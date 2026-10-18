@@ -8,8 +8,8 @@ build/
 *.dylib
 *.exe
 
-# Compiled binary
-minima
+# Compiled binary (root only - a bare "minima" also matched org/minima/!)
+/minima
 APP/WSL/minima
 
 # Test binaries
