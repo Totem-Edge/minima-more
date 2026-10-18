@@ -1,0 +1,9 @@
+node	java	
+window_seconds	180.17	s
+cpu_seconds	3.110	s
+cpu_percent_avg	1.726	%
+cpu_seconds_per_hour	62.14	s/h
+rss_min_kb	148812	kB
+rss_avg_kb	281708	kB
+rss_max_kb	290744	kB
+threads	56	

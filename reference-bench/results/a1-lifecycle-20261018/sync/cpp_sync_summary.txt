@@ -1,0 +1,10 @@
+node	cpp	
+sync_seconds	5.89	s
+sync_complete	yes	
+chain_height	11	
+peak_sync_rss_kb	20108	kB
+idle_rss_min_kb	21480	kB
+idle_rss_avg_kb	21731	kB
+idle_rss_max_kb	21964	kB
+idle_rss_last_kb	21964	kB
+threads	25	

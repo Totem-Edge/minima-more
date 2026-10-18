@@ -1,0 +1,9 @@
+node	cpp	
+window_seconds	180.17	s
+cpu_seconds	1.910	s
+cpu_percent_avg	1.060	%
+cpu_seconds_per_hour	38.16	s/h
+rss_min_kb	19852	kB
+rss_avg_kb	20102	kB
+rss_max_kb	20216	kB
+threads	23	

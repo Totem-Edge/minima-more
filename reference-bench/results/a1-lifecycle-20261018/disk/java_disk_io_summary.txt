@@ -1,0 +1,9 @@
+node	java	
+window_seconds	180.06	s
+storage_write_bytes	299008	B
+storage_write_bytes_per_hour	5978167	B/h
+storage_write_bytes_per_day	143476008	B/day
+write_chars	233640	B
+datadir_growth_kb	68	kB
+wal_max_kb	0	kB
+wal_checkpoints	0	

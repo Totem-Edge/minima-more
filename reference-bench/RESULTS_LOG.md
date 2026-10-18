@@ -427,6 +427,32 @@ The whole comparison is one command: `scripts/run_sweep.sh` (component + node). 
 additions this round: Linux-portable toolchain flags in `_env.sh`, `run_sql_bench.sh`,
 `run_sweep.sh`, and portable thread counting (Linux `ps -o nlwp` vs macOS `ps -M`).
 
+## 2026-10-18 — A1 full-lifecycle sweep (sync, CPU, disk)
+Added the node-lifecycle benches (metrics 1-5) and ran them on OCI A1 (4-core ARM),
+C++ vs Java on the same host. Raw output: `results/a1-lifecycle-20261018/`.
+
+| Metric | C++ (this node) | Java (minima-core) |
+|---|---|---|
+| fully-synced RAM — peak during sync | 20.1 MB | 248.2 MB |
+| fully-synced RAM — idle after sync | 21.7 MB | 177.6 MB |
+| initial sync time (chain 11/15 blocks) | 5.89 s | 4.09 s |
+| CPU at idle (CPU-seconds / hour) | 38.2 | 62.1 |
+| CPU at idle (avg utilisation) | 1.06% | 1.73% |
+| CPU under tx load (ms per tx) | 1635 | 2363 |
+| send latency under load (ms avg) | 447 | 1965 |
+| tx sends ok / failed | 4 / 0 | 3 / 1 |
+| disk writes (B/hour) | 3.68 MB | 5.98 MB |
+| disk writes (B/day) | 88 MB | 143 MB |
+| threads | 25 | 58 |
+
+New scripts: `run_full_sync.sh` (metrics 1+2), `run_cpu_idle.sh` (3),
+`run_tx_load.sh` (4), `run_disk_io.sh` (5), plus shared `_node.sh` helpers.
+
+**Caveats:** windows were reduced for the sweep (idle/disk 180 s; per-hour/day values
+extrapolated); the sync chain is small (automine ~1 block / 40-50 s) so sync time
+exercises the IBD mechanism, not bulk throughput, and the two runs synced slightly
+different heights (the miner kept mining between them); single run on a shared host.
+
 ## Planned next
 - Quiet-host, multi-rep harness mode for decision-grade numbers.
 - Cross-impl / Java two-node sync (C++↔Java) and a **large-chain sync throughput**

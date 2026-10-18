@@ -143,4 +143,52 @@ for ax, (title, lbls, vals, ylab, fmt) in zip(axes, panels):
 fig.suptitle("Microbenchmarks — C++ node vs Java node", fontweight="bold", y=1.02)
 _save(fig, "microbench.svg")
 
+# --- full-lifecycle benchmarks (OCI Ampere A1, same host) -------------------
+
+# 8. Fully-synced node RAM (peak + idle), MB
+fig, ax = plt.subplots(figsize=(7, 3.8))
+labels = ["Peak during sync", "Idle after sync"]
+cpp = [19.6, 21.2]
+java = [242.4, 173.4]
+x = np.arange(len(labels)); w = 0.36
+b1 = ax.bar(x - w / 2, cpp, w, label="C++ node", color=CPP)
+b2 = ax.bar(x + w / 2, java, w, label="Java node", color=JAVA)
+ax.set_xticks(x); ax.set_xticklabels(labels)
+ax.set_ylabel("RSS (MB)")
+ax.set_title("Fully-synced node RAM", fontweight="bold")
+ax.set_ylim(0, 280); ax.legend(frameon=False)
+for bb in (b1, b2):
+    for r in bb:
+        ax.annotate(f"{r.get_height():.0f}", (r.get_x() + r.get_width() / 2, r.get_height()),
+                    textcoords="offset points", xytext=(0, 4), ha="center",
+                    fontsize=10, fontweight="bold")
+_save(fig, "lifecycle_synced_ram.svg")
+
+# 9. CPU at idle (CPU-seconds per hour)
+bars("lifecycle_cpu_idle.svg", ["C++ node", "Java node"], [38.16, 62.14], [CPP, JAVA],
+     "CPU at idle — CPU-seconds per hour (lower is better)", "CPU-seconds / hour", fmt="{:.1f}")
+
+# 10. CPU under transaction load (CPU ms/tx + send latency)
+fig, ax = plt.subplots(figsize=(7, 3.8))
+labels = ["CPU ms per tx", "Send latency (ms)"]
+cpp = [1635, 447]
+java = [2363, 1964]
+x = np.arange(len(labels)); w = 0.36
+b1 = ax.bar(x - w / 2, cpp, w, label="C++ node", color=CPP)
+b2 = ax.bar(x + w / 2, java, w, label="Java node", color=JAVA)
+ax.set_xticks(x); ax.set_xticklabels(labels)
+ax.set_ylabel("Milliseconds (lower is better)")
+ax.set_title("CPU under transaction load", fontweight="bold")
+ax.set_ylim(0, 2700); ax.legend(frameon=False)
+for bb in (b1, b2):
+    for r in bb:
+        ax.annotate(f"{r.get_height():.0f}", (r.get_x() + r.get_width() / 2, r.get_height()),
+                    textcoords="offset points", xytext=(0, 4), ha="center",
+                    fontsize=9, fontweight="bold")
+_save(fig, "lifecycle_tx_load.svg")
+
+# 11. Disk writes at idle (MB/hour)
+bars("lifecycle_disk.svg", ["C++ node", "Java node"], [3.68, 5.98], [CPP, JAVA],
+     "Disk writes at idle — MB per hour (lower is better)", "MB / hour", fmt="{:.2f}")
+
 print("done")

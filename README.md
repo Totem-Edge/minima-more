@@ -70,6 +70,39 @@ and [`reference-bench/RESULTS_LOG.md`](reference-bench/RESULTS_LOG.md).
 
 ---
 
+## Full-lifecycle benchmarks
+
+Component tests isolate individual paths. These five measure a **running node end
+to end on one host** (OCI Ampere A1, 4-core ARM), C++ vs Java on the same machine —
+the numbers an operator actually cares about.
+
+| Metric | C++ node | Java node |
+|---|---|---|
+| Fully-synced RAM — peak during sync | **~20 MB** | ~248 MB |
+| Fully-synced RAM — idle after sync | **~21 MB** | ~178 MB |
+| Initial sync time (same chain) | 5.9 s | 4.1 s |
+| CPU at idle — CPU-seconds / hour | **38** | 62 |
+| CPU at idle — avg utilisation | **1.06%** | 1.73% |
+| CPU under tx load — ms per tx | **1635** | 2363 |
+| Send latency under load | **447 ms** | 1965 ms |
+| Disk writes at idle — MB / hour | **3.7** | 6.0 |
+| Disk writes at idle — MB / day | **88** | 143 |
+| Threads | **25** | 58 |
+
+![Fully-synced node RAM: C++ vs Java](assets/lifecycle_synced_ram.svg)
+![CPU at idle: C++ vs Java](assets/lifecycle_cpu_idle.svg)
+![CPU under transaction load: C++ vs Java](assets/lifecycle_tx_load.svg)
+![Disk writes at idle: C++ vs Java](assets/lifecycle_disk.svg)
+
+Reproduce / methodology: `run_full_sync.sh` (sync time + synced RAM),
+`run_cpu_idle.sh` (CPU over an idle window), `run_tx_load.sh` (RPC-driven sends),
+`run_disk_io.sh` (`/proc/<pid>/io` storage writes). **Caveats:** windows were
+reduced for the sweep (idle/disk 180 s; per-hour/day figures are extrapolated), the
+sync chain is small (automine ≈ 1 block / 40–50 s, so it exercises the IBD mechanism,
+not bulk throughput), and figures are single runs on a shared host — indicative.
+
+---
+
 ## Where the performance comes from
 
 Every optimisation below is **consensus-safe and byte-identical** — it changes
@@ -210,6 +243,10 @@ reference-bench/scripts/run_ram_bench.sh       # MMR RAM + build time
 reference-bench/scripts/run_mempool_bench.sh   # mempool RAM + coin lookup
 reference-bench/scripts/run_sql_bench.sh       # SQLite write throughput
 reference-bench/scripts/run_node_bench.sh      # full-node startup RSS / threads / disk
+reference-bench/scripts/run_full_sync.sh       # initial sync time + synced RAM
+reference-bench/scripts/run_cpu_idle.sh        # CPU at idle (CPU-seconds / hour)
+reference-bench/scripts/run_tx_load.sh         # CPU under transaction load
+reference-bench/scripts/run_disk_io.sh         # disk writes per hour/day (incl. WAL)
 ```
 
 ![Microbenchmarks: C++ node vs Java node](assets/microbench.svg)

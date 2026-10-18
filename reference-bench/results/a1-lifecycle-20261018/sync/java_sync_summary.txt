@@ -1,0 +1,10 @@
+node	java	
+sync_seconds	4.09	s
+sync_complete	yes	
+chain_height	15	
+peak_sync_rss_kb	248220	kB
+idle_rss_min_kb	145192	kB
+idle_rss_avg_kb	177590	kB
+idle_rss_max_kb	239764	kB
+idle_rss_last_kb	239764	kB
+threads	58	

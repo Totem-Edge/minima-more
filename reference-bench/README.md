@@ -52,6 +52,11 @@ reference-bench/
   scripts/run_sql_bench.sh          SQLite write throughput (batched vs per-row)
   scripts/run_node_ram.sh           full-node RSS soak (steady-state / leak)
   scripts/run_node_throughput.sh    online transaction throughput (RPC-driven)
+  scripts/run_full_sync.sh          initial sync time + fully-synced RAM
+  scripts/run_cpu_idle.sh           CPU at idle (CPU-seconds / hour)
+  scripts/run_tx_load.sh            CPU / latency under transaction load
+  scripts/run_disk_io.sh            disk writes per hour/day (incl. WAL)
+  scripts/_node.sh                  shared node-launch / rss / cpu / io helpers
   scripts/run_sweep.sh              one-command full sweep -> SWEEP_SUMMARY.md
   results/<timestamp>/              environment.txt + per-run raw outputs + summaries
 ```
