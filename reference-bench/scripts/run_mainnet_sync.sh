@@ -27,7 +27,12 @@ name=$NODE
 dir=/tmp/mainnet-$name
 if [ "$REUSE" != "1" ]; then rm -rf "$dir"; fi
 mkdir -p "$dir"
-case "$name" in cpp) port=21701;; java) port=21801;; esac
+# Use a unique advertised port per run by default. Live mainnet peers rate-limit
+# IBDs to the same advertised address for ~30 min (Java LIMIT_IBD_30MINS), so a
+# fixed port makes repeated fresh-sync attempts look like one identity and the
+# peer silently sends its greeting but no IBD. Override with PORT=<n>.
+PORT=${PORT:-$((24000 + ($$ % 3000)))}
+port=$PORT
 rpc=$((port + 4))
 
 echo "== starting $name (mainnet, bootstrapping $PEERS) =="

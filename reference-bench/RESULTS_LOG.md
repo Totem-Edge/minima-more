@@ -453,6 +453,31 @@ extrapolated); the sync chain is small (automine ~1 block / 40-50 s) so sync tim
 exercises the IBD mechanism, not bulk throughput, and the two runs synced slightly
 different heights (the miner kept mining between them); single run on a shared host.
 
+## 2026-10-18 — Mainnet sync resolved: works; peers rate-limit IBDs per address
+Diagnosed why fresh mainnet sync appeared broken. With a transparent framed proxy
+(`reference-bench/scripts/tcp_proxy.py`) and `tcpdump`, the C++ node **does sync the
+live mainnet chain** (e.g. IBD 5.0-5.4 MB / ~1070-1100 blocks, tip ~2,373,4xx) and
+receives the peer's GREETING on every attempt (peer v1.0.45-1.0.49).
+
+Root cause of the intermittent failures: **the live peers rate-limit IBDs to the
+same advertised address for ~30 minutes** (Java `LIMIT_IBD_30MINS`, keyed on the
+greeted node's full minima address). Repeated fresh-sync tests all advertised the
+same `host:port`, so after the first success the peer kept sending its greeting but
+withheld the IBD.
+
+Evidence (A1):
+- Same port 21701 repeatedly: 1/4, then 0/6 successful IBDs (greeting always received).
+- A **fresh port each run**: **3/3 synced** (tip 2,373,413 / 2,373,414).
+- Through the relay the timing differed but the protocol frames were byte-identical
+  to the Java client (greeting -> our empty IBD -> peer's ~5 MB IBD -> TXPOWREQ/TXPOW).
+
+`run_mainnet_sync.sh` now picks a unique advertised port per run by default (the
+same lesson for any repeated fresh-sync test). The earlier no-crossover blacklist
+guard remains (it prevented a fresh node from marking a valid peer "different chain").
+
+Note: the C++ / Java wire frames match; this was a peer-side rate limit plus our
+fixed test identity, not a protocol incompatibility.
+
 ## Planned next
 - Quiet-host, multi-rep harness mode for decision-grade numbers.
 - Cross-impl / Java two-node sync (C++↔Java) and a **large-chain sync throughput**
