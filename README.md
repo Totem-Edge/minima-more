@@ -1,6 +1,6 @@
 # Minima More - Same blockchain. A fraction of the resources. Up to 4.7× faster cryptography.
 
-Minima More delivers a dramatically leaner, faster blockchain node — without compromising consensus. Re-engineered in native C++, it demonstrates an approximately 94% lower reported idle memory figure (19 MB vs 302 MB), 67% less peak memory for a million-entry Merkle Mountain Range, and 56% fewer threads than the Java reference node. Core cryptographic workloads run 3.3× faster for SHA3 hashing and 4.7× faster for WOTS+ signing, while indexed mempool double-spend checks are accelerated by an extraordinary 49,000×. The result is a significantly more resource-efficient implementation of the full Minima protocol, designed to bring high-performance blockchain operation to everything from servers to low-power ARM and Raspberry Pi devices.
+Minima More delivers a dramatically leaner, faster blockchain node — without compromising consensus. Re-engineered in native C++, it demonstrates an approximately 94% lower reported idle memory figure (19 MB vs 302 MB), 67% less peak memory for a million-entry Merkle Mountain Range, and 56% fewer threads than the Java reference node. Core cryptographic workloads run 3.3× faster for SHA3 hashing and 4.7× faster for WOTS signing, while indexed mempool double-spend checks are accelerated by an extraordinary 49,000×. The result is a significantly more resource-efficient implementation of the full Minima protocol, designed to bring high-performance blockchain operation to everything from servers to low-power ARM and Raspberry Pi devices.
 
 
 Same consensus, byte-for-byte. Same hashes (SHA3-256), same MiniNumber arithmetic,
@@ -124,7 +124,7 @@ root on every call. Cached (invalidated on every mutation):
   **RAII thread-local digests** (no per-thread leak).
 - **SHA3-256 is 3.3× the Java node** on the same hardware.
 
-### 5. WOTS+ signatures
+### 5. WOTS signatures
 - **x4 SIMD** chain evaluation with a **bounded worker pool** sized from the core
   count.
 - **Batched `sign()`/`verify()`** in lockstep, plus a cached private-chain table.
