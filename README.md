@@ -1,6 +1,6 @@
 # ⚡Minima More - Same blockchain. A fraction of the resources. Up to 4.7× faster cryptography.
 
-Minima More is a high-performance, native C++ implementation of the full Minima blockchain protocol, engineered to make running a complete blockchain node dramatically more efficient.
+Minima More is a high-performance, native C++ implementation of the full Minima blockchain protocol, re-engineered to make running a complete blockchain node dramatically more efficient.
 
 In initial same-hardware benchmarks against the Java reference node, Minima More delivers:
 
