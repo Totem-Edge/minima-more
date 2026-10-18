@@ -1,4 +1,4 @@
-# Minima C++ Node — a high-performance Minima blockchain node
+# Minima More - fully optimised, high-performance C++ Minima blockchain node.
 
 A native **C++ port of the Minima node**: the full Minima protocol — TxPoW, the
 Merkle Mountain Range (MMR), WOTS+ signatures, KISSVM, P2P/IBD sync and SQLite
