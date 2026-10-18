@@ -285,6 +285,10 @@ void NIOMessage::run() {
             auto greet_ptr = Greeting::ReadFromStream(dis);
             if (!greet_ptr) return;
             Greeting& greet = *greet_ptr;
+            MinimaLogger::log("[+] Peer greeting: version=" + greet.getVersion().toString()
+                + " top=" + greet.getTopBlock().toString()
+                + " chain=" + std::to_string(greet.getChain().size())
+                + " from " + nioclient->getFullAddress());
 
             bool testcheck = true;
             std::string greetstr = greet.getVersion().toString();
