@@ -18,11 +18,6 @@ Designed for servers, ARM systems, Raspberry Pi-class devices and the next gener
 
 Performance figures are workload-specific, based on initial same-host benchmarks. Consensus compatibility is being validated against Java reference vectors and network behaviour.
 
-
-Same consensus, byte-for-byte. Same hashes (SHA3-256), same MiniNumber arithmetic,
-same block/TxPoW validation, same MMR proof format. The difference is *how much of
-your machine it costs to run*.
-
 > **Performance reference:** every number below is measured against the Java
 > reference node, [`spartacusrex-minima/minima-core`](https://github.com/spartacusrex-minima/minima-core),
 > on the same hardware. This node's consensus output is identical to the Minima
