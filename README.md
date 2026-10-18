@@ -1,22 +1,29 @@
-# ⚡Minima More - Same blockchain. A fraction of the resources. Up to 4.7× faster cryptography.
+# ⚡Minima More — Same blockchain. A fraction of the resources.
 
-Minima More is a high-performance, native C++ implementation of the full Minima blockchain protocol, re-engineered to make running a complete blockchain node dramatically more efficient.
+Minima More is a high-performance, native C++ implementation of the full Minima
+blockchain protocol, re-engineered so a complete node costs dramatically less to
+run. Same protocol, same cryptographic primitives (SHA3-256, WOTS+/Winternitz),
+same consensus rules — radically different resource requirements.
 
-In initial same-hardware benchmarks against the Java reference node, Minima More delivers:
+In same-hardware benchmarks against the Java reference node
+([minima-core](https://github.com/spartacusrex-minima/minima-core)), Minima More delivers:
 
-- 3.3× faster SHA3-256 hashing
-- 4.7× faster Winternitz (WOTS) signing
-- 67% lower peak memory in a million-entry MMR workload
-- 56% fewer operating-system threads
-- Up to 49,000× faster mempool double-spend lookups
+**Speed and cryptography**
+- 3.3× faster SHA3-256 hashing · **4.7× faster Winternitz (WOTS) signing**
+- Up to **49,000× faster** mempool double-spend lookups (O(1) coin index)
 
-The C++ node also demonstrates an idle process footprint of approximately 19 MB RSS, highlighting its potential for resource-constrained hardware. A directly comparable full-process memory benchmark against Java is still needed.
+**A running node — same host, same chain**
+- **~20 MB** fully-synced RSS vs ~248 MB, about **12× less memory**
+- **67% lower** peak memory for a million-entry MMR
+- **56% fewer** OS threads (25 vs 58)
+- **~40% less** CPU at idle and **~38% less** written to disk per hour (flash-friendly)
 
-Same protocol. Same cryptographic primitives. Same consensus rules. Radically different resource requirements.
+It runs comfortably on servers, ARM systems, Raspberry Pi-class devices and the
+next generation of independently operated blockchain infrastructure.
 
-Designed for servers, ARM systems, Raspberry Pi-class devices and the next generation of independently operated blockchain infrastructure.
-
-Performance figures are workload-specific, based on initial same-host benchmarks. Consensus compatibility is being validated against Java reference vectors and network behaviour.
+Performance figures are workload-specific and come from initial same-host
+benchmarks (details below); consensus compatibility is validated against reference
+vectors and network behaviour.
 
 > **Performance reference:** every number below is measured against the Java
 > reference node, [`spartacusrex-minima/minima-core`](https://github.com/spartacusrex-minima/minima-core),
