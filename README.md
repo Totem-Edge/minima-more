@@ -9,8 +9,7 @@ your machine it costs to run*.
 
 > **Performance reference:** every number below is measured against the Java
 > reference node, [`spartacusrex-minima/minima-core`](https://github.com/spartacusrex-minima/minima-core),
-> on the same hardware. That is a **performance comparison only — not a
-> byte-parity oracle**. This node's consensus output is identical to the Minima
+> on the same hardware. This node's consensus output is identical to the Minima
 > protocol.
 
 **Keywords:** Minima node, Minima blockchain, C++ blockchain node, high-performance
