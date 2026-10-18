@@ -1,6 +1,22 @@
-# Minima More - Same blockchain. A fraction of the resources. Up to 4.7× faster cryptography.
+# ⚡Minima More - Same blockchain. A fraction of the resources. Up to 4.7× faster cryptography.
 
-Minima More delivers a dramatically leaner, faster blockchain node — without compromising consensus. Re-engineered in native C++, it demonstrates an approximately 94% lower reported idle memory figure (19 MB vs 302 MB), 67% less peak memory for a million-entry Merkle Mountain Range, and 56% fewer threads than the Java reference node. Core cryptographic workloads run 3.3× faster for SHA3 hashing and 4.7× faster for WOTS signing, while indexed mempool double-spend checks are accelerated by an extraordinary 49,000×. The result is a significantly more resource-efficient implementation of the full Minima protocol, designed to bring high-performance blockchain operation to everything from servers to low-power ARM and Raspberry Pi devices.
+Minima More is a high-performance, native C++ implementation of the full Minima blockchain protocol, engineered to make running a complete blockchain node dramatically more efficient.
+
+In initial same-hardware benchmarks against the Java reference node, Minima More delivers:
+
+- 3.3× faster SHA3-256 hashing
+- 4.7× faster Winternitz (WOTS) signing
+- 67% lower peak memory in a million-entry MMR workload
+- 56% fewer operating-system threads
+- Up to 49,000× faster mempool double-spend lookups
+
+The C++ node also demonstrates an idle process footprint of approximately 19 MB RSS, highlighting its potential for resource-constrained hardware. A directly comparable full-process memory benchmark against Java is still needed.
+
+Same protocol. Same cryptographic primitives. Same consensus rules. Radically different resource requirements.
+
+Designed for servers, ARM systems, Raspberry Pi-class devices and the next generation of independently operated blockchain infrastructure.
+
+Performance figures are workload-specific, based on initial same-host benchmarks. Consensus compatibility is being validated against Java reference vectors and network behaviour.
 
 
 Same consensus, byte-for-byte. Same hashes (SHA3-256), same MiniNumber arithmetic,
