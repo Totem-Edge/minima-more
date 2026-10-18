@@ -19,6 +19,10 @@ public:
     static std::string MINIMA_MICRO_BUILD;
     static std::string getFullMicroVersion();
 
+    // Minima More - product/brand version (single source of truth; matches the
+    // CMake project version). Display-only - NOT the consensus/greeting version.
+    static std::string MINIMA_MORE_VERSION;
+
     // Speed in blocks per second.. 0.02 = 50 second block time
     static org::minima::objects::base::MiniNumber MINIMA_BLOCK_SPEED;
 

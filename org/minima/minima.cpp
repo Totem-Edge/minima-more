@@ -178,7 +178,7 @@ void print_banner() {
     org::minima::utils::MinimaLogger::log("*                                            *");
     org::minima::utils::MinimaLogger::log("**********************************************");
     org::minima::utils::MinimaLogger::log(
-        std::string("Welcome to Pure Minima ") + GlobalParams::getFullMicroVersion() +
+        std::string("Welcome to Minima More ") + GlobalParams::MINIMA_MORE_VERSION +
         " - for assistance type help. Then press enter.");
 }
 
