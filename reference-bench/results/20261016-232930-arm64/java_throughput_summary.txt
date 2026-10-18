@@ -1,0 +1,12 @@
+node	java	
+warmup_to_spendable_s	63.74	s
+tx_sent_ok	1	
+tx_failed	2	
+send_latency_avg_ms	1143.6	ms
+send_latency_min_ms	1143.6	ms
+send_latency_max_ms	1143.6	ms
+confirm_wait_total_s	0	s
+blocks_added	1	
+peak_rss_kb	263808	kB
+idle_rss_kb	203376	kB
+threads	63	

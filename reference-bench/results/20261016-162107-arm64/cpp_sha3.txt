@@ -1,0 +1,2 @@
+sha3_224_us_per_hash	0.5466	us/hash
+sha3_224_hashes_per_sec	1829584.01	h/s

@@ -1,0 +1,10 @@
+rss_baseline_kb	1936	kB
+mmr_200000_rss_kb	135952	kB (delta 134016)
+mmr_400000_rss_kb	268208	kB (delta 132256)
+mmr_600000_rss_kb	406656	kB (delta 138448)
+mmr_800000_rss_kb	532336	kB (delta 125680)
+mmr_1000000_rss_kb	683856	kB (delta 151520)
+mmr_build_ms	3785.2	ms
+rss_after_mmr_kb	683904	kB
+mmr_delta_kb	681968	kB
+mmr_bytes_per_entry	698.34	B

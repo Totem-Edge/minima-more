@@ -1,0 +1,7 @@
+node	cpp	
+samples	15	
+rss_min_kb	10416	kB
+rss_avg_kb	11956	kB
+rss_max_kb	15168	kB
+rss_last_kb	11904	kB
+rss_slope_kb_per_s	-233.143	kB/s

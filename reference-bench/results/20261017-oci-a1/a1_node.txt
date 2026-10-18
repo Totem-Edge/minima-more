@@ -1,0 +1,6 @@
+# OCI Ampere A1 - C++ node solo (Release), fresh chain
+ready_s	3.48
+peak_rss_kb	17852
+idle_rss_kb	18584
+threads	24
+disk_kb	400

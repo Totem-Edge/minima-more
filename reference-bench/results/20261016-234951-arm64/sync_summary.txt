@@ -1,0 +1,10 @@
+node	sync	
+mine_seconds	150	s
+miner_blocks	6	
+ibd_seconds	0.71	s
+ibd_blocks	6	
+ibd_size_kb	3.6	KB
+relay_latency_ms	39	ms
+miner_rss_kb	13232	kB
+follower_rss_after_sync_kb	16832	kB
+follower_peak_rss_kb	14704	kB

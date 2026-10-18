@@ -1,0 +1,10 @@
+node	cpp-cpp	
+mine_seconds	60	s
+miner_blocks	3	
+ibd_seconds	3.60	s
+ibd_blocks	3	
+ibd_size_kb	1.9	KB
+relay_latency_ms	26	ms
+miner_rss_kb	22264	kB
+follower_rss_after_sync_kb	21304	kB
+follower_peak_rss_kb	21552	kB

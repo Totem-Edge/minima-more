@@ -1,0 +1,7 @@
+node	java	
+genesis_seconds	3.185	s
+ready_seconds	3.195	s
+peak_rss_kb	271808	kB
+idle_rss_kb	271808	kB
+threads	59	
+disk_kb	184	kB

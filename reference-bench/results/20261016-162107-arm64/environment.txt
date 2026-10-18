@@ -1,0 +1,12 @@
+# Environment / provenance
+date_utc: 2026-10-16T13:21:07Z
+host: Darwin Peters-MacBook-Pro.local 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:55 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T8103 arm64
+arch: arm64
+cpu: Apple M1
+cores: 8
+mem_bytes: 17179869184
+cc: Apple clang version 16.0.0 (clang-1600.0.26.6)
+java: openjdk version "17.0.16" 2025-07-15
+minima_core: /Users/peter.cheek/Downloads/CRYSTAL_LABS/reference/minima-core
+minima_core_commit: c2a54a2e46b2c3a4fd541b80e7d7f5e7afe7d4da
+minima_core_commit_date: 2026-09-23 08:41:36 +0100

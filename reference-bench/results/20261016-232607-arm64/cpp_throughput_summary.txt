@@ -1,0 +1,12 @@
+node	cpp	
+warmup_to_spendable_s	82.62	s
+tx_sent_ok	3	
+tx_failed	0	
+send_latency_avg_ms	380.9	ms
+send_latency_min_ms	380.9	ms
+send_latency_max_ms	380.9	ms
+confirm_wait_total_s	88	s
+blocks_added	6	
+peak_rss_kb	15360	kB
+idle_rss_kb	15584	kB
+threads	24	

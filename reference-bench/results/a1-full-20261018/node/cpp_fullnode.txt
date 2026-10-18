@@ -1,0 +1,7 @@
+node	cpp	
+genesis_seconds	5.911	s
+ready_seconds	5.918	s
+peak_rss_kb	19964	kB
+idle_rss_kb	18676	kB
+threads	23	
+disk_kb	468	kB

@@ -1,0 +1,5 @@
+# OCI Ampere A1 (Neoverse-N1, 4 cores/24GB, aarch64, g++ -O3) - MMR RAM curve
+# N	bytes_per_entry	rss_delta_kb
+100000	883.34	86264
+500000	859.82	419832
+1000000	857.85	837740

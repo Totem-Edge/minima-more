@@ -1,0 +1,10 @@
+heap_baseline_kb	3107	kB
+mmr_20000_heap_kb	17679	kB (delta 14572)
+mmr_40000_heap_kb	29509	kB (delta 11830)
+mmr_60000_heap_kb	40916	kB (delta 11406)
+mmr_80000_heap_kb	53603	kB (delta 12687)
+mmr_100000_heap_kb	65101	kB (delta 11497)
+heap_after_mmr_kb	5898	kB
+heap_delta_kb	2791	kB
+mmr_bytes_per_entry	28.58	B
+java_peak_rss_kb	206256	kB

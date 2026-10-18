@@ -1,0 +1,8 @@
+txpow_build_ms	2006.4	ms
+unbatched_rows	50000	
+batched_rows	50000	
+unbatched_ms	32927.1	ms
+batched_ms	15516.7	ms
+unbatched_inserts_per_sec	1519	/s
+batched_inserts_per_sec	3222	/s
+speedup	2.12	x

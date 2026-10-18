@@ -1,0 +1,18 @@
+# minima-core (spartacusrex) performance reference - NOT a byte-parity oracle
+java.version	17.0.20.1	
+os.arch	aarch64	
+availableProcessors	4	
+maxHeapMB	5996	
+wotsIters	200	
+mmrN	20000	
+hashIters	500000	
+wots_pubkey_ms	8.127999	ms/op
+wots_sign_ms	4.298728	ms/op
+wots_verify_ms	3.782524	ms/op
+sha3_224_us_per_hash	2.887758	us/hash
+sha3_224_hashes_per_sec	346289.413291	h/s
+mmr_add_entries_ms	143.772073	ms
+mmr_add_entries_per_sec	139109.074403	entries/s
+mmr_getProof_check_us	1513.648000	us
+mmr_proof_check_ok	false	(informational; value differs)
+# done

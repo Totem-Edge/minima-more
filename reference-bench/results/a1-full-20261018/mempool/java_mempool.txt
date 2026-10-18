@@ -1,0 +1,13 @@
+heap_baseline_kb	3062	kB
+mempool_txns	200000	
+mempool_coins	400000	
+mempool_build_ms	7663.452749	ms
+heap_after_mempool_kb	718369	kB
+mempool_delta_kb	715306	kB
+mempool_bytes_per_txpow	3662.37168	B
+mempool_bytes_per_coin	1831.18584	B
+mempool_lookups	1000	
+mempool_lookup_hits	1000	
+mempool_lookup_ms	43732.610542	ms
+mempool_lookup_us_per	43732.610542	us
+java_peak_rss_kb	1961992	kB
