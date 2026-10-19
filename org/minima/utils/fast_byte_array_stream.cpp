@@ -52,8 +52,9 @@ void FastByteArrayStream::ensureCapacityForAppend(std::size_t len) {
                 len
             );
             std::fflush(stderr);
-            // Immediate termination, no cleanup, cross-platform
-            std::_Exit(0);
+            // Propagate instead of killing the whole node: the caller can then
+            // reject the offending message/peer (was std::_Exit(0)).
+            throw std::bad_alloc();
         }
     }
 }

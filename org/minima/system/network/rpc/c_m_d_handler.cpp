@@ -418,6 +418,9 @@ void CMDHandler::run() {
             throw std::invalid_argument("Invalid Authentication at RPC");
         }
 
+        // Authenticated user's mode ("read"/"write"); default/write is the norm.
+        const std::string authmode = authuser.getString("mode", "write");
+
         // Is it a POST request
         if (method == "POST") {
             // Get the POST data..
@@ -443,6 +446,31 @@ void CMDHandler::run() {
         try {
             if (fileRequested == "quit") {
                 quit = true;
+            }
+
+            // Enforce RPC user mode: a "read" credential may only run read-only commands.
+            if (authmode == "read") {
+                static const char* kReadOnly[] = {
+                    "status","block","balance","coins","tokens","keys","history","peers",
+                    "network","getaddress","getinfo","vault","megammr","runscript","help",
+                    "checkaddress","tokenid","coinexists","mempool","txpow"};
+                bool allowed = true;
+                std::stringstream ss(fileRequested);
+                std::string one;
+                while (std::getline(ss, one, ';')) {
+                    std::string t = trim(one);
+                    std::size_t sp = t.find_first_of(" \t");
+                    std::string cmd = sp == std::string::npos ? t : t.substr(0, sp);
+                    for (auto& ch : cmd) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    if (cmd.empty()) continue;
+                    bool r = false;
+                    for (auto* ro : kReadOnly) if (cmd == ro) { r = true; break; }
+                    if (!r) { allowed = false; break; }
+                }
+                if (!allowed) {
+                    org::minima::utils::MinimaLogger::log("CMDHANDLER : read-only RPC user attempted: " + fileRequested);
+                    throw std::runtime_error("read-only RPC user - command not permitted");
+                }
             }
 
             // Now run this command

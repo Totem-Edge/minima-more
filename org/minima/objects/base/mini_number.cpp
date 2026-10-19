@@ -374,7 +374,13 @@ MiniNumber MiniNumber::divide_with_context(const MiniNumber& other) const {
     }
     // value = (U1 * 10^{-S1}) / (U2 * 10^{-S2}) = (U1 * 10^{S2 + t}) / U2 * 10^{-(S1 + t)}
     const int t = MAX_DIGITS + 2; // extra precision before rounding
-    cpp_int N = m_unscaled * pow10(static_cast<unsigned int>(other.m_scale + t));
+    const int exp = other.m_scale + t;
+    if (exp < 0) {
+        // A negative exponent cast to unsigned would explode into a huge pow10
+        // (DoS). Reject instead.
+        throw std::runtime_error("MiniNumber::divide: negative scaling exponent");
+    }
+    cpp_int N = m_unscaled * pow10(static_cast<unsigned int>(exp));
     cpp_int Q = N / other.m_unscaled; // toward zero
     MiniNumber res;
     res.m_unscaled = Q;

@@ -263,7 +263,7 @@ void MiniData::readDataStream(std::istream& in, int zSize) {
 
     // Check against maximum allowed (error message mirrors Java)
     if (len > MINIMA_MAX_MINIDATA_LENGTH) {
-        std::string msg = "Read Error : MiniData Length larger than maximum allowed (256 MB) ";
+        std::string msg = "Read Error : MiniData Length larger than maximum allowed (16 MB) ";
         msg += org::minima::utils::MiniFormat::formatSize(len);
         throw std::ios_base::failure(msg);
     }

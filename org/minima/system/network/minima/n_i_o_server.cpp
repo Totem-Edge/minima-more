@@ -318,14 +318,24 @@ void NIOServer::run() {
             FD_ZERO(&readfds);
             FD_ZERO(&writefds);
 
-            SocketHandle maxfd = mServerSocket;
-            FD_SET(toNativeSock(mServerSocket), &readfds);
+            // Guard every FD_SET against FD_SETSIZE overflow (defensive, no redesign).
+            SocketHandle maxfd = 0;
+            {
+                int sfd = toNativeSock(mServerSocket);
+                if (sfd >= 0 && sfd < FD_SETSIZE) {
+                    FD_SET(sfd, &readfds);
+                    maxfd = mServerSocket;
+                }
+            }
 
             // Include the wakeup pipe read side so select() returns when woken.
             if (isValidHandle(mWakeupRead)) {
-                FD_SET(toNativeSock(mWakeupRead), &readfds);
-                if (mWakeupRead > maxfd) {
-                    maxfd = mWakeupRead;
+                int wfd = toNativeSock(mWakeupRead);
+                if (wfd >= 0 && wfd < FD_SETSIZE) {
+                    FD_SET(wfd, &readfds);
+                    if (mWakeupRead > maxfd) {
+                        maxfd = mWakeupRead;
+                    }
                 }
             }
 
@@ -344,12 +354,16 @@ void NIOServer::run() {
                 if (!client) continue;
                 SocketHandle h = client->getSocketHandle();
                 if (!isValidHandle(h)) continue;
-                FD_SET(toNativeSock(h), &readfds);
+                int nfd = toNativeSock(h);
+                // Never FD_SET a descriptor >= FD_SETSIZE: that writes past the
+                // fixed bitset (memory corruption). Skip such clients instead.
+                if (nfd < 0 || nfd >= FD_SETSIZE) continue;
+                FD_SET(nfd, &readfds);
                 if (client->hasPendingWrite()) {
-                    FD_SET(toNativeSock(h), &writefds);
+                    FD_SET(nfd, &writefds);
                 }
-                if (h > maxfd) {
-                    maxfd = h;
+                if (nfd > maxfd) {
+                    maxfd = nfd;
                 }
             }
 

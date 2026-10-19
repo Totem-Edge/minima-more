@@ -1,5 +1,7 @@
 #include "org/minima/kissvm/values/number_value.hpp"
 
+#include <stdexcept>
+
 #ifdef _WIN32
 // No OS-specific logic needed here; placeholder for future Windows-specific adaptations if required.
 #else
@@ -13,6 +15,25 @@ namespace values {
 
 using org::minima::objects::base::MiniNumber;
 
+namespace {
+// Java's MiniNumber is bounded to +/- (2^64-1); our internal MiniNumber is wider
+// (for chain weights/difficulty). Enforce the Java bound at the KISSVM value
+// boundary so scripts are accepted/rejected identically by both implementations.
+const MiniNumber& javaMax() {
+    static const MiniNumber m(std::string("18446744073709551615"));  // 2^64 - 1
+    return m;
+}
+const MiniNumber& javaMin() {
+    static const MiniNumber m = MiniNumber(std::string("18446744073709551615")).mult(MiniNumber::MINUSONE());
+    return m;
+}
+void checkJavaRange(const MiniNumber& n) {
+    if (n.isMore(javaMax()) || n.isLess(javaMin())) {
+        throw std::runtime_error("NumberValue: magnitude exceeds 2^64-1 (Java parity)");
+    }
+}
+}  // namespace
+
 NumberValue::NumberValue(int zValue)
     : mNumber(MiniNumber(std::to_string(zValue))) {}
 
@@ -20,10 +41,10 @@ NumberValue::NumberValue(long long zValue)
     : mNumber(MiniNumber(std::to_string(zValue))) {}
 
 NumberValue::NumberValue(const MiniNumber& zValue)
-    : mNumber(zValue) {}
+    : mNumber(zValue) { checkJavaRange(mNumber); }
 
 NumberValue::NumberValue(const std::string& zNumber)
-    : mNumber(MiniNumber(zNumber)) {}
+    : mNumber(MiniNumber(zNumber)) { checkJavaRange(mNumber); }
 
 MiniNumber NumberValue::getNumber() const {
     return mNumber;
