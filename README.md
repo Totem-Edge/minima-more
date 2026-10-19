@@ -15,10 +15,12 @@ In same-hardware benchmarks against the Java reference node
 - Up to **49,000× faster** mempool double-spend lookups (O(1) coin index)
 
 **A running node — same host, same chain**
-- **~20 MB** fully-synced RSS vs ~248 MB, about **12× less memory**
+- **On live mainnet:** peak sync RSS **~92 MB vs ~407 MB**, idle **~210 MB vs ~1.39 GB**, data dir **~220 MB vs ~881 MB**
+- **~20 MB** fully-synced RSS on a fresh chain vs ~248 MB, about **12× less memory**
 - **67% lower** peak memory for a million-entry MMR
-- **56% fewer** OS threads (25 vs 58)
+- **56% fewer** OS threads (25 vs 60)
 - **~40% less** CPU at idle and **~38% less** written to disk per hour (flash-friendly)
+- **P2P peer discovery fixed:** reaches **~10 live mainnet peers** (was 1)
 
 It runs comfortably on servers, ARM systems, Raspberry Pi-class devices and the
 next generation of independently operated blockchain infrastructure.
@@ -35,7 +37,8 @@ vectors and network behaviour.
 **Keywords:** Minima node, Minima blockchain, C++ blockchain node, high-performance
 node, Merkle Mountain Range optimization, MMR memory optimization, TxPoW mining,
 WOTS+ signatures, blockchain node RAM footprint, SQLite batched writes, low-resource
-blockchain node, ARM blockchain node, cryptocurrency node optimization.
+blockchain node, ARM blockchain node, cryptocurrency node optimization, P2P peer
+discovery, mainnet node benchmark, C++ vs Java blockchain node.
 
 ---
 
@@ -61,9 +64,12 @@ Every box above is an optimisation target: **memory layout** (MMR), **CPU**
 
 | Dimension | This node (C++) | Java node | 
 |---|---|---|
-| Idle process RAM | **~19 MB** | ~302 MB |
-| Peak startup RAM | **~20 MB** | ~302 MB |
-| Threads | **23** | 52 |
+| Idle process RAM (fresh chain) | **~19 MB** | ~302 MB |
+| Peak startup RAM (fresh chain) | **~20 MB** | ~302 MB |
+| Live mainnet — peak sync RAM | **~92 MB** | ~407 MB |
+| Live mainnet — idle RAM | **~210 MB** | ~1.39 GB |
+| Live mainnet — data dir | **~220 MB** | ~881 MB |
+| Threads | **25** | 60 |
 | MMR, 1M entries — peak RAM | **624 MB** | 1.90 GB |
 | MMR, 1M entries — build time | **~4.0 s** | ~3.8 s |
 | Mempool coin lookup (double-spend guard) | **0.9 µs** | ~44 ms (~49,000× slower) |
@@ -76,6 +82,34 @@ Every box above is an optimisation target: **memory layout** (MMR), **CPU**
 
 Full methodology and raw output: [`reference-bench/`](reference-bench/README.md)
 and [`reference-bench/RESULTS_LOG.md`](reference-bench/RESULTS_LOG.md).
+
+---
+
+## Live mainnet
+
+The closest test to what an operator actually deploys: **two fresh nodes — C++ and
+Java — syncing the real Minima mainnet chain from the same peers on the same host**
+(OCI Ampere A1, 4-core ARM), then settling.
+
+| Metric | C++ node | Java node |
+|---|---|---|
+| Time to tip (s) | 10.0 | 6.2 |
+| Peak RSS during sync | **~92 MB** | ~407 MB |
+| Idle RSS (after 60 s settle) | **~210 MB** | ~1.39 GB |
+| CPU-seconds over 60 s settle | **34.3** | 67.8 |
+| Threads | **25** | 60 |
+| Data dir | **~220 MB** | ~881 MB |
+
+The C++ node also runs the network end to end on live mainnet — it **syncs to the
+tip** from real 1.0.4x peers, receives and validates real spends (WOTS signatures +
+MMR proofs), builds/signs/mines/broadcasts spends (`send`), mints tokens
+(`tokencreate`), and runs KISSVM (`runscript`). Full functional log:
+[`reference-bench/MAINNET_TESTS.md`](reference-bench/MAINNET_TESTS.md).
+
+**Peers rate-limit IBDs per address.** Live peers enforce `LIMIT_IBD_30MINS`: the
+same advertised `host:port` is served an initial block download once, then the peer
+keeps greeting but withholds the IBD for ~30 minutes. `run_mainnet_sync.sh` and
+`run_mainnet_bench.sh` therefore advertise a **fresh port per run**.
 
 ---
 
@@ -231,9 +265,29 @@ issues that stop real nodes syncing:
 - Correct super-parent handling in `TxPoWTree::checkParents`.
 - WOTS BC/GMSS seed expansion matched to the protocol.
 - `TxPoW::deepCopy` without `const_cast`; null-token guards.
+- **P2P length-framing bug** on `SINGLE_PING` (missing the NIO 4-byte prefix) —
+  fixed; without it the node could never discover or verify peers.
+- **No-crossover blacklist guard:** a fresh, empty node no longer marks a valid
+  mainnet peer as "different chain".
 - **MiniData wire cap** reduced 512 MB → 16 MB (DoS hardening).
 - Greeting **chain-id** advertise/verify; golden-vector consensus test
   (`test_consensus_vectors`, 12/12).
+
+### 12. P2P peer discovery (live mainnet)
+A node is only useful if it finds peers. Two fixes turned discovery from "one
+bootstrap link" into a healthy mesh:
+
+- **Length framing:** `SINGLE_PING` was sent without the NIO 4-byte length prefix,
+  so peers read a bogus length and closed — silently breaking every discovery and
+  peer-verification exchange.
+- **Seeds:** a compiled default list, configured `-p2pnodes`, and **baked-in
+  peer-list URLs** (`eurobuddha.com` / `spartacusrex.com`) are merged and submitted
+  to the `PeersChecker` (forced) at cold start; advertised peer lists in peer
+  greetings are also consumed.
+
+**Result:** a fresh node reaches **~10 live mainnet peers** (was 1), and the link
+table persists across restarts (`p2p2.db`). Full P2P swap-links gossip and faster
+parallel verification are tracked in `OPTIMIZATION_BACKLOG.md`.
 
 ---
 
@@ -256,6 +310,9 @@ reference-bench/scripts/run_full_sync.sh       # initial sync time + synced RAM
 reference-bench/scripts/run_cpu_idle.sh        # CPU at idle (CPU-seconds / hour)
 reference-bench/scripts/run_tx_load.sh         # CPU under transaction load
 reference-bench/scripts/run_disk_io.sh         # disk writes per hour/day (incl. WAL)
+reference-bench/scripts/run_mainnet_sync.sh    # fresh sync of the LIVE mainnet chain
+reference-bench/scripts/run_mainnet_bench.sh   # live mainnet: C++ vs Java + P2P peers
+reference-bench/scripts/run_mainnet_commands.sh # read-only command smoke on mainnet
 ```
 
 ![Microbenchmarks: C++ node vs Java node](assets/microbench.svg)

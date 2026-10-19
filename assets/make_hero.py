@@ -21,14 +21,18 @@ CPP, JAVA, BLUE = "#3fb950", "#f0883e", "#58a6ff"
 
 # title, C++ value, Java value, unit, badge, badge colour
 CARDS = [
-    ("Synced RAM", 20, 248, "MB", "12× less", CPP),
-    ("OS threads", 25, 58, "", "56% fewer", CPP),
-    ("CPU at idle", 38, 62, "CPU-s/h", "40% less", CPP),
-    ("Disk writes (idle)", 3.7, 6.0, "MB/h", "38% less", CPP),
+    ("Mainnet peak RAM", 92, 407, "MB", "4.4× less", CPP),
+    ("Mainnet idle RAM", 210, 1390, "MB", "6.6× less", CPP),
+    ("Mainnet data dir", 220, 881, "MB", "4× smaller", CPP),
+    ("OS threads", 25, 60, "", "56% fewer", CPP),
     ("MMR RAM (1M)", 624, 1898, "MB", "67% less", CPP),
+    ("CPU (mainnet 60 s)", 34, 68, "CPU-s", "2× less", CPP),
+    ("Disk writes (idle)", 3.7, 6.0, "MB/h", "38% less", CPP),
+    ("Synced RAM (solo)", 20, 248, "MB", "12× less", CPP),
     ("Mempool lookup", 0.9, 43733, "µs", "49,000×", BLUE),
     ("SHA3-256", 1159, 346, "k h/s", "3.3× faster", BLUE),
     ("WOTS signing", 0.92, 4.30, "ms", "4.7× faster", BLUE),
+    ("MMR build (1M)", 2216, 2256, "ms", "~parity", BLUE),
 ]
 
 
@@ -76,21 +80,25 @@ def main():
              fontsize=42, fontweight="bold")
     fig.text(0.5, 0.902, "Same blockchain. A fraction of the resources.",
              ha="center", color=CPP, fontsize=19, style="italic")
-    fig.text(0.5, 0.862,
-             "C++ node vs Java node (minima-core)   ·   same hardware, same chain"
-             "   ·   green = C++   orange = Java",
+    fig.text(0.5, 0.864,
+             "C++ node vs Java node (minima-core)  ·  same hardware, same chain"
+             "  ·  green = C++  orange = Java",
              ha="center", color=SUB, fontsize=12)
 
-    gs = fig.add_gridspec(2, 4, left=0.035, right=0.965, top=0.825, bottom=0.095,
-                          wspace=0.18, hspace=0.30)
+    gs = fig.add_gridspec(3, 4, left=0.035, right=0.965, top=0.820, bottom=0.105,
+                          wspace=0.18, hspace=0.34)
     for i, (title, cv, jv, unit, badge, bcol) in enumerate(CARDS):
         ax = fig.add_subplot(gs[i // 4, i % 4])
         card(ax, title, cv, jv, unit, badge, bcol)
 
-    fig.text(0.5, 0.028,
+    fig.text(0.5, 0.048,
+             "P2P peer discovery fixed on live mainnet:  1  →  ~10 peers"
+             "   (missing NIO length-framing prefix)",
+             ha="center", color=CPP, fontsize=13, fontweight="bold")
+    fig.text(0.5, 0.021,
              "Same protocol · same SHA3-256 / WOTS cryptography · same consensus rules"
              "        ·        Full methodology & raw data: reference-bench/",
-             ha="center", color=SUB, fontsize=11)
+             ha="center", color=SUB, fontsize=10)
 
     fig.savefig(os.path.join(OUT, "hero.png"), facecolor=BG)
     fig.savefig(os.path.join(OUT, "hero.svg"), format="svg", facecolor=BG)
