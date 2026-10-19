@@ -1,46 +1,92 @@
-sqlite	archive	bulk_load_rows_per_s	249658	rows/s
-sqlite	archive	point_get_by_num_p50_us	2	us
-sqlite	archive	point_get_by_num_p95_us	3	us
-sqlite	archive	point_get_by_id_p50_us	2	us
-sqlite	archive	scan_asc_ms	0	ms
-sqlite	archive	scan_desc_ms	0	ms
-sqlite	archive	count_rows	100000	
+sqlite	archive	bulk_load_rows_per_s	163971	rows/s
+sqlite	archive	point_get_by_num_p50_us	2.71	us
+sqlite	archive	point_get_by_num_p95_us	3.42	us
+sqlite	archive	point_get_by_id_p50_us	2.67	us
+sqlite	archive	scan_asc_ms	2	ms
+sqlite	archive	scan_desc_ms	1	ms
+sqlite	archive	count_rows	200000	
 sqlite	archive	first_block	0	
-sqlite	archive	last_block	99999	
-sqlite	archive	analytics_ms	11	ms
-sqlite	archive	analytics_txns	2048075	
+sqlite	archive	last_block	199999	
+sqlite	archive	analytics_ms	23	ms
+sqlite	archive	analytics_txns	4106733	
 sqlite	archive	snapshot_s	0	s
-sqlite	archive	peak_rss_mb	333	MB
-sqlite	archive	on_disk_mb	76	MB
-sqlite	coin	bulk_load_rows_per_s	334182	rows/s
-sqlite	coin	point_get_p50_us	2	us
-sqlite	coin	point_get_p95_us	4	us
+sqlite	archive	peak_rss_mb	463	MB
+sqlite	archive	on_disk_mb	153	MB
+sqlite	coin	bulk_load_rows_per_s	261733	rows/s
+sqlite	coin	point_get_p50_us	3.29	us
+sqlite	coin	point_get_p95_us	4.54	us
 sqlite	coin	prefix_scan_ms	0	ms
 sqlite	coin	prefix_scan_hits	1	
-sqlite	coin	count	60000	
+sqlite	coin	count	120000	
 sqlite	coin	snapshot_s	0	s
-sqlite	coin	peak_rss_mb	284	MB
-sqlite	coin	on_disk_mb	22	MB
-lmdb	archive	bulk_load_rows_per_s	540246	rows/s
-lmdb	archive	point_get_by_num_p50_us	1	us
-lmdb	archive	point_get_by_num_p95_us	1	us
-lmdb	archive	point_get_by_id_p50_us	3	us
+sqlite	coin	peak_rss_mb	397	MB
+sqlite	coin	on_disk_mb	44	MB
+lmdb	archive	bulk_load_rows_per_s	467569	rows/s
+lmdb	archive	point_get_by_num_p50_us	1.92	us
+lmdb	archive	point_get_by_num_p95_us	2.50	us
+lmdb	archive	point_get_by_id_p50_us	3.75	us
 lmdb	archive	scan_asc_ms	0	ms
 lmdb	archive	scan_desc_ms	0	ms
-lmdb	archive	count_rows	100000	
+lmdb	archive	count_rows	200000	
 lmdb	archive	first_block	0	
-lmdb	archive	last_block	99999	
-lmdb	archive	analytics_ms	5	ms
-lmdb	archive	analytics_txns	2048075	
+lmdb	archive	last_block	199999	
+lmdb	archive	analytics_ms	14	ms
+lmdb	archive	analytics_txns	4106733	
 lmdb	archive	snapshot_s	0	s
-lmdb	archive	peak_rss_mb	374	MB
-lmdb	archive	on_disk_mb	75	MB
-lmdb	coin	bulk_load_rows_per_s	258039	rows/s
-lmdb	coin	point_get_p50_us	1	us
-lmdb	coin	point_get_p95_us	2	us
+lmdb	archive	peak_rss_mb	651	MB
+lmdb	archive	on_disk_mb	150	MB
+lmdb	coin	bulk_load_rows_per_s	319176	rows/s
+lmdb	coin	point_get_p50_us	1.75	us
+lmdb	coin	point_get_p95_us	2.46	us
 lmdb	coin	prefix_scan_ms	0	ms
 lmdb	coin	prefix_scan_hits	1	
-lmdb	coin	count	60000	
+lmdb	coin	count	120000	
 lmdb	coin	snapshot_s	0	s
-lmdb	coin	peak_rss_mb	285	MB
-lmdb	coin	on_disk_mb	28	MB
+lmdb	coin	peak_rss_mb	493	MB
+lmdb	coin	on_disk_mb	56	MB
+rocksdb	archive	bulk_load_rows_per_s	377822	rows/s
+rocksdb	archive	point_get_by_num_p50_us	3.79	us
+rocksdb	archive	point_get_by_num_p95_us	11.33	us
+rocksdb	archive	point_get_by_id_p50_us	5.46	us
+rocksdb	archive	scan_asc_ms	2	ms
+rocksdb	archive	scan_desc_ms	4	ms
+rocksdb	archive	count_rows	200000	
+rocksdb	archive	first_block	0	
+rocksdb	archive	last_block	199999	
+rocksdb	archive	analytics_ms	35	ms
+rocksdb	archive	analytics_txns	4106733	
+rocksdb	archive	snapshot_s	0	s
+rocksdb	archive	peak_rss_mb	884	MB
+rocksdb	archive	on_disk_mb	135	MB
+rocksdb	coin	bulk_load_rows_per_s	179001	rows/s
+rocksdb	coin	point_get_p50_us	2.08	us
+rocksdb	coin	point_get_p95_us	4.96	us
+rocksdb	coin	prefix_scan_ms	0	ms
+rocksdb	coin	prefix_scan_hits	1	
+rocksdb	coin	count	120000	
+rocksdb	coin	snapshot_s	0	s
+rocksdb	coin	peak_rss_mb	680	MB
+rocksdb	coin	on_disk_mb	38	MB
+duckdb	archive	bulk_load_rows_per_s	136040	rows/s
+duckdb	archive	point_get_by_num_p50_us	312.62	us
+duckdb	archive	point_get_by_num_p95_us	971.50	us
+duckdb	archive	point_get_by_id_p50_us	107.92	us
+duckdb	archive	scan_asc_ms	5	ms
+duckdb	archive	scan_desc_ms	1	ms
+duckdb	archive	count_rows	200000	
+duckdb	archive	first_block	0	
+duckdb	archive	last_block	199999	
+duckdb	archive	analytics_ms	2	ms
+duckdb	archive	analytics_txns	4106733	
+duckdb	archive	snapshot_s	0	s
+duckdb	archive	peak_rss_mb	632	MB
+duckdb	archive	on_disk_mb	145	MB
+duckdb	coin	bulk_load_rows_per_s	328214	rows/s
+duckdb	coin	point_get_p50_us	578.75	us
+duckdb	coin	point_get_p95_us	1172.62	us
+duckdb	coin	prefix_scan_ms	1	ms
+duckdb	coin	prefix_scan_hits	1	
+duckdb	coin	count	120000	
+duckdb	coin	snapshot_s	0	s
+duckdb	coin	peak_rss_mb	663	MB
+duckdb	coin	on_disk_mb	42	MB

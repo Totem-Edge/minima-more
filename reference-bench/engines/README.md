@@ -23,8 +23,25 @@ Output lands in `../results/<ts>-engines-<arch>/`: `ENGINE_BENCH_SUMMARY.md`
 |---|---|---|
 | SQLite | **built** | baseline; matches the node's current embedded usage |
 | LMDB | **built** | mmap B+tree; secondary-index DBI for getById / prefix scan |
-| RocksDB | scaffold | driver present, returns unavailable until built on the lab host |
-| DuckDB | scaffold | expected to lose point lookups, win analytics (RFC-0001 §4.1) |
+| RocksDB | **built** | LSM KV; WriteBatch bulk load; Checkpoint snapshot |
+| DuckDB | **built** | columnar; Appender bulk load; loses point lookups, wins analytics |
+
+## First results (M1, 200k blocks / 120k coins, single run)
+
+| Metric | SQLite | LMDB | RocksDB | DuckDB |
+|---|---|---|---|---|
+| archive bulk load (rows/s) | 163,971 | **467,569** | 377,822 | 136,040 |
+| archive get-by-num p50 (µs) | 2.71 | **1.92** | 3.79 | 312.62 |
+| archive get-by-id p50 (µs) | 2.67 | 3.75 | 5.46 | 107.92 |
+| archive analytics (ms) | 23 | 14 | 35 | **2** |
+| coin bulk load (rows/s) | 261,733 | 319,176 | 179,001 | **328,214** |
+| coin get p50 (µs) | 3.29 | **1.75** | 2.08 | 578.75 |
+| coin on-disk (MB) | 44 | 56 | **38** | 42 |
+
+As RFC-0001 predicted: **LMDB** leads point lookups (zero-copy mmap), **DuckDB**
+wins analytics (~7–17×) but is ~100–300× slower per point get, SQLite sits in the
+middle, RocksDB is write-optimised (fast bulk, middling gets). Raw:
+`../results/engines-local-20261019/`.
 
 A driver whose library is absent at build time returns `nullptr`; the runner skips
 it (`run_engine_bench.sh` enables LMDB only when its headers link).

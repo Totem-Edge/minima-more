@@ -67,6 +67,7 @@ static double pct(std::vector<double>& v, double q) {
     size_t i = std::min(v.size() - 1, (size_t)(q * v.size()));
     return v[i];
 }
+static std::string f2(double v) { char b[32]; std::snprintf(b, sizeof b, "%.2f", v); return b; }
 
 struct Row { std::string store, metric, value, unit; };
 
@@ -114,9 +115,9 @@ static void runArchive(const std::string& eng, std::unique_ptr<ArchiveStore> s,
     double after = rssMB(); if (after > peak) peak = after;
     s->close();
 
-    rows.push_back({"archive", "point_get_by_num_p50_us", std::to_string((int)pct(byNum, 0.50)), "us"});
-    rows.push_back({"archive", "point_get_by_num_p95_us", std::to_string((int)pct(byNum, 0.95)), "us"});
-    rows.push_back({"archive", "point_get_by_id_p50_us", std::to_string((int)pct(byId, 0.50)), "us"});
+    rows.push_back({"archive", "point_get_by_num_p50_us", f2(pct(byNum, 0.50)), "us"});
+    rows.push_back({"archive", "point_get_by_num_p95_us", f2(pct(byNum, 0.95)), "us"});
+    rows.push_back({"archive", "point_get_by_id_p50_us", f2(pct(byId, 0.50)), "us"});
     rows.push_back({"archive", "scan_asc_ms", std::to_string((int)scanAsc), "ms"});
     rows.push_back({"archive", "scan_desc_ms", std::to_string((int)scanDesc), "ms"});
     rows.push_back({"archive", "count_rows", std::to_string(cnt), ""});
@@ -165,8 +166,8 @@ static void runCoin(const std::string& eng, std::unique_ptr<CoinStore> s,
     double after = rssMB(); if (after > peak) peak = after;
     s->close();
 
-    rows.push_back({"coin", "point_get_p50_us", std::to_string((int)pct(gets, 0.50)), "us"});
-    rows.push_back({"coin", "point_get_p95_us", std::to_string((int)pct(gets, 0.95)), "us"});
+    rows.push_back({"coin", "point_get_p50_us", f2(pct(gets, 0.50)), "us"});
+    rows.push_back({"coin", "point_get_p95_us", f2(pct(gets, 0.95)), "us"});
     rows.push_back({"coin", "prefix_scan_ms", std::to_string((int)pre), "ms"});
     rows.push_back({"coin", "prefix_scan_hits", std::to_string(hits.size()), ""});
     rows.push_back({"coin", "count", std::to_string(cnt), ""});

@@ -25,26 +25,27 @@ echo "Results dir: $OUT"
 echo "Dataset: BLOCKS=$BLOCKS COINS=$COINS LOOKUPS=$LOOKUPS SPAN=$SPAN"
 
 case "$(uname -s)" in
-  Darwin) MACLIB="-L/opt/homebrew/lib" ;;
+  Darwin) MACLIB="-L/opt/homebrew/lib -Wl,-rpath,/opt/homebrew/lib" ;;
   *)      MACLIB="" ;;
 esac
 
-# LMDB: enable only if its headers/lib are usable on this host.
-LMDB_FLAGS=""
-printf '#include <lmdb.h>\nint main(){return 0;}\n' > /tmp/_lmdb_probe.cpp
-if $CXX -std=c++17 $MACLIB $OPENSSL_INCLUDE /tmp/_lmdb_probe.cpp -o /tmp/_lmdb_probe -llmdb >/dev/null 2>&1; then
-  LMDB_FLAGS="-DHAVE_LMDB -llmdb"
-  echo "LMDB: enabled"
-else
-  echo "LMDB: not found -> driver will report unavailable"
-fi
+probe() {  # probe <name> <include-line> <link-flags>
+  printf '%s\nint main(){return 0;}\n' "$2" > /tmp/_probe.cpp
+  if $CXX -std=c++17 $MACLIB $OPENSSL_INCLUDE /tmp/_probe.cpp -o /tmp/_probe $3 >/dev/null 2>&1;
+  then printf '%s' "-DHAVE_$1 $3"; else printf ''; fi
+}
+
+LMDB_FLAGS=$(probe LMDB '#include <lmdb.h>' '-llmdb')
+ROCKS_FLAGS=$(probe ROCKSDB '#include <rocksdb/db.h>' '-lrocksdb -lz -llz4 -lzstd -lsnappy -lbz2')
+DUCK_FLAGS=$(probe DUCKDB '#include "duckdb.hpp"' '-lduckdb')
+echo "engines: lmdb=${LMDB_FLAGS:+on}${LMDB_FLAGS:-off} rocksdb=${ROCKS_FLAGS:+on}${ROCKS_FLAGS:-off} duckdb=${DUCK_FLAGS:+on}${DUCK_FLAGS:-off}"
 
 echo "== building =="
 $CXX -std=c++17 -O3 -DNDEBUG -I "$ENG" $OPENSSL_INCLUDE \
     -o "$OUT/bench_engines" \
     "$ENG/bench_engines.cpp" "$ENG/driver_sqlite.cpp" "$ENG/driver_lmdb.cpp" \
     "$ENG/driver_rocksdb.cpp" "$ENG/driver_duckdb.cpp" \
-    $MACLIB $SQLITE_LIB $LMDB_FLAGS -lpthread
+    $MACLIB $SQLITE_LIB $LMDB_FLAGS $ROCKS_FLAGS $DUCK_FLAGS -lpthread
 
 echo "== running =="
 "$OUT/bench_engines" --blocks "$BLOCKS" --coins "$COINS" --lookups "$LOOKUPS" \

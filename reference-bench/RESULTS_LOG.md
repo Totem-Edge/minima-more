@@ -525,6 +525,25 @@ on the analytics scan; SQLite holds its own on bulk load and coin-store footprin
 Next: RocksDB + DuckDB on the A1, mainnet-scale (2.4M blocks / 1.7M coins), and the
 point-vs-analytics split. Raw: `results/engines-local-20261019/`.
 
+## 2026-10-19 — RFC-0003 engines: all four built (SQLite / LMDB / RocksDB / DuckDB)
+Completed the harness: RocksDB (WriteBatch bulk load, Checkpoint snapshot) and
+DuckDB (Appender bulk load, native aggregates) drivers implemented and built, so
+all four engines now run the R1/R2 workloads. M1, 200k blocks / 120k coins, 3k
+lookups (single run, indicative):
+
+| Metric | SQLite | LMDB | RocksDB | DuckDB |
+|---|---|---|---|---|
+| archive bulk load (rows/s) | 163,971 | **467,569** | 377,822 | 136,040 |
+| archive get-by-num p50 (µs) | 2.71 | **1.92** | 3.79 | 312.62 |
+| archive analytics (ms) | 23 | 14 | 35 | **2** |
+| coin get p50 (µs) | 3.29 | **1.75** | 2.08 | 578.75 |
+| coin on-disk (MB) | 44 | 56 | **38** | 42 |
+
+Confirms RFC-0001's role split: LMDB/SQLite for R1/R2 point+range (LMDB best),
+DuckDB for R3 analytics (wins ~7-17x but ~100-300x slower point gets), RocksDB
+write-optimised. Raw: `results/engines-local-20261019/`. Next: re-run at
+mainnet scale (2.4M/1.7M) on the A1.
+
 ## Planned next
 - Quiet-host, multi-rep harness mode for decision-grade numbers.
 - Cross-impl / Java two-node sync (C++↔Java) and a **large-chain sync throughput**
