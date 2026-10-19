@@ -35,13 +35,15 @@ std::vector<std::uint8_t> AesUtil::generateKey(const std::string& saltHex,
         const int keyLen = m_keySizeBits / 8;
         std::vector<std::uint8_t> key(static_cast<size_t>(keyLen));
 
-        // PBKDF2WithHmacSHA1
-        int ok = PKCS5_PBKDF2_HMAC_SHA1(
+        // PBKDF2 with HMAC-SHA256 (was SHA1). NOTE: this changes the derived
+        // key, so data encrypted by older builds is not decryptable with this.
+        int ok = PKCS5_PBKDF2_HMAC(
             passphrase.data(),
             static_cast<int>(passphrase.size()),
             salt.data(),
             static_cast<int>(salt.size()),
             m_iterationCount,
+            EVP_sha256(),
             keyLen,
             key.data()
         );

@@ -241,12 +241,20 @@ void TxPoWSqlDB::wipeDB() {
 }
 
 std::string TxPoWSqlDB::sanitizeWhere(const std::string& where) {
+    // Defensive blacklist for an internally-constructed WHERE clause -- NOT a
+    // SQL-injection boundary. Prefer parameterised queries; never pass raw user
+    // input here. Strips comments and statement/mutation keywords.
     std::string lower = where;
     std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return std::tolower(c); });
-    lower = std::regex_replace(lower, std::regex(";"), "");
-    lower = std::regex_replace(lower, std::regex("\\bupdate\\b"), "");
-    lower = std::regex_replace(lower, std::regex("\\bdelete\\b"), "");
-    lower = std::regex_replace(lower, std::regex("\\binsert\\b"), "");
+    lower = std::regex_replace(lower, std::regex("--[^\\n]*"), " ");
+    lower = std::regex_replace(lower, std::regex("/\\*"), " ");
+    lower = std::regex_replace(lower, std::regex("\\*/"), " ");
+    for (const char* kw : {";", "\\bupdate\\b", "\\bdelete\\b", "\\binsert\\b",
+                           "\\bdrop\\b", "\\balter\\b", "\\battach\\b", "\\bpragma\\b",
+                           "\\bunion\\b", "\\breplace\\b", "\\bcreate\\b", "\\bgrant\\b",
+                           "\\bvacuum\\b", "\\bload_extension\\b"}) {
+        lower = std::regex_replace(lower, std::regex(kw), " ");
+    }
     return lower;
 }
 

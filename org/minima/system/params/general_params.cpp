@@ -73,7 +73,7 @@ bool GeneralParams::RPC_ENABLED = false;
 bool GeneralParams::RPC_AUTHENTICATE = false;
 bool GeneralParams::RPC_SSL = false;
 std::string GeneralParams::RPC_AUTHSTYLE = "basic";
-std::string GeneralParams::RPC_PASSWORD = "none";
+std::string GeneralParams::RPC_PASSWORD = "";
 
 std::string GeneralParams::SEED_PHRASE = "";
 bool GeneralParams::ANYSEED_PHRASE = false;

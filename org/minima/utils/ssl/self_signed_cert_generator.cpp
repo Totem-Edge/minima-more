@@ -193,8 +193,8 @@ SelfSignedCertGenerator::createKeystore(X509* cert, EVP_PKEY* key, const std::st
         key,                              // private key
         cert,                             // certificate
         nullptr,                          // no additional CA certs
-        NID_pbe_WithSHA1And3_Key_TripleDES_CBC, // key encryption
-        NID_pbe_WithSHA1And3_Key_TripleDES_CBC, // cert encryption
+        0, // key encryption: 0 -> OpenSSL 3 default (AES-256-CBC + SHA-256)
+        0, // cert encryption: 0 -> OpenSSL 3 default (AES-256-CBC + SHA-256)
         2048,                             // key iteration count
         2048,                             // mac iteration count
         0                                 // keytype

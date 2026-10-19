@@ -145,9 +145,16 @@ NetworkManager::NetworkManager() {
         mP2P2Manager = std::make_unique<DummyProcessor>("P2P2_DUMMY");
     }
 
-    // Do we start the RPC server
+    // Do we start the RPC server. Refuse to expose RPC without a password: an
+    // empty/unset password would let any client authenticate.
     if (org::minima::system::params::GeneralParams::RPC_ENABLED) {
-        startRPC();
+        using org::minima::system::params::GeneralParams;
+        if (GeneralParams::RPC_PASSWORD.empty() || GeneralParams::RPC_PASSWORD == "none") {
+            org::minima::utils::MinimaLogger::log(
+                "RPC enabled without a password - refusing to start the RPC server");
+        } else {
+            startRPC();
+        }
     }
 }
 
