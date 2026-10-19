@@ -1,0 +1,8 @@
+heap_baseline_kb	3024	kB
+mmr_total_entries	599992	
+heap_after_mmr_kb	185388	kB
+heap_delta_kb	182363	kB
+mmr_bytes_per_entry	622.46696	B
+mmr_build_ms	1773.758839	ms
+has_root	true	
+java_peak_rss_kb	598976	kB

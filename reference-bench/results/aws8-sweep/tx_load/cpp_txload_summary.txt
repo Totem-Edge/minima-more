@@ -1,0 +1,13 @@
+node	cpp	
+load_window_s	95.63	s
+tx_ok	3	
+tx_failed	0	
+achieved_tx_per_min	1.88	tx/min
+cpu_seconds_load	6.210	s
+cpu_ms_per_tx	2070	ms/tx
+send_latency_avg_ms	568.8	ms
+send_latency_min_ms	475.8	ms
+send_latency_max_ms	618.4	ms
+peak_rss_kb	24440	kB
+idle_rss_kb	24440	kB
+threads	24	

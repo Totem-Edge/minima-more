@@ -15,6 +15,10 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>  // sysconf/_SC_PAGESIZE for RSS on Linux
+#endif
+
 #include "dataset.hpp"
 #include "interface.hpp"
 
@@ -44,7 +48,6 @@ static double rssMB() {
     std::fclose(f);
     return res * (sysconf(_SC_PAGESIZE) / 1048576.0);
 }
-#include <unistd.h>
 #endif
 
 static void rmrf(const std::string& p) { std::error_code ec; fs::remove_all(p, ec); }

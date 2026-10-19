@@ -1,0 +1,9 @@
+node	cpp	
+window_seconds	120.04	s
+storage_write_bytes	139264	B
+storage_write_bytes_per_hour	4176528	B/h
+storage_write_bytes_per_day	100236672	B/day
+write_chars	99048	B
+datadir_growth_kb	96	kB
+wal_max_kb	272	kB
+wal_checkpoints	0	

@@ -7,27 +7,29 @@ blockchain protocol, re-engineered so a complete node costs dramatically less to
 run. Same protocol, same cryptographic primitives (SHA3-256, WOTS+/Winternitz),
 same consensus rules — radically different resource requirements.
 
-In same-hardware benchmarks against the Java reference node
-([minima-core](https://github.com/spartacusrex-minima/minima-core)), Minima More delivers:
+All headline figures below were measured on **one host — an AWS `c6g.xlarge`
+(4 vCPU / 8 GB, Neoverse-N1, aarch64)** — running this node and the Java reference
+([minima-core](https://github.com/spartacusrex-minima/minima-core)) side by side,
+against the same chain and the same peers. Minima More delivers:
 
 **Speed and cryptography**
-- 3.3× faster SHA3-256 hashing · **4.7× faster Winternitz (WOTS) signing**
-- Up to **49,000× faster** mempool double-spend lookups (O(1) coin index)
+- 3.4× faster SHA3-256 hashing · **4.9× faster Winternitz (WOTS) signing**
+- **~21,000× faster** mempool double-spend lookups (O(1) coin index)
 
 **A running node — same host, same chain**
-- **On live mainnet:** peak sync RSS **~92 MB vs ~407 MB**, idle **~210 MB vs ~1.39 GB**, data dir **~220 MB vs ~881 MB**
-- **~19 MB** idle RSS on a fresh chain vs ~302 MB, about **16× less memory**
-- **67% lower** peak memory for a million-entry MMR
-- **56% fewer** OS threads (23 vs 52)
-- **~40% less** CPU at idle and **~38% less** written to disk per hour (flash-friendly)
-- **P2P peer discovery fixed:** reaches **~10 live mainnet peers** (was 1)
+- **On live mainnet:** peak sync RSS **~89 MB vs ~426 MB**, idle **~192 MB vs ~741 MB**, data dir **~65 MB vs ~721 MB**
+- **~19 MB** idle RSS on a fresh chain vs ~224 MB — about **11× less memory**
+- **68% lower** peak memory for a 300k-entry MMR
+- **60% fewer** OS threads (25 vs 62 on mainnet)
+- **~35% less** CPU at idle and **~29% less** written to disk per hour (flash-friendly)
+- **P2P peer discovery fixed:** a fresh node now reaches live mainnet peers (was 1)
 
 It runs comfortably on servers, ARM systems, Raspberry Pi-class devices and the
 next generation of independently operated blockchain infrastructure.
 
-Performance figures are workload-specific and come from initial same-host
-benchmarks (details below); consensus compatibility is validated against reference
-vectors and network behaviour.
+Performance figures are workload-specific and come from same-host benchmarks
+(details below); consensus compatibility is validated against reference vectors
+and network behaviour.
 
 > **Performance reference:** every number below is measured against the Java
 > reference node, [`spartacusrex-minima/minima-core`](https://github.com/spartacusrex-minima/minima-core),
@@ -60,45 +62,49 @@ Every box above is an optimisation target: **memory layout** (MMR), **CPU**
 
 ---
 
-## At a glance (measured vs the Java node, same host)
+## At a glance (measured on one 8 GB ARM host)
 
-| Dimension | This node (C++) | Java node | 
+Host: **AWS `c6g.xlarge` — 4 vCPU / 8 GB — Neoverse-N1 (aarch64)**, both nodes on
+the same machine.
+
+| Dimension | This node (C++) | Java node |
 |---|---|---|
-| Idle process RAM (fresh chain) | **~19 MB** | ~302 MB |
-| Peak startup RAM (fresh chain) | **~20 MB** | ~302 MB |
-| Live mainnet — peak sync RAM | **~92 MB** | ~407 MB |
-| Live mainnet — idle RAM | **~210 MB** | ~1.39 GB |
-| Live mainnet — data dir | **~220 MB** | ~881 MB |
-| Threads (fresh chain) | **23** | 52 |
-| MMR, 1M entries — peak RAM | **624 MB** | 1.90 GB |
-| MMR, 1M entries — build time (M1) | **~2.2 s** | ~2.3 s |
-| Mempool coin lookup (double-spend guard) | **0.9 µs** | ~44 ms (~49,000× slower) |
-| Database inserts (batched) | **2.1× faster** than its own per-row path | — |
-| SHA3-256 224 B (1 thread) | **1.16 M hashes/s** | 346 k hashes/s |
-| WOTS sign (batched) | **0.92 ms** | 4.30 ms |
-| MMR `getRoot()` (cached) | **~137× faster** than uncached | — |
+| Idle process RAM (fresh chain) | **~19 MB** | ~224 MB |
+| Peak startup RAM (fresh chain) | **~19 MB** | ~224 MB |
+| Live mainnet — peak sync RAM | **~89 MB** | ~426 MB |
+| Live mainnet — idle RAM | **~192 MB** | ~741 MB |
+| Live mainnet — data dir | **~65 MB** | ~721 MB |
+| Threads (live mainnet) | **25** | 62 |
+| MMR, 300k entries — peak RSS | **186 MB** | 585 MB |
+| MMR, `addEntry`+`getRoot` | **214k entries/s** | 122k entries/s |
+| Mempool coin lookup (double-spend guard) | **0.97 µs** | ~20,417 µs (~21,000× slower) |
+| Database inserts (batched) | **3.5× faster** than its own per-row path | — |
+| SHA3-256 224 B (1 thread) | **967k hashes/s** | 283k hashes/s |
+| WOTS sign (batched) | **1.07 ms** | 5.24 ms |
+| WOTS verify | **1.16 ms** | 4.62 ms |
 
 ![Full-node RAM: C++ node vs Java node](assets/node_ram.svg)
 
-Full methodology and raw output: [`reference-bench/`](reference-bench/README.md)
-and [`reference-bench/RESULTS_LOG.md`](reference-bench/RESULTS_LOG.md).
+Full methodology and raw output: [`reference-bench/`](reference-bench/README.md).
 
 ---
 
 ## Live mainnet
 
 The closest test to what an operator actually deploys: **two fresh nodes — C++ and
-Java — syncing the real Minima mainnet chain from the same peers on the same host**
-(OCI Ampere A1, 4-core ARM), then settling.
+Java — syncing the real Minima mainnet chain from the same peers on the same host**,
+then settling. Measured on the 8 GB AWS `c6g.xlarge` above.
 
 | Metric | C++ node | Java node |
 |---|---|---|
-| Time to tip (s) | 10.0 | 6.2 |
-| Peak RSS during sync | **~92 MB** | ~407 MB |
-| Idle RSS (after 60 s settle) | **~210 MB** | ~1.39 GB |
-| CPU-seconds over 60 s settle | **34.3** | 67.8 |
-| Threads | **25** | 60 |
-| Data dir | **~220 MB** | ~881 MB |
+| Time to tip (s) | 17.6 | 8.1 |
+| Peak RSS during sync | **~89 MB** | ~426 MB |
+| Idle RSS (after 60 s settle) | **~192 MB** | ~741 MB |
+| CPU-seconds over 60 s settle | **32.7** | 76.2 |
+| Threads | **25** | 62 |
+| Data dir | **~65 MB** | ~721 MB |
+| P2P peers reached / known | 2 / 3 | 3 / 10 |
+| P2P time to first peer (s) | 6.0 | 5.4 |
 
 The C++ node also runs the network end to end on live mainnet — it **syncs to the
 tip** from real 1.0.4x peers, receives and validates real spends (WOTS signatures +
@@ -111,26 +117,30 @@ same advertised `host:port` is served an initial block download once, then the p
 keeps greeting but withholds the IBD for ~30 minutes. `run_mainnet_sync.sh` and
 `run_mainnet_bench.sh` therefore advertise a **fresh port per run**.
 
+Raw: [`reference-bench/results/aws8-mainnet/`](reference-bench/results/aws8-mainnet/).
+
 ---
 
 ## Full-lifecycle benchmarks
 
-Component tests isolate individual paths. These five measure a **running node end
-to end on one host** (OCI Ampere A1, 4-core ARM), C++ vs Java on the same machine —
-the numbers an operator actually cares about.
+Component tests isolate individual paths. These measure a **running node end to
+end on the same 8 GB host**, C++ vs Java on the same machine — the numbers an
+operator actually cares about.
 
 | Metric | C++ node | Java node |
 |---|---|---|
-| Fully-synced RAM — peak during sync | **~20 MB** | ~248 MB |
-| Fully-synced RAM — idle after sync | **~21 MB** | ~178 MB |
-| Initial sync time (same chain) | 5.9 s | 4.1 s |
-| CPU at idle — CPU-seconds / hour | **38** | 62 |
-| CPU at idle — avg utilisation | **1.06%** | 1.73% |
-| CPU under tx load — ms per tx | **1635** | 2363 |
-| Send latency under load | **447 ms** | 1965 ms |
-| Disk writes at idle — MB / hour | **3.7** | 6.0 |
-| Disk writes at idle — MB / day | **88** | 143 |
-| Threads | **25** | 58 |
+| Genesis creation (s) | **3.20** | 5.16 |
+| Daemon ready (s) | **3.21** | 5.17 |
+| Fully-synced RAM — peak during sync | **~20 MB** | ~207 MB |
+| Fully-synced RAM — idle after sync | **~21 MB** | ~151 MB |
+| Initial sync time (same chain) | 5.10 s | 4.87 s |
+| CPU at idle — CPU-seconds / hour | **66.8** | 102.5 |
+| CPU at idle — avg utilisation | **1.86%** | 2.85% |
+| CPU under tx load — ms per tx | **2,070** | 2,855 |
+| Send latency under load | **569 ms** | 2,298 ms |
+| Disk writes at idle — MB / hour | **4.18** | 5.90 |
+| Disk writes at idle — MB / day | **100** | 142 |
+| Threads | **23–25** | 53–58 |
 
 ![Fully-synced node RAM: C++ vs Java](assets/lifecycle_synced_ram.svg)
 ![CPU at idle: C++ vs Java](assets/lifecycle_cpu_idle.svg)
@@ -140,9 +150,11 @@ the numbers an operator actually cares about.
 Reproduce / methodology: `run_full_sync.sh` (sync time + synced RAM),
 `run_cpu_idle.sh` (CPU over an idle window), `run_tx_load.sh` (RPC-driven sends),
 `run_disk_io.sh` (`/proc/<pid>/io` storage writes). **Caveats:** windows were
-reduced for the sweep (idle/disk 180 s; per-hour/day figures are extrapolated), the
+reduced for the sweep (idle/disk 120 s; per-hour/day figures are extrapolated), the
 sync chain is small (automine ≈ 1 block / 40–50 s, so it exercises the IBD mechanism,
 not bulk throughput), and figures are single runs on a shared host — indicative.
+
+Raw: [`reference-bench/results/aws8-sweep/`](reference-bench/results/aws8-sweep/).
 
 ---
 
@@ -163,32 +175,38 @@ chosen **per role**, and measured rather than assumed
 | **R4 agentic** | embeddings, graph, full-text | KNN, BM25, graph hops | LanceDB / FTS (RFC pending) |
 
 Benchmarked on one synthetic mainnet-shaped dataset with identical record bytes for
-every engine (M1, 200k blocks / 120k coins, 3k lookups — single run):
+every engine (**AWS 8 GB host**, 200k blocks / 120k coins, 3k lookups — single run).
+DuckDB was not installable on this host, so only the embedded engines below ran here.
 
-| Metric | SQLite | LMDB | RocksDB | DuckDB |
+| Metric | SQLite | sqlite-plain | LMDB | RocksDB |
 |---|---|---|---|---|
-| archive bulk load (rows/s) | 163,971 | **467,569** | 377,822 | 136,040 |
-| archive get-by-num p50 (µs) | 2.71 | **1.92** | 3.79 | 312.62 |
-| archive analytics (ms) | 23 | 14 | 35 | **2** |
-| coin get p50 (µs) | 3.29 | **1.75** | 2.08 | 578.75 |
-| coin on-disk (MB) | 44 | 56 | **38** | 42 |
+| archive bulk load (rows/s) | 85,140 | 188 | **206,447** | 183,366 |
+| archive get-by-num p50 (µs) | 6.46 | 8.71 | **1.71** | 3.62 |
+| archive analytics (ms) | 52 | 83 | **27** | 61 |
+| archive on-disk (MB) | 153 | 153 | 183 | **135** |
+| coin bulk load (rows/s) | 173,643 | 193 | **279,742** | 138,229 |
+| coin get p50 (µs) | 4.92 | 11.10 | **1.26** | 3.25 |
+| coin on-disk (MB) | 44 | 44 | 58 | **38** |
 
 **What it says:** the roles pull in different directions. **LMDB** leads the hot
-point lookups (R1/R2, zero-copy mmap), **DuckDB** wins R3 analytics by ~7–17× but
-is ~100–300× slower per point get, **SQLite** is the balanced default (and remains
-for R0), and **RocksDB** is write-optimised (append-heavy). The plan is a thin
-storage interface per role, with these embedded engines selectable by node mode.
+point lookups (R1/R2, zero-copy mmap) and bulk load, **RocksDB** is the most
+space-efficient and write-optimised, **SQLite** is the balanced default (and remains
+for R0), and **DuckDB** (measured earlier on M1: ~2 ms analytics, ~7–17× faster than
+these for R3) wins columnar aggregation but is ~100–300× slower per point get. The
+plan is a thin storage interface per role, with these embedded engines selectable by
+node mode.
 
 **Is the node's SQLite tuning included?** Yes — "SQLite" here is the node's own
 configuration (**WAL, `synchronous=NORMAL`, memory temp store, larger cache,
 memory-mapped I/O, busy timeout**, plus **batched writes** — one bulk transaction).
 To show what that buys, the harness also runs a **`sqlite-plain`** variant (stock
-defaults, per-row commits): bulk load is **~150× faster** tuned vs plain
-(archive 302k vs 1.9k rows/s; coin 339k vs 2.6k rows/s) and point gets ~3× faster.
+defaults, per-row commits): bulk load is **~450× faster** tuned vs plain
+(archive 85k vs 188 rows/s; coin 174k vs 193 rows/s) and point gets ~1.5–2.3× faster.
 Without the tuning, SQLite would look far worse than it actually is in the node.
 
 Reproduce: `reference-bench/engines/run_engine_bench.sh` — methodology and fairness
-statement in [`reference-bench/engines/`](reference-bench/engines/README.md).
+statement in [`reference-bench/engines/`](reference-bench/engines/README.md). Raw:
+[`reference-bench/results/aws8-engines/`](reference-bench/results/aws8-engines/).
 
 ---
 
@@ -208,8 +226,9 @@ allocator overhead — not the 32-byte payload — dominated RAM.
   (no heap allocation for the common 32-byte case).
 - Entry maps use a **packed `uint64_t` key** instead of a heap string.
 
-**Result:** MMR footprint **858 → 634 bytes/entry (−26%)**, and 1M entries now cost
-**624 MB peak instead of 1.90 GB**. See `MINIDATA_SBO_MIGRATION_SCOPE.md`.
+**Result:** MMR footprint **858 → 635 bytes/entry (−26%)**, and the **process peak
+RSS for 300k entries is 186 MB vs 585 MB** for the Java node (which also carries JVM
+overhead). See `MINIDATA_SBO_MIGRATION_SCOPE.md`.
 
 ![MMR bytes per entry across the optimisation steps](assets/mmr_bytes_per_entry.svg)
 
@@ -230,7 +249,7 @@ flowchart TB
 
 ![MMR peak RAM: C++ node vs Java node](assets/mmr_ram.svg)
 
-### 2. MMR CPU — build time cut ~41%
+### 2. MMR CPU — 1.8× the Java node
 - **In-place crypto serialization:** hashing no longer builds an `ostringstream`,
   copies to a `std::string`, then copies into a `vector` — it serializes straight
   into a reused thread-local buffer and hashes in place. This speeds up *every*
@@ -240,12 +259,10 @@ flowchart TB
 - **`MMREntryNumber` fast paths:** parity (used per tree level) is a single bit
   test instead of a `modulo` object.
 
-**Result:** MMR 1M-entry build **3785 → 2216 ms (−41%)**, closing a 1.6× gap to
-**parity** — 2216 ms vs ~2256 ms (Java) on M1. On the smaller OCI A1 core the two
-are close but C++ is slightly behind (~4038 vs ~3759 ms); the win here is CPU, the
-footprint win is in §1.
+**Result:** MMR `addEntry`+`getRoot` runs at **214k entries/s vs 122k** on the same
+8 GB host — **1.8× the Java node**.
 
-![MMR build time across the optimisation steps](assets/mmr_build_time.svg)
+![MMR addEntry + getRoot throughput](assets/mmr_build_time.svg)
 
 ### 3. MMR root / peaks caching
 `getRoot()` and `getPeaks()` previously rebuilt the peak list and recomputed the
@@ -257,15 +274,16 @@ root on every call. Cached (invalidated on every mutation):
 ### 4. Cryptography
 - **OpenSSL 3.x EVP** with a single `EVP_MD_fetch` (no per-call locked fetch) and
   **RAII thread-local digests** (no per-thread leak).
-- **SHA3-256 is 3.3× the Java node** on the same hardware.
+- **SHA3-256 is 3.4× the Java node** on the same hardware (967k vs 283k hashes/s,
+  one thread).
 
 ### 5. WOTS signatures
 - **x4 SIMD** chain evaluation with a **bounded worker pool** sized from the core
   count.
 - **Batched `sign()`/`verify()`** in lockstep, plus a cached private-chain table.
 
-**Result:** batched signing is **~3× faster than scalar**, and **~4.7× the Java
-node** (0.92 ms vs 4.30 ms).
+**Result:** batched signing is **3.1× faster than scalar**, and **4.9× the Java
+node** (1.07 ms vs 5.24 ms). WOTS verify is **4.0× faster** (1.16 vs 4.62 ms).
 
 ### 6. TxPoW mining
 Bounded **parallel nonce mining** across cores, so block/TxPoW mining saturates the
@@ -275,8 +293,8 @@ CPU instead of running on a single thread.
 The mempool keeps a **coin → TxPoW index**, so "is this coin already in the
 mempool?" is a hash lookup instead of a linear scan of every transaction.
 
-**Result:** **~49,000× faster** than the Java node's scan (0.9 µs vs ~44 ms per
-lookup), for negligible extra RAM.
+**Result:** **~21,000× faster** than the Java node's scan (0.97 µs vs ~20.4 ms per
+lookup), for moderate extra RAM.
 
 ![Mempool double-spend check: O(1) vs linear scan](assets/coin_lookup.svg)
 
@@ -292,8 +310,8 @@ flowchart LR
 - **Batched writes:** bursty inserts (sync / tree load / restore) share one
   transaction, committing every 512 rows instead of per row.
 
-**Result:** **~9×** from the tuning pragmas alone, **~2.1×** more from write
-batching. Correctness covered by `test_sql_batch`.
+**Result:** **3.5×** more insert throughput with batching (2,183 → 7,681 rows/s on
+this host). Correctness covered by `test_sql_batch`.
 
 ![SQLite write throughput: batched vs per-row](assets/sqlite_write.svg)
 
@@ -304,7 +322,7 @@ The per-line resident-memory syscall is **cached behind a 1-second TTL**, removi
 ### 10. Threading
 Background worker pools are sized from `hardware_concurrency()` within a bounded
 range (override with `MINIMA_NIO_WORKERS`), so small devices stay lean and big
-devices stay busy — **23 threads vs the Java node's 52**.
+devices stay busy — **23–25 threads vs the Java node's 53–62**.
 
 ### 11. Consensus & network correctness (integrity)
 Performance work never touches consensus, but the port also fixes correctness
@@ -333,9 +351,9 @@ bootstrap link" into a healthy mesh:
   to the `PeersChecker` (forced) at cold start; advertised peer lists in peer
   greetings are also consumed.
 
-**Result:** a fresh node reaches **~10 live mainnet peers** (was 1), and the link
-table persists across restarts (`p2p2.db`). Full P2P swap-links gossip and faster
-parallel verification are tracked in `OPTIMIZATION_BACKLOG.md`.
+**Result:** a fresh node reaches live mainnet peers (was 1; up to ~10 on a longer
+run), and the link table persists across restarts (`p2p2.db`). Full P2P swap-links
+gossip and faster parallel verification are tracked in `OPTIMIZATION_BACKLOG.md`.
 
 ---
 
@@ -367,12 +385,15 @@ reference-bench/engines/run_engine_bench.sh    # embedded storage engines by rol
 ![Microbenchmarks: C++ node vs Java node](assets/microbench.svg)
 
 Results land in `reference-bench/results/<timestamp>/`, including
-`SWEEP_SUMMARY.md`. A full same-hardware comparison on an Oracle Ampere **A1**
-(4-core ARM) is checked in under
-[`reference-bench/results/a1-full-20261018/`](reference-bench/results/a1-full-20261018/).
+`SWEEP_SUMMARY.md`. The checked-in one-host run for this README is:
+- [`results/aws8-mainnet/`](reference-bench/results/aws8-mainnet/) — live mainnet, C++ vs Java
+- [`results/aws8-core/`](reference-bench/results/aws8-core/) — WOTS / SHA3 / MMR
+- [`results/aws8-sweep/`](reference-bench/results/aws8-sweep/) — full lifecycle sweep
+- [`results/aws8-engines/`](reference-bench/results/aws8-engines/) — storage engines
 
-**Caveat:** C++ figures are process RSS; Java figures are JVM heap-in-use (plus a
-peak-RSS row for the whole JVM). Heap ≠ RSS. Single runs, indicative.
+**Caveats:** C++ figures are process RSS; Java process figures are the whole JVM.
+For the MMR/mempool microbenches the Java per-entry rows are JVM heap-in-use (plus a
+whole-process peak-RSS row). Heap ≠ RSS. Single runs on one host, indicative only.
 
 ---
 

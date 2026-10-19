@@ -1,0 +1,12 @@
+rss_baseline_kb	5032	kB
+mempool_txns	100000	
+mempool_coins	200000	
+mempool_build_ms	5590.4	ms
+rss_after_mempool_kb	746224	kB
+mempool_delta_kb	741192	kB
+mempool_bytes_per_txpow	7589.81	B
+mempool_bytes_per_coin	3794.90	B
+mempool_lookups	1000	
+mempool_lookup_hits	1000	
+mempool_lookup_ms	0.97	ms
+mempool_lookup_us_per	0.97	us

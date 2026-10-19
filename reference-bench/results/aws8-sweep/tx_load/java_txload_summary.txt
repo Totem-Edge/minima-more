@@ -1,0 +1,13 @@
+node	java	
+load_window_s	65.27	s
+tx_ok	2	
+tx_failed	1	
+achieved_tx_per_min	1.84	tx/min
+cpu_seconds_load	5.710	s
+cpu_ms_per_tx	2855	ms/tx
+send_latency_avg_ms	2298.3	ms
+send_latency_min_ms	1977.3	ms
+send_latency_max_ms	2619.3	ms
+peak_rss_kb	246320	kB
+idle_rss_kb	246480	kB
+threads	57	

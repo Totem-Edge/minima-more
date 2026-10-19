@@ -41,7 +41,9 @@ struct Db {
         std::vector<rocksdb::ColumnFamilyDescriptor> desc;
         desc.emplace_back(rocksdb::kDefaultColumnFamilyName, rocksdb::ColumnFamilyOptions());
         for (auto& n : names) desc.emplace_back(n, rocksdb::ColumnFamilyOptions());
-        auto st = rocksdb::DB::Open(opts(), path, desc, &cfs, &db);
+        rocksdb::DB* raw = nullptr;
+        auto st = rocksdb::DB::Open(opts(), path, desc, &cfs, &raw);
+        db.reset(raw);
         if (!st.ok()) throw std::runtime_error("rocksdb open: " + st.ToString());
     }
     rocksdb::ColumnFamilyHandle* cf(size_t i) { return cfs[i + 1]; }  // skip default

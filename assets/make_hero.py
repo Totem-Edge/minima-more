@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate the hero performance infographic (assets/hero.svg + hero.png).
 
-One wide banner summarising the headline C++-vs-Java results. Rendered as PNG
-(universally supported) plus SVG (scalable).
+One wide banner summarising the headline C++-vs-Java results, all measured on
+one host: AWS c6g.xlarge - 4 vCPU / 8 GB - Neoverse-N1 (aarch64).
 
-Data: reference-bench/RESULTS_LOG.md (A1 same-host sweeps).
+Data: reference-bench/results/aws8-mainnet, aws8-core, aws8-sweep.
 Run: python3 assets/make_hero.py
 """
 import os
@@ -21,18 +21,18 @@ CPP, JAVA, BLUE = "#3fb950", "#f0883e", "#58a6ff"
 
 # title, C++ value, Java value, unit, badge, badge colour
 CARDS = [
-    ("Mainnet peak RAM", 92, 407, "MB", "4.4× less", CPP),
-    ("Mainnet idle RAM", 210, 1390, "MB", "6.6× less", CPP),
-    ("Mainnet data dir", 220, 881, "MB", "4× smaller", CPP),
-    ("OS threads", 25, 60, "", "56% fewer", CPP),
-    ("MMR RAM (1M)", 624, 1898, "MB", "67% less", CPP),
-    ("CPU (mainnet 60 s)", 34, 68, "CPU-s", "2× less", CPP),
-    ("Disk writes (idle)", 3.7, 6.0, "MB/h", "38% less", CPP),
-    ("Synced RAM (solo)", 20, 248, "MB", "12× less", CPP),
-    ("Mempool lookup", 0.9, 43733, "µs", "49,000×", BLUE),
-    ("SHA3-256", 1159, 346, "k h/s", "3.3× faster", BLUE),
-    ("WOTS signing", 0.92, 4.30, "ms", "4.7× faster", BLUE),
-    ("MMR build (1M)", 2216, 2256, "ms", "~parity", BLUE),
+    ("Mainnet peak RAM", 89, 426, "MB", "4.8× less", CPP),
+    ("Mainnet idle RAM", 192, 741, "MB", "3.9× less", CPP),
+    ("Mainnet data dir", 65, 721, "MB", "11× smaller", CPP),
+    ("OS threads", 25, 62, "", "60% fewer", CPP),
+    ("MMR RAM (300k)", 186, 585, "MB", "3.1× less", CPP),
+    ("CPU (mainnet 60 s)", 33, 76, "CPU-s", "2.3× less", CPP),
+    ("Disk writes (idle)", 4.2, 5.9, "MB/h", "29% less", CPP),
+    ("Synced RAM (solo)", 20, 207, "MB", "11× less", CPP),
+    ("Mempool lookup", 1.0, 20417, "µs", "21,000×", BLUE),
+    ("SHA3-256", 967, 283, "k h/s", "3.4× faster", BLUE),
+    ("WOTS signing", 1.07, 5.24, "ms", "4.9× faster", BLUE),
+    ("MMR add+root", 214, 122, "k/s", "1.8× faster", BLUE),
 ]
 
 
@@ -81,8 +81,8 @@ def main():
     fig.text(0.5, 0.902, "Same blockchain. A fraction of the resources.",
              ha="center", color=CPP, fontsize=19, style="italic")
     fig.text(0.5, 0.864,
-             "C++ node vs Java node (minima-core)  ·  same hardware, same chain"
-             "  ·  green = C++  orange = Java",
+             "C++ node vs Java node (minima-core)  ·  AWS c6g.xlarge: 4 vCPU / 8 GB"
+             " Neoverse-N1  ·  same chain, same host  ·  green = C++  orange = Java",
              ha="center", color=SUB, fontsize=12)
 
     gs = fig.add_gridspec(3, 4, left=0.035, right=0.965, top=0.820, bottom=0.105,
@@ -92,7 +92,7 @@ def main():
         card(ax, title, cv, jv, unit, badge, bcol)
 
     fig.text(0.5, 0.048,
-             "P2P peer discovery fixed on live mainnet:  1  →  ~10 peers"
+             "P2P peer discovery fixed on live mainnet:  1  →  up to ~10 peers"
              "   (missing NIO length-framing prefix)",
              ha="center", color=CPP, fontsize=13, fontweight="bold")
     fig.text(0.5, 0.021,

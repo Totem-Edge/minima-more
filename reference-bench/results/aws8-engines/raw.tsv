@@ -1,0 +1,92 @@
+sqlite	archive	bulk_load_rows_per_s	85140	rows/s
+sqlite	archive	point_get_by_num_p50_us	6.46	us
+sqlite	archive	point_get_by_num_p95_us	8.24	us
+sqlite	archive	point_get_by_id_p50_us	3.55	us
+sqlite	archive	scan_asc_ms	0	ms
+sqlite	archive	scan_desc_ms	0	ms
+sqlite	archive	count_rows	200000	
+sqlite	archive	first_block	0	
+sqlite	archive	last_block	199999	
+sqlite	archive	analytics_ms	52	ms
+sqlite	archive	analytics_txns	4106733	
+sqlite	archive	snapshot_s	1	s
+sqlite	archive	peak_rss_mb	424	MB
+sqlite	archive	on_disk_mb	153	MB
+sqlite	coin	bulk_load_rows_per_s	173643	rows/s
+sqlite	coin	point_get_p50_us	4.92	us
+sqlite	coin	point_get_p95_us	11.91	us
+sqlite	coin	prefix_scan_ms	0	ms
+sqlite	coin	prefix_scan_hits	1	
+sqlite	coin	count	120000	
+sqlite	coin	snapshot_s	0	s
+sqlite	coin	peak_rss_mb	314	MB
+sqlite	coin	on_disk_mb	44	MB
+sqlite-plain	archive	bulk_load_rows_per_s	188	rows/s
+sqlite-plain	archive	point_get_by_num_p50_us	8.71	us
+sqlite-plain	archive	point_get_by_num_p95_us	10.64	us
+sqlite-plain	archive	point_get_by_id_p50_us	6.03	us
+sqlite-plain	archive	scan_asc_ms	0	ms
+sqlite-plain	archive	scan_desc_ms	0	ms
+sqlite-plain	archive	count_rows	200000	
+sqlite-plain	archive	first_block	0	
+sqlite-plain	archive	last_block	199999	
+sqlite-plain	archive	analytics_ms	83	ms
+sqlite-plain	archive	analytics_txns	4106733	
+sqlite-plain	archive	snapshot_s	0	s
+sqlite-plain	archive	peak_rss_mb	269	MB
+sqlite-plain	archive	on_disk_mb	153	MB
+sqlite-plain	coin	bulk_load_rows_per_s	193	rows/s
+sqlite-plain	coin	point_get_p50_us	11.10	us
+sqlite-plain	coin	point_get_p95_us	12.45	us
+sqlite-plain	coin	prefix_scan_ms	0	ms
+sqlite-plain	coin	prefix_scan_hits	1	
+sqlite-plain	coin	count	120000	
+sqlite-plain	coin	snapshot_s	0	s
+sqlite-plain	coin	peak_rss_mb	269	MB
+sqlite-plain	coin	on_disk_mb	44	MB
+lmdb	archive	bulk_load_rows_per_s	206447	rows/s
+lmdb	archive	point_get_by_num_p50_us	1.71	us
+lmdb	archive	point_get_by_num_p95_us	4.95	us
+lmdb	archive	point_get_by_id_p50_us	2.86	us
+lmdb	archive	scan_asc_ms	0	ms
+lmdb	archive	scan_desc_ms	0	ms
+lmdb	archive	count_rows	200000	
+lmdb	archive	first_block	0	
+lmdb	archive	last_block	199999	
+lmdb	archive	analytics_ms	27	ms
+lmdb	archive	analytics_txns	4106733	
+lmdb	archive	snapshot_s	0	s
+lmdb	archive	peak_rss_mb	571	MB
+lmdb	archive	on_disk_mb	183	MB
+lmdb	coin	bulk_load_rows_per_s	279742	rows/s
+lmdb	coin	point_get_p50_us	1.26	us
+lmdb	coin	point_get_p95_us	3.73	us
+lmdb	coin	prefix_scan_ms	0	ms
+lmdb	coin	prefix_scan_hits	1	
+lmdb	coin	count	120000	
+lmdb	coin	snapshot_s	0	s
+lmdb	coin	peak_rss_mb	327	MB
+lmdb	coin	on_disk_mb	58	MB
+rocksdb	archive	bulk_load_rows_per_s	183366	rows/s
+rocksdb	archive	point_get_by_num_p50_us	3.62	us
+rocksdb	archive	point_get_by_num_p95_us	5.60	us
+rocksdb	archive	point_get_by_id_p50_us	7.43	us
+rocksdb	archive	scan_asc_ms	0	ms
+rocksdb	archive	scan_desc_ms	1	ms
+rocksdb	archive	count_rows	200000	
+rocksdb	archive	first_block	0	
+rocksdb	archive	last_block	199999	
+rocksdb	archive	analytics_ms	61	ms
+rocksdb	archive	analytics_txns	4106733	
+rocksdb	archive	snapshot_s	1	s
+rocksdb	archive	peak_rss_mb	505	MB
+rocksdb	archive	on_disk_mb	135	MB
+rocksdb	coin	bulk_load_rows_per_s	138229	rows/s
+rocksdb	coin	point_get_p50_us	3.25	us
+rocksdb	coin	point_get_p95_us	4.94	us
+rocksdb	coin	prefix_scan_ms	0	ms
+rocksdb	coin	prefix_scan_hits	1	
+rocksdb	coin	count	120000	
+rocksdb	coin	snapshot_s	0	s
+rocksdb	coin	peak_rss_mb	370	MB
+rocksdb	coin	on_disk_mb	38	MB

@@ -1,0 +1,6 @@
+=== WOTS signature chains: scalar vs batched+pooled ===
+iters    500
+scalar   3.89389 ms/sign  (1946.94 ms)
+batched  1.24704 ms/sign  (623.519 ms)
+speedup  3.12251x
+identical yes

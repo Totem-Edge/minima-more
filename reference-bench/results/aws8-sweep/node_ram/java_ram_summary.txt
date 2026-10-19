@@ -1,0 +1,7 @@
+node	java	
+samples	20	
+rss_min_kb	127552	kB
+rss_avg_kb	143651	kB
+rss_max_kb	229628	kB
+rss_last_kb	127552	kB
+rss_slope_kb_per_s	-5372.421	kB/s
