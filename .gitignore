@@ -12,8 +12,13 @@ build/
 /minima
 APP/WSL/minima
 
-# Test binaries
-tests/test_*.*
+# Test binaries (sources under tests/ ARE tracked; only in-tree executables ignored)
+/tests/test_mmr
+/tests/test_winternitz
+/tests/test_sha3
+/tests/test_serialization
+/tests/test_serialization_standalone
+/tests/test_consensus_vectors
 
 # Database / wallet files (runtime)
 *.db
