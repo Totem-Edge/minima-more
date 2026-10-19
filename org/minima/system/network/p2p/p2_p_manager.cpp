@@ -356,54 +356,24 @@ void P2PManager::doDiscoveryPing() {
         return;
     }
 
-    // The loop exits immediately unless discovery is flagged active.
-    mState->setDoingDiscoveryConnection(true);
-
-    int attempts = 0;
-    while (mState->isDoingDiscoveryConnection() && isRunning()) {
-        if (attempts >= 3) {
-            P2PFunctions::log_debug(std::string("Discovery node connection paused.. tried ") + std::to_string(attempts) + " times..");
-            mState->setDoingDiscoveryConnection(false);
-            return;
+    // Submit the seeds to the PeersChecker, which verifies each (pings it) and
+    // establishes links. Peers do not reliably return a learnable "peers-list",
+    // so the checker - not a ping-and-learn loop - is the mechanism that actually
+    // connects us to the network.
+    if (mPeersChecker) {
+        std::size_t added = 0;
+        for (const auto& s : seeds) {
+            if (added >= 32) break;
+            auto m = std::make_shared<org::minima::utils::messages::Message>(
+                P2PPeersChecker::PEERS_CHECKPEERS);
+            m->addObject("address", InetSocketAddress(s.host, s.port)).addBoolean("force", true);
+            mPeersChecker->PostMessage(m);
+            ++added;
         }
-
-        // Pick a random discovery source
-        std::uniform_int_distribution<std::size_t> dist(0, seeds.size() - 1);
-        const auto& address = seeds[dist(mRng)];
-
-        auto greet = NIOManager::sendPingMessage(address.host, address.port, true);
-        if (greet) {
-            JSONObject& extra = greet->getExtraData();
-            if (extra.containsKey("peers-list")) {
-                try {
-                    const std::any& v = extra.get("peers-list");
-                    const JSONArray& peersArrayList = std::any_cast<const JSONArray&>(v);
-                    auto peers = InetSocketAddressIO::addressesJSONArrayToList(peersArrayList);
-                    std::shuffle(peers.begin(), peers.end(), mRng);
-
-                    // Insert range into known set
-                    mState->getKnownPeers().insert(peers.begin(), peers.end());
-
-                    // Add discovered peers to the verified list so they are used immediately
-                    if (mPeersChecker) {
-                        mPeersChecker->getVerifiedPeers().insert(peers.begin(), peers.end());
-                    }
-
-                    P2PFunctions::log_info("[+] Discovery Completed - learned " + std::to_string(peers.size()) + " peers");
-                    mState->setDoingDiscoveryConnection(false);
-                } catch (const std::bad_any_cast&) {
-                    // Ignore malformed extra data
-                }
-            }
-        } else {
-            try {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-            } catch (...) {
-                P2PFunctions::log_debug("Wait interrupted");
-            }
+        if (added > 0) {
+            P2PFunctions::log_info("[+] Discovery: submitted " + std::to_string(added)
+                                   + " peers to the PeersChecker");
         }
-
-        attempts++;
     }
 }
 
