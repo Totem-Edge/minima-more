@@ -99,6 +99,21 @@ void JSONValue::writeJSONString(const std::any& value, JSONWriter& out) {
         return;
     }
 
+    // C-string: put(key, "literal") decays to const char* and lands in std::any
+    // as such. Must be quoted/escaped like a std::string, otherwise it falls
+    // through to anyToStringFallback and is emitted raw -> invalid JSON
+    // (e.g. "type":simple).
+    if (const auto cs = std::any_cast<const char*>(&value)) {
+        if (*cs == nullptr) out.write("null");
+        else writeQuotedEscaped(std::string(*cs), out);
+        return;
+    }
+    if (const auto cs = std::any_cast<char*>(&value)) {
+        if (*cs == nullptr) out.write("null");
+        else writeQuotedEscaped(std::string(*cs), out);
+        return;
+    }
+
     // String
     if (const auto s = std::any_cast<std::string>(&value)) {
         writeQuotedEscaped(*s, out);
