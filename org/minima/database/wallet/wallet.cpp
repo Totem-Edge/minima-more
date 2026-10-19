@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <sstream>
+#include <openssl/rand.h>
 #include <random>
 #include <algorithm>
 #include <filesystem>
@@ -525,12 +526,14 @@ std::unique_ptr<ScriptRow> Wallet::getDefaultAddress() {
     int numkeys = static_cast<int>(allkeys.size());
     if (numkeys == 0) return nullptr;
 
-    // Use time-based seed like Java's new Random()
-    // This ensures a different random number each time the method is called
-    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-    std::mt19937 gen(static_cast<unsigned int>(seed));
-    std::uniform_int_distribution<int> dist(0, numkeys - 1);
-    int idx = dist(gen);
+    // Cryptographically secure selection of a default address index (was mt19937).
+    unsigned char rbuf[4];
+    if (RAND_bytes(rbuf, 4) != 1) {
+        throw std::runtime_error("RAND_bytes failed (wallet address selection)");
+    }
+    std::size_t rv = (std::size_t(rbuf[0]) << 24) | (std::size_t(rbuf[1]) << 16) |
+                     (std::size_t(rbuf[2]) << 8) | std::size_t(rbuf[3]);
+    int idx = static_cast<int>(rv % static_cast<std::size_t>(numkeys));
 
     // Return a copy
     const ScriptRow& s = *allkeys[idx];

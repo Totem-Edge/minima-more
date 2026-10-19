@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <sstream>
+#include <openssl/rand.h>
 #include <algorithm>
 #include <random>
 #include <limits>
@@ -360,12 +361,9 @@ MiniData MiniData::getRandomData(int len) {
     }
     std::vector<std::uint8_t> data(static_cast<size_t>(len));
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<unsigned int> dis(0, 255);
-
-    for (int i = 0; i < len; ++i) {
-        data[static_cast<size_t>(i)] = static_cast<std::uint8_t>(dis(gen));
+    // Cryptographically secure randomness (was mt19937): use the OS CSPRNG.
+    if (len > 0 && RAND_bytes(data.data(), len) != 1) {
+        throw std::runtime_error("RAND_bytes failed (MiniData::getRandomData)");
     }
     return MiniData(data);
 }

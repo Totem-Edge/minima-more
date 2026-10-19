@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include <openssl/evp.h>
+#include <openssl/rand.h>
 
 using org::minima::objects::base::MiniData;
 using org::minima::objects::base::MiniString;
@@ -2144,14 +2145,18 @@ std::vector<std::string> BIP39::getNewWordList() {
     const auto& list = WORD_LIST();
     const std::size_t listlen = list.size();
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<std::size_t> dist(0, listlen - 1);
-
     std::vector<std::string> words;
     words.reserve(24);
     for (int i = 0; i < 24; ++i) {
-        std::size_t idx = dist(gen);
+        // Cryptographically secure word selection (was mt19937). Each word is
+        // drawn from the OS CSPRNG, so the mnemonic has full 256-bit entropy.
+        unsigned char rbuf[4];
+        if (RAND_bytes(rbuf, 4) != 1) {
+            throw std::runtime_error("RAND_bytes failed (BIP39 mnemonic entropy)");
+        }
+        std::size_t rv = (std::size_t(rbuf[0]) << 24) | (std::size_t(rbuf[1]) << 16) |
+                         (std::size_t(rbuf[2]) << 8) | std::size_t(rbuf[3]);
+        std::size_t idx = rv % listlen;  // BIP39 list is 2048 words; 2^32 % 2048 == 0 -> no bias
         std::string w = list[idx];
         w = trim_all(w);
         words.push_back(to_upper_ascii(w));
