@@ -450,10 +450,14 @@ void CMDHandler::run() {
 
             // Enforce RPC user mode: a "read" credential may only run read-only commands.
             if (authmode == "read") {
+                // Deliberately conservative. Do NOT add anything that can expose
+                // secrets (vault -> seed phrase), mutate the wallet (getaddress /
+                // keys), execute code (runscript), or has mutating actions
+                // (megammr). Audit at action/parameter level, not just the name.
                 static const char* kReadOnly[] = {
-                    "status","block","balance","coins","tokens","keys","history","peers",
-                    "network","getaddress","getinfo","vault","megammr","runscript","help",
-                    "checkaddress","tokenid","coinexists","mempool","txpow"};
+                    "status","block","balance","coins","tokens","history","peers",
+                    "network","getinfo","help","checkaddress","tokenid","coinexists",
+                    "mempool","txpow"};
                 bool allowed = true;
                 std::stringstream ss(fileRequested);
                 std::string one;
