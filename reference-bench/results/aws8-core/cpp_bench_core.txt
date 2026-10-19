@@ -1,0 +1,6 @@
+wots_pubkey_ms	2.253653	ms/op
+wots_sign_ms	1.096914	ms/op
+wots_verify_ms	1.189860	ms/op
+sha3_224_hashes_per_sec	966765.492980	h/s
+mmr_add_entries_ms	94.152601	ms
+mmr_add_entries_per_sec	212421.109853	entries/s
