@@ -432,6 +432,19 @@ target_link_libraries(minima PRIVATE ZLIB::ZLIB)
 find_package(CURL REQUIRED)
 target_link_libraries(minima PRIVATE CURL::libcurl)
 
+# Optional allocator: jemalloc measurably reduces steady-state RSS (freed
+# key-generation memory is returned to the OS instead of retained by glibc).
+option(MINIMA_USE_JEMALLOC "Link jemalloc when available" OFF)
+if(MINIMA_USE_JEMALLOC)
+    find_library(JEMALLOC_LIBRARY jemalloc)
+    if(JEMALLOC_LIBRARY)
+        target_link_libraries(minima PRIVATE ${JEMALLOC_LIBRARY})
+        message(STATUS "minima: using jemalloc (${JEMALLOC_LIBRARY})")
+    else()
+        message(WARNING "MINIMA_USE_JEMALLOC requested but jemalloc not found")
+    endif()
+endif()
+
 # libzip (for zip_extractor.cpp) — optional, not available on all platforms
 find_package(libzip QUIET)
 set(HAS_LIBZIP FALSE)

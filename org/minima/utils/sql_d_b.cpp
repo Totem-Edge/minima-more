@@ -8,6 +8,9 @@
 #include <iomanip>
 #include <iostream>
 #include <utility>
+#include <cstdlib>
+#include <cctype>
+#include <string>
 
 #include "org/minima/objects/base/mini_data.hpp"
 #include "org/minima/objects/base/mini_string.hpp"
@@ -68,22 +71,86 @@ void SqlDB::applySQLiteTuning() {
     applySQLiteTuning(mSQLConnection);
 }
 
+namespace {
+std::string lowerCopy(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+// Path of the "main" database (empty for :memory:).
+std::string mainDatabasePath(sqlite3* db) {
+    std::string path;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, "PRAGMA database_list;", -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char* name = sqlite3_column_text(stmt, 1);
+            const unsigned char* file = sqlite3_column_text(stmt, 2);
+            if (name && file && std::string(reinterpret_cast<const char*>(name)) == "main") {
+                path = reinterpret_cast<const char*>(file);
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+    return path;
+}
+
+struct DbTuning {
+    int cacheKib;
+    int mmapMb;
+};
+
+// Role-based cache budget. Six connections at the old 16 MiB each cost ~96 MiB
+// of anonymous RSS on a synced mainnet node; small DBs do not need that. Roles
+// are identified from the connection's own path, so every caller benefits
+// without changing signatures. Override with MINIMA_SQLITE_CACHE_KIB /
+// MINIMA_SQLITE_MMAP_MB.
+DbTuning tuningForDb(sqlite3* db) {
+    DbTuning t{8192, 64};
+    const std::string p = lowerCopy(mainDatabasePath(db));
+    if (p.find("p2p") != std::string::npos || p.find("userprefs") != std::string::npos) {
+        t = {4096, 32};
+    } else if (p.find("chaintree") != std::string::npos ||
+               p.find("cascade") != std::string::npos ||
+               p.find("txpow") != std::string::npos) {
+        t = {8192, 64};
+    } else if (p.find("archive") != std::string::npos) {
+        t = {16384, 128};
+    } else if (p.find("wallet") != std::string::npos) {
+        t = {8192, 64};
+    }
+    if (const char* e = std::getenv("MINIMA_SQLITE_CACHE_KIB")) {
+        int v = std::atoi(e);
+        if (v > 0) t.cacheKib = v;
+    }
+    if (const char* e = std::getenv("MINIMA_SQLITE_MMAP_MB")) {
+        int v = std::atoi(e);
+        if (v >= 0) t.mmapMb = v;
+    }
+    return t;
+}
+} // namespace
+
 void SqlDB::applySQLiteTuning(sqlite3* db) {
     if (!db) return;
 
+    const DbTuning t = tuningForDb(db);
+    const std::string cacheSql = "PRAGMA cache_size=-" + std::to_string(t.cacheKib) + ";";
+    const std::string mmapSql = "PRAGMA mmap_size=" +
+        std::to_string(static_cast<long long>(t.mmapMb) * 1024 * 1024) + ";";
+    const std::string cacheName = "cache_size=-" + std::to_string(t.cacheKib);
+    const std::string mmapName = "mmap_size=" + std::to_string(t.mmapMb) + "MB";
+
     // One PRAGMA statement per call avoids error-short-circuit and gives clearer logging.
-    struct PragmaItem { const char* sql; const char* name; bool required; };
-    static const PragmaItem pragmas[] = {
+    struct PragmaItem { std::string sql; std::string name; bool required; };
+    const PragmaItem pragmas[] = {
         // WAL mode allows readers and writers to coexist; much faster under concurrent load.
         { "PRAGMA journal_mode=WAL;", "journal_mode=WAL", true },
         // NORMAL is safe with WAL and avoids fsync on every transaction commit.
         { "PRAGMA synchronous=NORMAL;", "synchronous=NORMAL", false },
-        // 16 MB page cache. SQLite default is only 2 MB.
-        { "PRAGMA cache_size=-16384;", "cache_size=-16384", false },
+        { cacheSql, cacheName, false },
         // 30 s busy timeout so concurrent writers retry instead of returning SQLITE_BUSY.
         { "PRAGMA busy_timeout=30000;", "busy_timeout=30000", false },
-        // Memory-mapped I/O for read-heavy workloads (WAL compatible).
-        { "PRAGMA mmap_size=268435456;", "mmap_size=256MB", false },
+        { mmapSql, mmapName, false },
         // Store temp files in memory where possible.
         { "PRAGMA temp_store=MEMORY;", "temp_store=MEMORY", false },
         // 4 KiB pages match most filesystem block sizes.
@@ -92,9 +159,9 @@ void SqlDB::applySQLiteTuning(sqlite3* db) {
 
     for (const auto& item : pragmas) {
         char* errMsg = nullptr;
-        int rc = sqlite3_exec(db, item.sql, nullptr, nullptr, &errMsg);
+        int rc = sqlite3_exec(db, item.sql.c_str(), nullptr, nullptr, &errMsg);
         if (rc != SQLITE_OK) {
-            std::string msg = "SQLite tuning pragma " + std::string(item.name) + " failed: " +
+            std::string msg = "SQLite tuning pragma " + item.name + " failed: " +
                               (errMsg ? errMsg : sqlite3_errmsg(db));
             if (errMsg) sqlite3_free(errMsg);
             if (item.required) {

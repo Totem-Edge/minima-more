@@ -285,6 +285,11 @@ root on every call. Cached (invalidated on every mutation):
 **Result:** batched signing is **3.1× faster than scalar**, and **4.9× the Java
 node** (1.07 ms vs 5.24 ms). WOTS verify is **4.0× faster** (1.16 vs 4.62 ms).
 
+**Bounded startup key precompute.** Generating the full 64-key pool dominated idle
+CPU during startup (87 % of samples in `mashHash32xN`). The startup burst is now
+device-sized — **16** keys on ≤2 GB, **32** on ≤8 GB, **64** on larger hosts —
+with the rest created on demand; `MINIMA_INIT_KEYS` overrides it.
+
 ### 6. TxPoW mining
 Bounded **parallel nonce mining** across cores, so block/TxPoW mining saturates the
 CPU instead of running on a single thread.
@@ -312,6 +317,19 @@ flowchart LR
 
 **Result:** **3.5×** more insert throughput with batching (2,183 → 7,681 rows/s on
 this host). Correctness covered by `test_sql_batch`.
+
+**Role-based cache budget.** The node opens six SQLite databases, so a fixed
+16 MiB cache on every connection cost ~96 MiB of anonymous RSS. The budget is now
+per role — 4 MiB for `p2p`/`userprefs`, 8 MiB for the hot state (`chaintree`,
+`cascade`, `txpow`), 16 MiB for `archive` — with `mmap_size` reduced accordingly.
+On a synced mainnet node this took **anonymous RSS from 224 MB to 160 MB (−29 %)**
+at the same block height. Override with `MINIMA_SQLITE_CACHE_KIB` /
+`MINIMA_SQLITE_MMAP_MB`.
+
+**Allocator.** Preloading/linking **jemalloc** cut steady-state RSS a further
+**~35 MB** in our A/B (219 → 180 MB after key precompute), because glibc retains
+the freed key-generation working set. Enable the optional link with
+`-DMINIMA_USE_JEMALLOC=ON` (or `LD_PRELOAD=libjemalloc.so.2`).
 
 ![SQLite write throughput: batched vs per-row](assets/sqlite_write.svg)
 

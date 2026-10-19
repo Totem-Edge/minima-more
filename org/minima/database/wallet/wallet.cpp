@@ -8,6 +8,17 @@
 #include <filesystem>
 #include <stdio.h>
 #include <cstddef>
+#include <cstdlib>
+#include <string>
+
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 // SQLite C API
 #include <sqlite3.h>
@@ -32,6 +43,39 @@ using org::minima::utils::MinimaLogger;
 
 // Static init
 int Wallet::NUMBER_GETADDRESS_KEYS = 64;
+int Wallet::NUMBER_INIT_KEYS = 0;
+
+namespace {
+long long totalRamBytes() {
+#if defined(__APPLE__)
+    long long mem = 0;
+    std::size_t len = sizeof(mem);
+    if (sysctlbyname("hw.memsize", &mem, &len, nullptr, 0) == 0) return mem;
+#elif defined(_WIN32)
+    MEMORYSTATUSEX ms{};
+    ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms)) return static_cast<long long>(ms.ullTotalPhys);
+#else
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long psize = sysconf(_SC_PAGE_SIZE);
+    if (pages > 0 && psize > 0) return static_cast<long long>(pages) * psize;
+#endif
+    return 0;
+}
+
+// Startup key-precompute target. Generating 64 WOTS keys dominates idle CPU
+// during startup on small devices; the tail is still created on demand.
+int autoInitKeys() {
+    if (const char* e = std::getenv("MINIMA_INIT_KEYS")) {
+        int v = std::atoi(e);
+        if (v > 0) return v;
+    }
+    const long long ram = totalRamBytes();
+    if (ram > 0 && ram <= 2LL * 1024 * 1024 * 1024) return 16;  // Pi-class
+    if (ram > 0 && ram <= 8LL * 1024 * 1024 * 1024) return 32;  // 4-core / 8 GB
+    return 64;
+}
+} // namespace
 
 static void throwOnSQLiteError(int rc, sqlite3* db, const char* ctx) {
     if (rc != SQLITE_OK && rc != SQLITE_ROW && rc != SQLITE_DONE) {
@@ -490,9 +534,21 @@ bool Wallet::initDefaultKeys(int zMaxNum, bool zLog) {
     auto allscripts = getAllDefaultAddresses();
     bool allcreated = false;
 
+    // Cap the startup burst on smaller devices; an explicit full request
+    // (zMaxNum >= capacity, e.g. vault restore) still creates every key.
+    const int capacity = NUMBER_GETADDRESS_KEYS;
+    int target;
+    if (zMaxNum >= capacity) {
+        target = capacity;
+    } else {
+        target = (NUMBER_INIT_KEYS > 0) ? NUMBER_INIT_KEYS : autoInitKeys();
+        if (target <= 0) target = capacity;
+        if (target > capacity) target = capacity;
+    }
+
     int numkeys = static_cast<int>(allscripts.size());
-    if (numkeys < NUMBER_GETADDRESS_KEYS) {
-        int diff = NUMBER_GETADDRESS_KEYS - numkeys;
+    if (numkeys < target) {
+        int diff = target - numkeys;
         if (diff > zMaxNum) diff = zMaxNum;
 
         for (int i = 0; i < diff; ++i) {
@@ -508,14 +564,14 @@ bool Wallet::initDefaultKeys(int zMaxNum, bool zLog) {
         {
             std::ostringstream os;
             os << diff << " more initial keys created.. Total now : " << (numkeys + diff)
-               << " / " << NUMBER_GETADDRESS_KEYS;
+               << " / " << target;
             org::minima::utils::MinimaLogger::log(os.str());
         }
     } else {
         allcreated = true;
     }
 
-    if (static_cast<int>(getAllDefaultAddresses().size()) >= NUMBER_GETADDRESS_KEYS) {
+    if (static_cast<int>(getAllDefaultAddresses().size()) >= target) {
         return true;
     }
     return allcreated;

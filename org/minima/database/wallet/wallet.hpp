@@ -122,6 +122,10 @@ class Wallet : public org::minima::utils::SqlDB {
 public:
     // Static parameter (adjusted for test params on construction)
     static int NUMBER_GETADDRESS_KEYS;
+    // How many default keys to precompute at startup. 0 = auto (MINIMA_INIT_KEYS
+    // env override, otherwise a RAM tier: 16 / 32 / 64). The remaining capacity
+    // is still created on demand; this only bounds the startup burst.
+    static int NUMBER_INIT_KEYS;
 
     Wallet();
     virtual ~Wallet();
