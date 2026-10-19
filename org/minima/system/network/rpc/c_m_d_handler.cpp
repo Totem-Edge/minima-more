@@ -455,9 +455,9 @@ void CMDHandler::run() {
                 // keys), execute code (runscript), or has mutating actions
                 // (megammr). Audit at action/parameter level, not just the name.
                 static const char* kReadOnly[] = {
-                    "status","block","balance","coins","tokens","history","peers",
+                    "status","block","balance","coins","tokens","history",
                     "network","getinfo","help","checkaddress","tokenid","coinexists",
-                    "mempool","txpow"};
+                    "mempool","txpow"};  // NOTE: 'peers' excluded - its url action fetches arbitrary URLs (SSRF).
                 bool allowed = true;
                 std::stringstream ss(fileRequested);
                 std::string one;
