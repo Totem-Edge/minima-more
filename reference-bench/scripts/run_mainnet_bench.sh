@@ -30,6 +30,11 @@ run_one() {
     t0=$(now)
     pid=$(start_node "$name" "$dir" "$OUT/${name}_mainnet.log" "$port" -p2pnodes "$PEERS")
     wait_ready "$OUT/${name}_mainnet.log" || true
+    # -daemon may fork (java), leaving $! as the exited parent; resolve the real
+    # node pid so RSS/CPU/threads track the live process.
+    if [ "$name" = "java" ]; then _np=$(pgrep -f "org.minima.Minima" 2>/dev/null | head -1)
+    else _np=$(pgrep -x minima 2>/dev/null | head -1); fi
+    [ -n "${_np:-}" ] && pid=$_np
 
     # p2p_poll <rpcport> -> NP = connections, NK = known peers
     p2p_poll() {
