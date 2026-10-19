@@ -146,6 +146,44 @@ not bulk throughput), and figures are single runs on a shared host — indicativ
 
 ---
 
+## Storage engines, chosen by role
+
+Storage isn't one workload — it's several, with very different access patterns
+([RFC-0001](RFC-0001-STORAGE-DB-ROLES-AND-ENGINE-SELECTION.md)). So the engine is
+chosen **per role**, and measured rather than assumed
+([RFC-0003](RFC-0003-EMBEDDED-ENGINE-BENCHMARK-HARNESS.md)). All candidates are
+**embedded** — in-process, no network listener, no DB auth to misconfigure.
+
+| Role | Data | Access pattern | Engine direction |
+|---|---|---|---|
+| **R0 core state** | wallet, p2p, chaintree, txpow | tiny rows, transactional | **SQLite** (embedded) |
+| **R1 archive** | every TxBlock | bulk append, point get by height/id, range scan | **LMDB** (point/range) |
+| **R2 coin store** | UTXO set + MMR proofs | point get by coinID, prefix scan | **LMDB** (zero-copy) |
+| **R3 analytics** | daily stats, balances, token supply | aggregations, scans | **DuckDB** (columnar) |
+| **R4 agentic** | embeddings, graph, full-text | KNN, BM25, graph hops | LanceDB / FTS (RFC pending) |
+
+Benchmarked on one synthetic mainnet-shaped dataset with identical record bytes for
+every engine (M1, 200k blocks / 120k coins, 3k lookups — single run):
+
+| Metric | SQLite | LMDB | RocksDB | DuckDB |
+|---|---|---|---|---|
+| archive bulk load (rows/s) | 163,971 | **467,569** | 377,822 | 136,040 |
+| archive get-by-num p50 (µs) | 2.71 | **1.92** | 3.79 | 312.62 |
+| archive analytics (ms) | 23 | 14 | 35 | **2** |
+| coin get p50 (µs) | 3.29 | **1.75** | 2.08 | 578.75 |
+| coin on-disk (MB) | 44 | 56 | **38** | 42 |
+
+**What it says:** the roles pull in different directions. **LMDB** leads the hot
+point lookups (R1/R2, zero-copy mmap), **DuckDB** wins R3 analytics by ~7–17× but
+is ~100–300× slower per point get, **SQLite** is the balanced default (and remains
+for R0), and **RocksDB** is write-optimised (append-heavy). The plan is a thin
+storage interface per role, with these embedded engines selectable by node mode.
+
+Reproduce: `reference-bench/engines/run_engine_bench.sh` — methodology and fairness
+statement in [`reference-bench/engines/`](reference-bench/engines/README.md).
+
+---
+
 ## Where the performance comes from
 
 Every optimisation below is **consensus-safe and byte-identical** — it changes
@@ -313,6 +351,7 @@ reference-bench/scripts/run_disk_io.sh         # disk writes per hour/day (incl.
 reference-bench/scripts/run_mainnet_sync.sh    # fresh sync of the LIVE mainnet chain
 reference-bench/scripts/run_mainnet_bench.sh   # live mainnet: C++ vs Java + P2P peers
 reference-bench/scripts/run_mainnet_commands.sh # read-only command smoke on mainnet
+reference-bench/engines/run_engine_bench.sh    # embedded storage engines by role (RFC-0003)
 ```
 
 ![Microbenchmarks: C++ node vs Java node](assets/microbench.svg)
