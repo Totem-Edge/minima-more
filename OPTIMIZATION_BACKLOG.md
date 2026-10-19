@@ -34,6 +34,10 @@ live in `reference-bench/` — see `reference-bench/README.md` (methodology + th
 | DB | RamDB mempool coin index (`mCoinToTxPoW`) — O(1) `checkForCoinID` | `3d2593a` |
 | DB | Cascade thread-safety (`shared_mutex` + `shared_ptr` + `getParent`) | `d3ebbea`,`7d24632` |
 | Cleanup | Maxima/MDS surface removed (NIO, params, userprefs, command list) | — |
+| Network | P2P `SINGLE_PING` framing fix (missing NIO 4-byte length) → discovery works | `fc0e346` |
+| Network | Multi-peer discovery: seeds from compiled list + `-p2pnodes` + baked-in peer-list URLs → PeersChecker (`CHECKPEERS` force) | `d242792` |
+| Network | tip-less "no crossover" guard (don't blacklist a valid mainnet peer) | `92a4e73` |
+| Network | peer persistence `p2p2.db` (saves once `knownPeers` populates) | `d242792` |
 
 N/A (no MASH/MSHS2 tree in this fork): raw forest, PK_ROOT dedup, parallel
 work-stealing forest, x4 forest batching, depth-15 re-base.
@@ -156,6 +160,55 @@ From the original review §2, not yet ported:
   **MegaMMR offload/prune modes** (`-megammr`, `-megaprune*`) for RAM-constrained
   devices, and the retained-window parameter (`MINIMA_CASCADE_START_DEPTH=2048`
   vs proof history 256) — a network/consensus parameter, not a local change.
+
+## DONE — Network / P2P peer discovery  (correctness + resource; benchmark later)
+
+**Symptom (before):** `connected:1`, `numKnownPeers:0`, log looped "No default Peers
+found". The Java node fans out to many peers; this one stayed on a single bootstrap
+connection.
+
+**Root cause:**
+1. `sendPingMessage()` sent the raw `MiniData` payload over a raw socket **without the
+   NIO 4-byte big-endian length prefix** (the normal write path prepends
+   `putInt32BE(len)`). Peers read a bogus length and closed → all discovery and peer
+   verification failed silently (`recv length failed`).
+2. `doDiscoveryPing()` was a no-op with an empty compiled `DEFAULT_NODE_LIST`.
+3. No seed source; v1.0.x peer greetings carry no peer list.
+4. The PeersChecker — the path that actually connects — was never fed.
+
+**Applied:**
+- `SINGLE_PING` frame now carries the length prefix.
+- Discovery seeds: compiled list → configured `-p2pnodes` (minus already-linked) →
+  **baked-in peer-list URLs** (`eurobuddha.com/minimapeers.txt` +
+  `spartacusrex.com/minimapeers.txt`), merged; submitted to the PeersChecker as
+  `PEERS_CHECKPEERS` (force). `ADDPEERS` is gated on an existing link, so CHECKPEERS
+  is used for cold start.
+- Consume a peer's advertised peer list from its NIO greeting (when present).
+- tip-less "no crossover" guard (don't blacklist a valid mainnet peer).
+
+**Verified (OCI A1):** no `-p2pnodes` → **~10 connections / 12 known peers** (was
+1 / 0); 3 configured peers → 3 / 3; `p2p2.db` persisted (~5-min timer / clean
+shutdown). Commits `fc0e346`, `d242792`, `92a4e73`.
+
+**OPEN (P2P refinements):**
+- **(a) Link maintenance** — target link count, reconnect backoff, **liveness table**
+  (skip recently-failed hosts; the URL lists contain many dead entries), prefer
+  recently-seen peers. Moderate, low risk.
+- **(b) Async/parallel verification** — `checkUnverifiedPeer` pings inline (10 s
+  timeout per dead peer), so cold-start verification is slow. Parallelize. Moderate,
+  low risk.
+- **(c) Full P2P swap-links gossip** — learn peers from *connected* peers over the
+  existing link (proper Minima mechanism / true Java parity). Larger effort.
+
+**Benchmark to add (`reference-bench`):** peers reached, time-to-first-connection,
+time-to-N-peers, discovery success rate, dead-peer skip rate, bytes/peer — vs the
+Java node on the same host. (Only hand-measured so far: ~10 peers.)
+
+**Interop/risk:** local connection management only; reuses existing Minima NIO/P2P
+message types; no consensus / block-validation / serialization change → existing
+mainnet nodes unaffected.
+
+---
 
 ## Suggested order (biggest device wins first)
 
