@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04,     arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libssl-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libboost-dev
+
+      - name: Configure (Release, static OpenSSL/SQLite preferred)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --target minima -j"$(nproc)"
+
+      - name: Package
+        run: |
+          VER="${{ github.ref_name }}"
+          [ -z "$VER" ] && VER="${{ github.event.inputs.tag }}"
+          BIN="minima-${VER}-linux-${{ matrix.arch }}"
+          mkdir -p dist
+          cp build/minima "dist/$BIN"
+          tar -C dist -czf "dist/${BIN}.tar.gz" "$BIN"
+          ( cd dist && sha256sum "${BIN}.tar.gz" > "${BIN}.tar.gz.sha256" )
+          ls -l dist
+
+      - name: Upload artifacts (for the release job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.arch }}
+          path: dist/*
+
+  release:
+    name: publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

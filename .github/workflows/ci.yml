@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build & test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04,     arch: x86_64,  optional: false }
+          - { runner: ubuntu-24.04-arm, arch: aarch64, optional: true }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config ccache \
+            libssl-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libboost-dev
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.arch }}-
+
+      - name: Configure (Release)
+        env:
+          CCACHE_DIR: ~/.ccache
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build node
+        run: cmake --build build --target minima -j"$(nproc)"
+
+      - name: Build tests
+        run: |
+          cmake --build build --target \
+            test_consensus_vectors test_mmr test_winternitz \
+            test_mempool_index test_sql_batch -j"$(nproc)"
+
+      - name: Run tests
+        run: |
+          ./build/test_consensus_vectors
+          ./build/test_mmr
+          ./build/test_winternitz
+          ./build/test_mempool_index
+          ./build/test_sql_batch
+
+      - name: Smoke test (genesis)
+        run: |
+          timeout 60 ./build/minima -data /tmp/ci-node -solo -daemon -clean \
+            -port 39001 -rpcenable -rpcpassword ci -allowallip || true
+          sleep 3
+          curl -s -m 8 -u minima:ci http://127.0.0.1:39005/status | head -c 200
+          pkill -x minima || true
+
+      - name: Upload node binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: minima-${{ matrix.arch }}
+          path: build/minima
+          if-no-files-found: error
