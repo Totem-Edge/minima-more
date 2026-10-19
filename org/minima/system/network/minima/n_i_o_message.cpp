@@ -45,6 +45,7 @@
 #include "org/minima/system/network/p2p/p2_p_manager.hpp"
 #include "org/minima/system/network/network_manager.hpp"
 #include "org/minima/system/network/p2p/p2_p_manager.hpp"
+#include "org/minima/system/network/p2p/p2_p_peers_checker.hpp"
 #include "org/minima/system/network/p2p2/p2_p2_d_b.hpp"
 #include "org/minima/system/network/p2p/messages/inet_socket_address_i_o.hpp"
 
@@ -285,6 +286,38 @@ void NIOMessage::run() {
             auto greet_ptr = Greeting::ReadFromStream(dis);
             if (!greet_ptr) return;
             Greeting& greet = *greet_ptr;
+
+            // Learn the peer's advertised peer list so the node can fan out beyond
+            // its single bootstrap connection. Java greetings carry a "peers" array
+            // (we also accept "peers-list" from ping responses). Feed them to the
+            // P2P PeersChecker, which verifies and connects.
+            {
+                static const char* s_peerKeys[] = { "peers", "peers-list" };
+                for (const char* pk : s_peerKeys) {
+                    if (!greet.getExtraData().containsKey(pk)) continue;
+                    try {
+                        auto* p2pm = static_cast<org::minima::system::network::p2p::P2PManager*>(
+                            &Main::getInstance()->getNetworkManager().getP2PManager());
+                        auto* pc = (p2pm != nullptr) ? p2pm->getPeersChecker() : nullptr;
+                        if (pc == nullptr) break;
+                        const std::any& pv = greet.getExtraData().get(pk);
+                        const org::minima::utils::json::JSONArray& arr =
+                            std::any_cast<const org::minima::utils::json::JSONArray&>(pv);
+                        auto peers = org::minima::system::network::p2p::messages::InetSocketAddressIO
+                                         ::addressesJSONArrayToList(arr);
+                        for (const auto& a : peers) {
+                            auto m = std::make_shared<org::minima::utils::messages::Message>(
+                                org::minima::system::network::p2p::P2PPeersChecker::PEERS_ADDPEERS);
+                            m->addObject("address", a);
+                            pc->PostMessage(m);
+                        }
+                        MinimaLogger::log("[+] Learned " + std::to_string(peers.size())
+                                          + " peers from greeting " + nioclient->getFullAddress());
+                    } catch (...) {
+                        // best effort - a malformed peer list must not break the handshake
+                    }
+                }
+            }
             MinimaLogger::log("[+] Peer greeting: version=" + greet.getVersion().toString()
                 + " top=" + greet.getTopBlock().toString()
                 + " chain=" + std::to_string(greet.getChain().size())

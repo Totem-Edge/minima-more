@@ -1,6 +1,7 @@
 #include "org/minima/system/network/p2p/p2_p_manager.hpp"
 
 #include <algorithm>
+#include <set>
 #include <thread>
 #include <chrono>
 
@@ -24,7 +25,9 @@
 #include "org/minima/system/network/p2p/messages/p2_p_do_swap.hpp"
 #include "org/minima/system/network/p2p/messages/p2_p_walk_links.hpp"
 
+#include "org/minima/system/main.hpp"
 #include "org/minima/system/network/minima/n_i_o_manager.hpp"
+#include "org/minima/system/network/minima/n_i_o_server.hpp"
 #include "org/minima/system/network/minima/n_i_o_client.hpp"
 #include "org/minima/system/network/minima/n_i_o_client_info.hpp"
 
@@ -237,28 +240,76 @@ std::vector<Message> P2PManager::init(P2PState& state) {
 }
 
 void P2PManager::doDiscoveryPing() {
-    // Check how many default nodes exist
-    if (P2PParams::DEFAULT_NODE_LIST.empty()) {
+    // Discovery sources: the compiled-in seed list, otherwise the peers we are
+    // already connected to. Using connected peers lets a node started with only
+    // -p2pnodes learn the wider network instead of staying on one connection
+    // (and it feeds the peer's advertised "peers-list" to the PeersChecker).
+    auto seeds = P2PParams::DEFAULT_NODE_LIST;
+
+    if (seeds.empty() && !org::minima::system::params::GeneralParams::P2P_ADDNODES.empty()) {
+        // Fall back to the configured -p2pnodes, skipping any peer we already hold
+        // a connection to (a discovery ping to such a peer is refused - it only
+        // accepts one link). Pinging our OTHER configured peers lets the node learn
+        // the wider network and fan out beyond the single bootstrap connection.
+        std::set<std::string> connected;
+        try {
+            auto* main = org::minima::system::Main::getInstance();
+            if (main != nullptr) {
+                for (const auto& c : main->getNIOManager().getNIOServer()->getAllNIOClients()) {
+                    if (c) connected.insert(c->getHost() + ":" + std::to_string(c->getPort()));
+                }
+            }
+        } catch (...) {
+            // best effort
+        }
+
+        const std::string& addnodes = org::minima::system::params::GeneralParams::P2P_ADDNODES;
+        std::size_t start = 0;
+        while (start < addnodes.size()) {
+            std::size_t comma = addnodes.find(',', start);
+            std::string node = (comma == std::string::npos) ? addnodes.substr(start)
+                                                            : addnodes.substr(start, comma - start);
+            start = (comma == std::string::npos) ? addnodes.size() : comma + 1;
+            // trim
+            std::size_t b = node.find_first_not_of(" \t\r\n");
+            if (b == std::string::npos) continue;
+            std::size_t e = node.find_last_not_of(" \t\r\n");
+            node = node.substr(b, e - b + 1);
+            if (node.empty() || connected.count(node)) continue;
+            std::size_t colon = node.rfind(':');
+            if (colon == std::string::npos) continue;
+            try {
+                seeds.emplace_back(node.substr(0, colon), std::stoi(node.substr(colon + 1)));
+            } catch (...) {
+                // skip malformed entry
+            }
+        }
+    }
+
+    if (seeds.empty()) {
         long timenow = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
         if (timenow - mLastNotifyNoPeers > mNotifyNoPeersTimer) {
-            MinimaLogger::log("No default Peers found - please use command 'peers' to add a valid peer..");
+            MinimaLogger::log("No peers to discover from yet - connect to a peer first..");
             mLastNotifyNoPeers = timenow;
         }
         return;
     }
 
+    // The loop exits immediately unless discovery is flagged active.
+    mState->setDoingDiscoveryConnection(true);
+
     int attempts = 0;
     while (mState->isDoingDiscoveryConnection() && isRunning()) {
         if (attempts >= 3) {
-            MinimaLogger::log(std::string("Discovery node connection paused.. tried ") + std::to_string(attempts) + " times..");
+            P2PFunctions::log_debug(std::string("Discovery node connection paused.. tried ") + std::to_string(attempts) + " times..");
             mState->setDoingDiscoveryConnection(false);
             return;
         }
 
-        // Pick random default node
-        std::uniform_int_distribution<std::size_t> dist(0, P2PParams::DEFAULT_NODE_LIST.size() - 1);
-        const auto& address = P2PParams::DEFAULT_NODE_LIST[dist(mRng)];
+        // Pick a random discovery source
+        std::uniform_int_distribution<std::size_t> dist(0, seeds.size() - 1);
+        const auto& address = seeds[dist(mRng)];
 
         auto greet = NIOManager::sendPingMessage(address.host, address.port, true);
         if (greet) {
@@ -278,7 +329,7 @@ void P2PManager::doDiscoveryPing() {
                         mPeersChecker->getVerifiedPeers().insert(peers.begin(), peers.end());
                     }
 
-                    P2PFunctions::log_info("[+] Discovery Completed");
+                    P2PFunctions::log_info("[+] Discovery Completed - learned " + std::to_string(peers.size()) + " peers");
                     mState->setDoingDiscoveryConnection(false);
                 } catch (const std::bad_any_cast&) {
                     // Ignore malformed extra data
