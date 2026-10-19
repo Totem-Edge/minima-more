@@ -27,6 +27,10 @@ public:
     // Log an uncaught exception with explicit notify flag
     static void logUncaught(const std::exception& zThrow, bool zNotify);
 
+    // Route logs to stderr instead of stdout. Needed for `-mcp stdio`, where
+    // stdout must carry only MCP frames.
+    static void setUseStderr(bool on);
+
 private:
     // Helpers
     static std::string currentDateTime();

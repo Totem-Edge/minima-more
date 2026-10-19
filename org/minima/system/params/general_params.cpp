@@ -74,6 +74,8 @@ bool GeneralParams::RPC_AUTHENTICATE = false;
 bool GeneralParams::RPC_SSL = false;
 std::string GeneralParams::RPC_AUTHSTYLE = "basic";
 std::string GeneralParams::RPC_PASSWORD = "";
+bool GeneralParams::MCP_SERVER = false;
+bool GeneralParams::MCP_STDIO = false;
 
 std::string GeneralParams::SEED_PHRASE = "";
 bool GeneralParams::ANYSEED_PHRASE = false;
@@ -149,6 +151,8 @@ void GeneralParams::resetDefaults() {
     RPC_SSL = false;
     RPC_AUTHSTYLE = "basic";
     RPC_PASSWORD = "none";
+    MCP_SERVER = false;
+    MCP_STDIO = false;
     SEED_PHRASE = "";
     ANYSEED_PHRASE = false;
     PEERSCHECKER_lOG = false;

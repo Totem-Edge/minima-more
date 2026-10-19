@@ -58,6 +58,51 @@ std::vector<std::string> Command::getValidParams() const {
     return {};
 }
 
+// Capability manifest metadata (RFC-0011 §5) — defaults.
+std::vector<ParamSpec> Command::getParamSpecs() const {
+    std::vector<ParamSpec> out;
+    for (const auto& p : getValidParams()) {
+        ParamSpec s;
+        s.name = p;
+        s.type = "string";
+        s.required = false;
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+
+CommandAnnotations Command::getAnnotations() const {
+    // Conservative: assume it changes state unless a command says otherwise.
+    // A small allowlist marks the clearly read-only commands so the generated
+    // reference and MCP tools are useful out of the box. Commands may override
+    // this precisely (e.g. capabilities).
+    CommandAnnotations a;
+    const std::string name = getName();
+
+    static const char* kReadOnly[] = {
+        "status", "balance", "block", "coins", "tokens", "history", "network",
+        "getaddress", "help", "checkaddress", "tokenid", "coinexists", "mempool",
+        "txpow", "healthcheck", "systemcheck", "trace", "printtree", "printmmr",
+        "nodecount", "ping", "convert", "maths", "hash", "timemilli",
+        "whitepaper", "capabilities"};
+    for (const char* n : kReadOnly) {
+        if (name == n) {
+            a.readOnly = true;
+            a.destructive = false;
+            a.idempotent = true;
+            break;
+        }
+    }
+
+    // Commands that handle secrets / key material: never echo params.
+    static const char* kSensitive[] = {
+        "vault", "getaddress", "keys", "backup", "restore", "seedrandom"};
+    for (const char* n : kSensitive) {
+        if (name == n) { a.sensitive = true; break; }
+    }
+    return a;
+}
+
 std::string Command::getCompleteCommand() const {
     return mCompleteCommand;
 }

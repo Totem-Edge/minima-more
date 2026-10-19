@@ -36,6 +36,12 @@ public:
     // Permission check
     bool isCommandAllowed(const std::string& zCommand);
 
+    // Capability manifest (RFC-0011 §5). Generated from the command registry;
+    // never hand-maintained. `capabilityManifestMarkdown()` powers the docs
+    // reference (and keeps it from drifting).
+    static std::unique_ptr<org::minima::utils::json::JSONObject> capabilityManifest();
+    static std::string capabilityManifestMarkdown();
+
 private:
     CommandRunner();
 

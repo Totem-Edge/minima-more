@@ -15,6 +15,32 @@ namespace minima {
 namespace system {
 namespace commands {
 
+// ---------------------------------------------------------------------------
+// Capability manifest metadata (RFC-0011 §5).
+//
+// A command MAY declare typed parameter metadata and capability annotations.
+// When it does not, the defaults derive from getValidParams() (all optional
+// strings) and a conservative annotation set, so the long tail is described
+// immediately and improved incrementally.
+// ---------------------------------------------------------------------------
+
+struct ParamSpec {
+    std::string name;
+    std::string type = "string"; // string|boolean|number|hex|address|array|object|enum
+    bool required = false;
+    std::string defaultValue;            // optional
+    std::vector<std::string> enumValues; // when type == "enum"
+    std::string description;
+};
+
+struct CommandAnnotations {
+    bool readOnly = false;
+    bool destructive = true; // conservative default: assume it changes state
+    bool idempotent = false;
+    std::string category;    // e.g. "base","txn","mash","network"; derived from name if empty
+    bool sensitive = false;  // a param carries secrets (never echoed)
+};
+
 // class CommandException : public std::runtime_error {
 // public:
 //     explicit CommandException(const std::string& what_arg) : std::runtime_error(what_arg) {}
@@ -41,7 +67,16 @@ public:
     void setCompleteCommand(const std::string& zCommand);
     std::string getCompleteCommand() const;
 
-    std::vector<std::string> getValidParams() const;
+    // Virtual so the manifest's default getParamSpecs() (which calls this via a
+    // base pointer) sees each command's declared params.
+    virtual std::vector<std::string> getValidParams() const;
+
+    // Capability manifest metadata (RFC-0011 §5). Defaults:
+    //   getParamSpecs()  -> one optional "string" spec per getValidParams() name
+    //   getAnnotations() -> conservative { readOnly:false, destructive:true, ... }
+    // Commands override these to describe themselves precisely.
+    virtual std::vector<ParamSpec> getParamSpecs() const;
+    virtual CommandAnnotations getAnnotations() const;
 
     std::string getHelp() const;
     virtual std::string getFullHelp() const;

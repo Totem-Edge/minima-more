@@ -2,10 +2,15 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
+
+#include "org/minima/system/params/general_params.hpp"
+#include "org/minima/system/params/global_params.hpp"
+#include "org/minima/system/brains/tx_po_w_checker.hpp"
 
 // Base command support
 #include "org/minima/system/commands/command_exception.hpp"
@@ -75,6 +80,7 @@
 #include "org/minima/system/commands/base/seedrandom.hpp"
 #include "org/minima/system/commands/base/slavenode.hpp"
 #include "org/minima/system/commands/base/status.hpp"
+#include "org/minima/system/commands/base/capabilities.hpp"
 #include "org/minima/system/commands/base/systemcheck.hpp"
 #include "org/minima/system/commands/base/test.hpp"
 #include "org/minima/system/commands/base/timemilli.hpp"
@@ -400,6 +406,7 @@ std::vector<std::unique_ptr<Command>>& CommandRunner::getPrototypes() {
         // The order here MUST match CommandRunner.java ALL_COMMANDS array
         s_protos.push_back(std::make_unique<base::quit>());
         s_protos.push_back(std::make_unique<base::status>());
+        s_protos.push_back(std::make_unique<base::capabilities>());
         s_protos.push_back(std::make_unique<search::coins>());
         s_protos.push_back(std::make_unique<search::txpow>());
         s_protos.push_back(std::make_unique<network::connect>());
@@ -654,6 +661,184 @@ std::string CommandRunner::toLower(const std::string& s) {
     out.reserve(s.size());
     for (char c : s) out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Capability manifest (RFC-0011 §5). Generated from the registry.
+// ---------------------------------------------------------------------------
+namespace {
+std::string deriveCategory(const std::string& name) {
+    auto has = [&](const char* p) { return name.rfind(p, 0) == 0; };
+    if (has("mash")) return "mash";
+    if (has("txn")) return "txn";
+    if (has("send")) return "send";
+    if (has("lookup")) return "lookup";
+    if (has("connect") || has("disconnect") || name == "peers" || name == "network" ||
+        name == "nodecount" || name == "ping" || name == "message") return "network";
+    if (has("backup") || has("restore") || has("reset") || has("vault") || has("archive") ||
+        has("duckdb") || has("megammr") || has("coinimport") || has("coinexport")) return "backup";
+    if (has("wallet") || name == "getaddress" || name == "newaddress" ||
+        name == "balance" || name == "coins") return "wallet";
+    return "base";
+}
+
+std::string currentModeName() {
+    using org::minima::system::params::GeneralParams;
+    if (GeneralParams::TXBLOCK_NODE) return "txblock";
+    if (GeneralParams::IS_MEGAMMR) return "megammr";
+    if (GeneralParams::ARCHIVE) return "archive";
+    return "full";
+}
+} // namespace
+
+std::unique_ptr<org::minima::utils::json::JSONObject> CommandRunner::capabilityManifest() {
+    using org::minima::utils::json::JSONArray;
+    using org::minima::utils::json::JSONObject;
+
+    auto root = std::make_unique<JSONObject>();
+
+    // Node header: which node is this, and which SDK domains it serves.
+    JSONObject node;
+    node.put("version", org::minima::system::params::GlobalParams::getFullMicroVersion());
+    node.put("network", org::minima::system::brains::TxPoWChecker::CURRENT_NETWORK.to0xString());
+    const std::string mode = currentModeName();
+    node.put("mode", mode);
+
+    JSONArray serves;
+    serves.add(std::string("statechain"));
+    serves.add(std::string("identity"));
+    if (mode == "archive") serves.add(std::string("archive"));
+    if (mode == "megammr") serves.add(std::string("megammr"));
+    if (mode == "txblock") serves.add(std::string("txblock"));
+    serves.add(std::string("lookup"));
+    node.put("serves", serves);
+
+    JSONObject mash;
+    mash.put("enabled", false);
+    node.put("mash", mash);
+
+    root->put("node", node);
+
+    // Commands: name, summary, category, annotations, typed params.
+    JSONArray cmds;
+    for (auto& p : getPrototypes()) {
+        if (!p) continue;
+        const std::string name = p->getName();
+        JSONObject c;
+        c.put("name", name);
+        c.put("summary", p->getHelp());
+
+        const CommandAnnotations a = p->getAnnotations();
+        c.put("category", a.category.empty() ? deriveCategory(name) : a.category);
+        JSONObject ann;
+        ann.put("readOnly", a.readOnly);
+        ann.put("destructive", a.destructive);
+        ann.put("idempotent", a.idempotent);
+        ann.put("sensitive", a.sensitive);
+        c.put("annotations", ann);
+
+        JSONArray params;
+        for (const auto& s : p->getParamSpecs()) {
+            JSONObject ps;
+            ps.put("name", s.name);
+            ps.put("type", s.type);
+            ps.put("required", s.required);
+            if (!s.defaultValue.empty()) ps.put("default", s.defaultValue);
+            if (!s.description.empty()) ps.put("description", s.description);
+            if (!s.enumValues.empty()) {
+                JSONArray ev;
+                for (const auto& e : s.enumValues) ev.add(e);
+                ps.put("enum", ev);
+            }
+            params.add(ps);
+        }
+        c.put("params", params);
+        cmds.add(c);
+    }
+    root->put("commands", cmds);
+    return root;
+}
+
+namespace {
+std::string mdCell(const std::string& s) {
+    std::string o;
+    o.reserve(s.size());
+    for (char c : s) {
+        if (c == '|') o += "\\|";
+        else if (c == '\n' || c == '\r') o += ' ';
+        else o += c;
+    }
+    return o;
+}
+} // namespace
+
+std::string CommandRunner::capabilityManifestMarkdown() {
+    using org::minima::utils::json::JSONArray;
+    using org::minima::utils::json::JSONObject;
+
+    std::unique_ptr<JSONObject> m = capabilityManifest();
+    if (!m) return std::string();
+
+    const JSONObject* node = std::any_cast<JSONObject>(&m->get("node"));
+    const JSONArray* cmds = std::any_cast<JSONArray>(&m->get("commands"));
+
+    std::ostringstream out;
+    out << "# Node Command & Tool Reference\n\n";
+    out << "<!-- GENERATED from the node capability manifest (RFC-0011 §5) - do not edit by hand. -->\n";
+    out << "<!-- Regenerate with tests/gen_command_reference; tests/test_docs_manifest asserts it matches. -->\n\n";
+
+    if (node) {
+        out << "Node: version `" << node->getString("version", "?")
+            << "`, network `" << node->getString("network", "?")
+            << "`, mode `" << node->getString("mode", "?") << "`.\n\n";
+    }
+
+    const std::size_t total = cmds ? cmds->size() : 0;
+    out << "Commands: " << total << ".\n\n";
+
+    std::map<std::string, std::vector<JSONObject>> byCat;
+    if (cmds) {
+        for (const auto& e : cmds->elements()) {
+            const JSONObject* c = std::any_cast<JSONObject>(&e);
+            if (!c) continue;
+            byCat[c->getString("category", "other")].push_back(*c);
+        }
+    }
+
+    for (auto& kv : byCat) {
+        out << "## " << kv.first << "\n\n";
+        out << "| Command | Access | Parameters | Summary |\n";
+        out << "|---|---|---|---|\n";
+        std::sort(kv.second.begin(), kv.second.end(), [](const JSONObject& a, const JSONObject& b) {
+            return a.getString("name") < b.getString("name");
+        });
+        for (const auto& c : kv.second) {
+            std::string access = "read";
+            if (const JSONObject* ann = std::any_cast<JSONObject>(&c.get("annotations"))) {
+                if (ann->getBoolean("destructive")) access = "destructive";
+                else if (!ann->getBoolean("readOnly")) access = "write";
+            }
+            std::string params;
+            if (const JSONArray* ps = std::any_cast<JSONArray>(&c.get("params"))) {
+                bool first = true;
+                for (const auto& pe : ps->elements()) {
+                    const JSONObject* p = std::any_cast<JSONObject>(&pe);
+                    if (!p) continue;
+                    if (!first) params += ", ";
+                    first = false;
+                    params += "`" + p->getString("name");
+                    if (p->getBoolean("required")) params += "*";
+                    params += "`";
+                }
+            }
+            if (params.empty()) params = "-";
+            out << "| `" << mdCell(c.getString("name")) << "` | " << access << " | " << params
+                << " | " << mdCell(c.getString("summary")) << " |\n";
+        }
+        out << "\n";
+    }
+
+    return out.str();
 }
 
 } // namespace commands

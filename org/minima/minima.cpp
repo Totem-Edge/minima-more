@@ -30,6 +30,7 @@
 
 // Include other project headers
 #include "org/minima/system/commands/command_runner.hpp"
+#include "org/minima/system/commands/mcp/mcp_server.hpp"
 #include "org/minima/system/params/general_params.hpp"
 #include "org/minima/system/params/global_params.hpp"
 #include "org/minima/system/params/param_configurer.hpp"
@@ -244,6 +245,21 @@ void Minima::main(const std::vector<std::string>& zArgs) {
     
     
     GeneralParams::resetDefaults();
+
+    // RFC-0011 §5: `-manifest` emits the generated capability manifest and exits.
+    for (std::size_t mi = 0; mi < zArgs.size(); ++mi) {
+        if (zArgs[mi] == "-manifest") {
+            const bool md = (mi + 1 < zArgs.size() &&
+                             (zArgs[mi + 1] == "md" || zArgs[mi + 1] == "markdown"));
+            if (md) {
+                std::cout << CommandRunner::capabilityManifestMarkdown() << std::endl;
+            } else {
+                auto manifest = CommandRunner::capabilityManifest();
+                std::cout << (manifest ? manifest->toString() : std::string("{}")) << std::endl;
+            }
+            return;
+        }
+    }
     
     
     GeneralParams::DATA_FOLDER = minimaFolder;
@@ -260,6 +276,21 @@ void Minima::main(const std::vector<std::string>& zArgs) {
             configurer.usingProgramArgs(zArgs);
         
             configurer.configure();
+
+            // RFC-0011 §6: `-mcp stdio|http` enables the in-node MCP transport.
+            bool mcpStdio = false, mcpHttp = false;
+            for (std::size_t mi = 0; mi < zArgs.size(); ++mi) {
+                if (zArgs[mi] == "-mcp" && mi + 1 < zArgs.size()) {
+                    if (zArgs[mi + 1] == "stdio") mcpStdio = true;
+                    else if (zArgs[mi + 1] == "http") mcpHttp = true;
+                }
+            }
+            if (mcpStdio || mcpHttp) GeneralParams::MCP_SERVER = true;
+            if (mcpStdio) {
+                GeneralParams::MCP_STDIO = true;
+                // stdout carries only MCP frames; route logs to stderr.
+                org::minima::utils::MinimaLogger::setUseStderr(true);
+            }
         
             if (configurer.shouldExit()) {
                     return;
@@ -304,6 +335,13 @@ void Minima::main(const std::vector<std::string>& zArgs) {
 
         // ... (rest of your original main function from here) ...
         
+        // RFC-0011 §6 Phase D: run the MCP stdio loop (blocking) instead of the
+        // interactive console loop; the node runs on its own threads.
+        if (GeneralParams::MCP_STDIO) {
+            org::minima::system::commands::mcp::McpServer::runStdio();
+            return;
+        }
+
         if (daemon) {
             org::minima::utils::MinimaLogger::log("Daemon mode started..");
             while (true) {

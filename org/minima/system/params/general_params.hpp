@@ -81,6 +81,11 @@ public:
     static std::string RPC_AUTHSTYLE;
     static std::string RPC_PASSWORD;
 
+    // In-node MCP (RFC-0011 §6). MCP_SERVER gates both transports; MCP_STDIO
+    // selects the stdio loop (`-mcp stdio`), otherwise HTTP (`-mcp http`).
+    static bool MCP_SERVER;
+    static bool MCP_STDIO;
+
     static std::string SEED_PHRASE;
     static bool ANYSEED_PHRASE;
 

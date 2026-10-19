@@ -27,6 +27,8 @@
 #include "org/minima/objects/base/mini_string.hpp"
 #include "org/minima/system/params/general_params.hpp"
 #include "org/minima/system/commands/command_runner.hpp"
+#include "org/minima/system/commands/mcp/mcp_server.hpp"
+#include "org/minima/system/main.hpp"
 #include "org/minima/utils/minima_logger.hpp"
 #include "org/minima/utils/json/j_s_o_n_array.hpp"
 #include "org/minima/utils/json/j_s_o_n_object.hpp"
@@ -420,6 +422,67 @@ void CMDHandler::run() {
 
         // Authenticated user's mode ("read"/"write"); default/write is the norm.
         const std::string authmode = authuser.getString("mode", "write");
+
+        // RFC-0011 §6 Phase E: in-node MCP over the RPC transport. Runs after the
+        // RPC authorisation check, so it inherits the RPC auth posture. A
+        // read-only credential may not drive MCP (tools/call can write).
+        if (fileRequested == "mcp" && org::minima::system::params::GeneralParams::MCP_SERVER) {
+            const std::string mnl = org::minima::system::params::GeneralParams::RPC_CRLF ? "\r\n" : "\n";
+            if (authmode == "read") {
+                const std::string resp = "HTTP/1.1 403 Forbidden" + mnl +
+                    "Content-Type: application/json" + mnl + mnl +
+                    "{\"error\":\"MCP requires a write-capable RPC credential\"}" + mnl;
+                send_all(*stream, resp.c_str(), resp.size());
+                closeSocket();
+                return;
+            }
+            if (method == "POST") {
+                std::string body;
+                body.resize(static_cast<std::size_t>(std::max(0, contentlength)));
+                if (!body.empty() && !recv_all(*stream, &body[0], body.size())) {
+                    throw std::runtime_error("MCP: short read");
+                }
+                const std::string out = org::minima::system::commands::mcp::McpServer::handleLine(body);
+                std::ostringstream oss;
+                oss << "HTTP/1.1 200 OK" << mnl;
+                oss << "Content-Type: application/json" << mnl;
+                oss << "Content-Length: " << out.size() << mnl;
+                oss << "Access-Control-Allow-Origin: *" << mnl << mnl;
+                oss << out << mnl;
+                const std::string resp = oss.str();
+                send_all(*stream, resp.c_str(), resp.size());
+                closeSocket();
+                return;
+            }
+            if (method == "GET") {
+                const std::string hdr =
+                    std::string("HTTP/1.1 200 OK") + mnl +
+                    "Content-Type: text/event-stream" + mnl +
+                    "Cache-Control: no-cache" + mnl +
+                    "Connection: keep-alive" + mnl +
+                    "Access-Control-Allow-Origin: *" + mnl + mnl +
+                    "event: endpoint" + mnl + "data: /mcp" + mnl + mnl;
+                if (!send_all(*stream, hdr.c_str(), hdr.size())) { closeSocket(); return; }
+
+                auto sink = org::minima::system::commands::mcp::McpServer::openSseSink();
+                bool alive = true;
+                for (int tick = 0; tick < 240 && alive; ++tick) {  // ~60 min idle cap
+                    std::string msg;
+                    std::string ev;
+                    if (org::minima::system::commands::mcp::McpServer::nextSseMessage(sink, msg, 15000)) {
+                        ev = "event: message" + mnl + "data: " + msg + mnl + mnl;
+                    } else {
+                        ev = ": keep-alive" + mnl + mnl;
+                    }
+                    alive = send_all(*stream, ev.c_str(), ev.size());
+                    auto* mi = org::minima::system::Main::getInstance();
+                    if (mi && !mi->isRunning()) break;
+                }
+                org::minima::system::commands::mcp::McpServer::closeSseSink(sink);
+                closeSocket();
+                return;
+            }
+        }
 
         // Is it a POST request
         if (method == "POST") {

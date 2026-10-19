@@ -50,6 +50,14 @@ void MinimaLogger::log(const std::string& zLog) {
     log(zLog, true);
 }
 
+namespace {
+bool s_useStderr = false;
+}
+
+void MinimaLogger::setUseStderr(bool on) {
+    s_useStderr = on;
+}
+
 void MinimaLogger::log(const std::string& zLog, bool zNotify) {
     // Memory usage approximation by platform
     std::uint64_t memBytes = getProcessMemoryBytes();
@@ -63,11 +71,13 @@ void MinimaLogger::log(const std::string& zLog, bool zNotify) {
     // Construct full log line
     std::string full_log = std::string("Minima @ ") + datetime + " [" + memStr + "] : " + zLog;
 
-    // Print to stdout. Keep the per-line flush (std::endl): the node is normally
-    // run with stdout redirected to a file/pipe (fully buffered), and operators
-    // rely on log lines appearing promptly. The expensive part of logging was
-    // the per-line memory syscall, which is now cached - not the flush.
-    std::cout << full_log << std::endl;
+    // Print to stdout (or stderr in `-mcp stdio` mode). Keep the per-line flush
+    // (std::endl): the node is normally run with stdout redirected to a
+    // file/pipe (fully buffered), and operators rely on log lines appearing
+    // promptly. The expensive part of logging was the per-line memory syscall,
+    // which is now cached - not the flush.
+    if (s_useStderr) std::cerr << full_log << std::endl;
+    else std::cout << full_log << std::endl;
 
     // Notify listeners if required
     if (zNotify) {

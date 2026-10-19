@@ -6,8 +6,7 @@ include(CTest)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-add_executable(minima
-    org/minima/minima.cpp
+set(MINIMA_SOURCES
     org/minima/database/minima_d_b.cpp
     org/minima/database/archive/archive_manager.cpp
     org/minima/database/archive/raw_archive_input.cpp
@@ -155,6 +154,7 @@ add_executable(minima
     org/minima/system/commands/command.cpp
     org/minima/system/commands/command_exception.cpp
     org/minima/system/commands/command_runner.cpp
+    org/minima/system/commands/mcp/mcp_server.cpp
     org/minima/system/commands/help.cpp
     org/minima/system/commands/tutorial.cpp
     org/minima/system/commands/whitepaper.cpp
@@ -176,6 +176,7 @@ add_executable(minima
     org/minima/system/commands/base/balance.cpp
     org/minima/system/commands/base/block.cpp
     org/minima/system/commands/base/burn.cpp
+    org/minima/system/commands/base/capabilities.cpp
     org/minima/system/commands/base/checkaddress.cpp
     org/minima/system/commands/base/coincheck.cpp
     org/minima/system/commands/base/coinexport.cpp
@@ -363,6 +364,15 @@ add_executable(minima
     org/minima/utils/ssl/s_s_l_manager.cpp
 )
 
+# Shared object library: the node executable and the manifest/MCP tests compile
+# the same sources once.
+add_library(minima_core OBJECT ${MINIMA_SOURCES})
+
+add_executable(minima
+    org/minima/minima.cpp
+    $<TARGET_OBJECTS:minima_core>
+)
+
 set_target_properties(minima PROPERTIES
     WIN32_EXECUTABLE OFF
     MACOSX_BUNDLE OFF
@@ -459,6 +469,40 @@ if(MYSQLCPP_OK)
 else()
     message(WARNING "MySQL Connector/C++ not found — MySQL archive features will be disabled. Install mysql-connector-c++ for full functionality.")
 endif()
+
+# Compile settings for the shared object library (tests reuse its objects).
+target_compile_features(minima_core PRIVATE cxx_std_17)
+target_include_directories(minima_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    target_include_directories(minima_core PRIVATE /opt/homebrew/include)
+endif()
+if(MSVC)
+    target_compile_options(minima_core PRIVATE /W4 /permissive-)
+    target_compile_definitions(minima_core PRIVATE _CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN NOMINMAX _WINSOCK_DEPRECATED_NO_WARNINGS)
+else()
+    target_compile_options(minima_core PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+target_include_directories(minima_core PRIVATE ${ZLIB_INCLUDE_DIRS})
+if(TARGET OpenSSL::SSL)
+    target_link_libraries(minima_core PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
+if(TARGET SQLite::SQLite3)
+    target_link_libraries(minima_core PRIVATE SQLite::SQLite3)
+endif()
+if(TARGET CURL::libcurl)
+    target_link_libraries(minima_core PRIVATE CURL::libcurl)
+endif()
+if(TARGET ZLIB::ZLIB)
+    target_link_libraries(minima_core PRIVATE ZLIB::ZLIB)
+endif()
+if(HAS_LIBZIP)
+    target_compile_definitions(minima_core PRIVATE HAS_LIBZIP)
+    target_include_directories(minima_core PRIVATE ${LIBZIP_INCLUDE_DIRS})
+endif()
+if(MYSQLCPP_OK)
+    target_compile_definitions(minima_core PRIVATE HAS_MYSQL)
+endif()
+target_link_libraries(minima_core PRIVATE Threads::Threads)
 
 # Optional tests (JUnit -> GoogleTest)
 if(BUILD_TESTING)
@@ -858,3 +902,38 @@ add_custom_target(help-clean
 # ============================================================================
 # END CLEANUP TARGETS
 # ============================================================================
+# ---------------------------------------------------------------------------
+# RFC-0011: capability manifest + in-node MCP tests (share the node objects).
+# ---------------------------------------------------------------------------
+set(MINIMA_TEST_LIBS Threads::Threads)
+if(TARGET SQLite::SQLite3)
+    list(APPEND MINIMA_TEST_LIBS SQLite::SQLite3)
+endif()
+if(TARGET OpenSSL::SSL)
+    list(APPEND MINIMA_TEST_LIBS OpenSSL::SSL OpenSSL::Crypto)
+endif()
+if(TARGET ZLIB::ZLIB)
+    list(APPEND MINIMA_TEST_LIBS ZLIB::ZLIB)
+endif()
+if(TARGET CURL::libcurl)
+    list(APPEND MINIMA_TEST_LIBS CURL::libcurl)
+endif()
+if(UNIX AND NOT APPLE)
+    list(APPEND MINIMA_TEST_LIBS ${CMAKE_DL_LIBS})
+endif()
+
+foreach(tgt test_capabilities test_mcp_server test_docs_manifest gen_command_reference)
+    add_executable(${tgt} EXCLUDE_FROM_ALL
+        tests/${tgt}.cpp
+        $<TARGET_OBJECTS:minima_core>)
+    target_compile_features(${tgt} PRIVATE cxx_std_17)
+    target_include_directories(${tgt} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    if(APPLE)
+        target_include_directories(${tgt} PRIVATE /opt/homebrew/include)
+    endif()
+    target_link_libraries(${tgt} PRIVATE ${MINIMA_TEST_LIBS})
+endforeach()
+
+add_test(NAME capabilities COMMAND test_capabilities)
+add_test(NAME mcp_server COMMAND test_mcp_server)
+add_test(NAME docs_manifest COMMAND test_docs_manifest ${CMAKE_CURRENT_SOURCE_DIR}/COMMAND_REFERENCE.md)
