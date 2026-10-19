@@ -93,6 +93,27 @@ static std::pair<std::string, long> performRequest(
     bool followRedirects,
     long connectTimeoutMs
 ) {
+    // SSRF guard: only http/https, and never internal/loopback/link-local hosts.
+    auto isAllowedUrl = [](const std::string& u) -> bool {
+        bool https = u.rfind("https://", 0) == 0, http = u.rfind("http://", 0) == 0;
+        if (!https && !http) return false;  // block file://, gopher://, ftp://, ...
+        std::string rest = u.substr(https ? 8 : 7);
+        std::string hostport = rest.substr(0, rest.find_first_of("/?#"));
+        auto at = hostport.find('@'); if (at != std::string::npos) hostport = hostport.substr(at + 1);
+        std::string host = hostport;
+        if (!host.empty() && host.front() == '[') { auto b = host.find(']'); if (b != std::string::npos) host = host.substr(1, b - 1); }
+        else { auto c = host.find(':'); if (c != std::string::npos) host = host.substr(0, c); }
+        std::string h = host; for (auto& ch : h) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if (h.empty() || h == "localhost" || h == "::1" || h == "0.0.0.0") return false;
+        if (h.rfind("127.", 0) == 0 || h.rfind("10.", 0) == 0 || h.rfind("192.168.", 0) == 0 ||
+            h.rfind("169.254.", 0) == 0 || h.rfind("100.64.", 0) == 0) return false;  // loopback/private/link-local/CGNAT
+        if (h.rfind("172.", 0) == 0) { int s = std::atoi(h.c_str() + 4); if (s >= 16 && s <= 31) return false; }
+        if (h.rfind("fc", 0) == 0 || h.rfind("fd", 0) == 0) return false;  // IPv6 ULA (loose)
+        return true;
+    };
+    if (!isAllowedUrl(url)) {
+        throw std::runtime_error("Blocked outbound fetch (SSRF guard): " + url);
+    }
     // throw std::runtime_error("CURL is disabled for testing");
     static CurlGlobalInit curlInit;
 
@@ -120,6 +141,12 @@ static std::pair<std::string, long> performRequest(
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, connectTimeoutMs);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    // Bounds: http/https only, limited redirects, timeouts and a hard size cap.
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 15000L);
+    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(1048576));
 
     if (method == "GET") {
         // Default is GET
