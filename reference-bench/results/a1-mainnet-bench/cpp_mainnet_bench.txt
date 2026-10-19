@@ -1,0 +1,10 @@
+node	cpp	
+port	24823	
+synced_seconds	10.01	s
+tip_block	2373134	
+peak_sync_rss_kb	92448	kB
+idle_rss_avg_kb	210162	kB
+idle_rss_last_kb	287456	kB
+cpu_seconds_settle	34.290	s
+threads	25	
+datadir_kb	219800	kB

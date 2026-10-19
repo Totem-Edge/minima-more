@@ -1,0 +1,10 @@
+node	java	
+port	24923	
+synced_seconds	6.16	s
+tip_block	2372878	
+peak_sync_rss_kb	406840	kB
+idle_rss_avg_kb	1392086	kB
+idle_rss_last_kb	2984852	kB
+cpu_seconds_settle	67.790	s
+threads	60	
+datadir_kb	881456	kB

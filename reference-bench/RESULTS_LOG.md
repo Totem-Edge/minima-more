@@ -478,6 +478,31 @@ guard remains (it prevented a fresh node from marking a valid peer "different ch
 Note: the C++ / Java wire frames match; this was a peer-side rate limit plus our
 fixed test identity, not a protocol incompatibility.
 
+## 2026-10-19 — Live-mainnet functional tests + C++ vs Java benchmark
+Ran the node on the **live Minima mainnet** (A1) and exercised it end to end; full
+log in `MAINNET_TESTS.md`, raw bench in `results/a1-mainnet-bench/`.
+
+Functional: synced to tip from real peers; received a real microspend (0.01) and
+validated its TxPoW (WOTS signatures + MMR proofs); `runscript script:"RETURN TRUE"`;
+`send` built/signed/mined and broadcast a spend (appeared in the mempool);
+`tokencreate name:MPATest amount:1000` minted a token; sent 0.005 back to an
+external miniaddress, confirmed at block 2,374,003 (balance 0.01 -> 0.005).
+
+Live-mainnet node benchmark (fresh sync, same peers, unique port each; single run):
+
+| Metric | C++ (this node) | Java (minima-core) |
+|---|---|---|
+| time to tip (s) | 10.0 | 6.2 |
+| peak RSS during sync | 92 MB | 407 MB |
+| idle RSS avg (after 60 s settle) | 210 MB | 1.39 GB |
+| CPU-seconds over 60 s settle | 34.3 | 67.8 |
+| threads | 25 | 60 |
+| data dir | 220 MB | 881 MB |
+
+New harness: `run_mainnet_bench.sh` (live mainnet, C++ vs Java) and
+`run_mainnet_commands.sh` (core-command smoke); `run_mainnet_sync.sh` picks a
+unique advertised port per run to avoid the peers' ~30-min IBD rate limit.
+
 ## Planned next
 - Quiet-host, multi-rep harness mode for decision-grade numbers.
 - Cross-impl / Java two-node sync (C++↔Java) and a **large-chain sync throughput**
