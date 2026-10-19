@@ -1,0 +1,14 @@
+node	cpp	
+port	24956	
+synced_seconds	22.71	s
+tip_block	2374085	
+peak_sync_rss_kb	139760	kB
+idle_rss_avg_kb	136638	kB
+idle_rss_last_kb	133904	kB
+cpu_seconds_settle	15.180	s
+threads	29	
+datadir_kb	24180	kB
+p2p_peers_reached	0	
+p2p_known_peers	3	
+p2p_time_first_peer_s	-	s
+p2p_time_to_5_peers_s	-	s

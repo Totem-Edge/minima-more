@@ -33,9 +33,10 @@ run_one() {
 
     # p2p_poll <rpcport> -> NP = connections, NK = known peers
     p2p_poll() {
-        _n=$(rpc "$1" network 2>/dev/null)
-        NP=$(echo "$_n" | grep -o '"connected":[0-9]*' | head -1 | grep -o '[0-9]*' || true); [ -z "$NP" ] && NP=0
+        _n=$(rpc "$1" network 2>/dev/null || true)
+        NP=$(echo "$_n" | grep -o '"isconnected":true' | wc -l | tr -d ' '); [ -z "$NP" ] && NP=0
         NK=$(echo "$_n" | grep -o '"numKnownPeers":[0-9]*' | head -1 | grep -o '[0-9]*' || true); [ -z "$NK" ] && NK=0
+        return 0
     }
     peak=0; tipms=""; firstpeer=""; n5=""
     for i in $(seq 1 $((MAX_WAIT * 2))); do

@@ -16,9 +16,9 @@ In same-hardware benchmarks against the Java reference node
 
 **A running node — same host, same chain**
 - **On live mainnet:** peak sync RSS **~92 MB vs ~407 MB**, idle **~210 MB vs ~1.39 GB**, data dir **~220 MB vs ~881 MB**
-- **~20 MB** fully-synced RSS on a fresh chain vs ~248 MB, about **12× less memory**
+- **~19 MB** idle RSS on a fresh chain vs ~302 MB, about **16× less memory**
 - **67% lower** peak memory for a million-entry MMR
-- **56% fewer** OS threads (25 vs 60)
+- **56% fewer** OS threads (23 vs 52)
 - **~40% less** CPU at idle and **~38% less** written to disk per hour (flash-friendly)
 - **P2P peer discovery fixed:** reaches **~10 live mainnet peers** (was 1)
 
@@ -69,9 +69,9 @@ Every box above is an optimisation target: **memory layout** (MMR), **CPU**
 | Live mainnet — peak sync RAM | **~92 MB** | ~407 MB |
 | Live mainnet — idle RAM | **~210 MB** | ~1.39 GB |
 | Live mainnet — data dir | **~220 MB** | ~881 MB |
-| Threads | **25** | 60 |
+| Threads (fresh chain) | **23** | 52 |
 | MMR, 1M entries — peak RAM | **624 MB** | 1.90 GB |
-| MMR, 1M entries — build time | **~4.0 s** | ~3.8 s |
+| MMR, 1M entries — build time (M1) | **~2.2 s** | ~2.3 s |
 | Mempool coin lookup (double-spend guard) | **0.9 µs** | ~44 ms (~49,000× slower) |
 | Database inserts (batched) | **2.1× faster** than its own per-row path | — |
 | SHA3-256 224 B (1 thread) | **1.16 M hashes/s** | 346 k hashes/s |
@@ -241,7 +241,9 @@ flowchart TB
   test instead of a `modulo` object.
 
 **Result:** MMR 1M-entry build **3785 → 2216 ms (−41%)**, closing a 1.6× gap to
-Java to **parity** (109%).
+**parity** — 2216 ms vs ~2256 ms (Java) on M1. On the smaller OCI A1 core the two
+are close but C++ is slightly behind (~4038 vs ~3759 ms); the win here is CPU, the
+footprint win is in §1.
 
 ![MMR build time across the optimisation steps](assets/mmr_build_time.svg)
 

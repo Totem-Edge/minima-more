@@ -562,6 +562,29 @@ and ~3× faster on point gets — confirming the earlier standalone result (RESU
 2026-10-18). The engine comparison above is therefore the tuned node config, not
 plain SQLite. Raw: `results/engines-local-20261019/`.
 
+## 2026-10-19 — Live-mainnet RE-RUN after the P2P fix (local M1, C++ vs Java)
+Re-ran the live-mainnet benchmark with a **Release build including the P2P fix**
+(framing + seed sources), C++ vs Java on the same host (macOS M1). The prior run
+was on A1 and pre-fix — with the SINGLE_PING bug the C++ node effectively ran on
+its single bootstrap link while Java had its full peer set. This run reflects the
+shipped node.
+
+| Metric | C++ | Java |
+|---|---|---|
+| time to tip (s) | 20.2 | 6.1 |
+| peak RSS during sync | 144 MB | 365 MB |
+| idle RSS avg (45 s) | 158 MB | 688 MB |
+| CPU-seconds / 45 s settle | 14.0 | 19.3 |
+| threads | 29 | 66 |
+| data dir | 29 MB | 164 MB |
+| P2P peers reached / time to first | 2 / 1.3 s | 3 / 2.9 s |
+
+Caveats: **different host from the A1 numbers currently in the README** (A1 re-run
+pending); sync exercised a recent IBD window, not a full genesis sync; single run.
+Raw: `results/local-mainnet-20261019-121456/`. Also fixed two harness bugs found
+here: `p2p_poll` aborted under `set -e` (non-zero return) and parsed the wrong
+"connected" field.
+
 ## Planned next
 - Quiet-host, multi-rep harness mode for decision-grade numbers.
 - Cross-impl / Java two-node sync (C++↔Java) and a **large-chain sync throughput**
