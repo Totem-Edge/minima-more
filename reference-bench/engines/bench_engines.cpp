@@ -200,6 +200,7 @@ int main(int argc, char** argv) {
     struct Eng { const char* name; std::unique_ptr<ArchiveStore> (*ar)(); std::unique_ptr<CoinStore> (*co)(); };
     Eng list[] = {
         {"sqlite", make_sqlite_archive, make_sqlite_coin},
+        {"sqlite-plain", make_sqlite_plain_archive, make_sqlite_plain_coin},
         {"lmdb", make_lmdb_archive, make_lmdb_coin},
         {"rocksdb", make_rocksdb_archive, make_rocksdb_coin},
         {"duckdb", make_duckdb_archive, make_duckdb_coin},

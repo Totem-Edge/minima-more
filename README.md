@@ -179,6 +179,14 @@ is ~100–300× slower per point get, **SQLite** is the balanced default (and re
 for R0), and **RocksDB** is write-optimised (append-heavy). The plan is a thin
 storage interface per role, with these embedded engines selectable by node mode.
 
+**Is the node's SQLite tuning included?** Yes — "SQLite" here is the node's own
+configuration (**WAL, `synchronous=NORMAL`, memory temp store, larger cache,
+memory-mapped I/O, busy timeout**, plus **batched writes** — one bulk transaction).
+To show what that buys, the harness also runs a **`sqlite-plain`** variant (stock
+defaults, per-row commits): bulk load is **~150× faster** tuned vs plain
+(archive 302k vs 1.9k rows/s; coin 339k vs 2.6k rows/s) and point gets ~3× faster.
+Without the tuning, SQLite would look far worse than it actually is in the node.
+
 Reproduce: `reference-bench/engines/run_engine_bench.sh` — methodology and fairness
 statement in [`reference-bench/engines/`](reference-bench/engines/README.md).
 

@@ -1,7 +1,13 @@
 // RFC-0003 — SQLite driver (baseline, role R1 archive + R2 coin store).
 //
-// Mirrors the node's existing SQLite usage (embedded, single-writer, batched
-// writes) so it is the honest baseline the other engines must beat.
+// Two variants:
+//   * "sqlite"       — the node's tuned+batched config (WAL, synchronous=NORMAL,
+//                      memory temp store, larger cache, mmap, busy timeout, and one
+//                      bulk-load transaction). This is the fair comparison vs the
+//                      other engines.
+//   * "sqlite-plain" — SQLite stock defaults, per-row autocommit. Not the node's
+//                      config; included so the tuning+batching win is measurable
+//                      (see RESULTS_LOG: ~9x pragmas, ~2.1x batching).
 #include <sqlite3.h>
 
 #include <cstdio>
@@ -33,9 +39,10 @@ Bytes colBlob(sqlite3_stmt* st, int i) {
     return Bytes(static_cast<const uint8_t*>(p), static_cast<const uint8_t*>(p) + n);
 }
 
-void configure(sqlite3* db, const OpenOpts& o) {
-    exec(db, "PRAGMA journal_mode=" + std::string(o.wal ? "WAL" : "DELETE"));
-    exec(db, "PRAGMA synchronous=" + std::string(o.wal ? "NORMAL" : "FULL"));
+// The node's device-aware pragmas (RESULTS_LOG: ~9x on their own).
+void configure(sqlite3* db) {
+    exec(db, "PRAGMA journal_mode=WAL");
+    exec(db, "PRAGMA synchronous=NORMAL");
     exec(db, "PRAGMA temp_store=MEMORY");
     exec(db, "PRAGMA cache_size=-65536");
     exec(db, "PRAGMA mmap_size=268435456");
@@ -45,12 +52,13 @@ void configure(sqlite3* db, const OpenOpts& o) {
 // ---------------------------------------------------------------- archive R1
 class SqliteArchive : public ArchiveStore {
 public:
-    const char* engine() const override { return "sqlite"; }
+    explicit SqliteArchive(bool tuned) : tuned_(tuned) {}
+    const char* engine() const override { return tuned_ ? "sqlite" : "sqlite-plain"; }
 
-    void open(const std::string& path, const OpenOpts& o) override {
+    void open(const std::string& path, const OpenOpts&) override {
         path_ = path;
         sqlite3_open(path.c_str(), &db_);
-        configure(db_, o);
+        if (tuned_) configure(db_);
         exec(db_, "CREATE TABLE IF NOT EXISTS blocks("
                   "num INTEGER PRIMARY KEY, id BLOB, txns INTEGER, payload BLOB)");
         exec(db_, "CREATE INDEX IF NOT EXISTS idx_blocks_id ON blocks(id)");
@@ -58,11 +66,9 @@ public:
         prep(db_, "INSERT OR REPLACE INTO blocks(num,id,txns,payload) VALUES(?,?,?,?)", &ins_);
         prep(db_, "SELECT payload FROM blocks WHERE num=?", &byNum_);
         prep(db_, "SELECT payload FROM blocks WHERE id=?", &byId_);
-        exec(db_, "BEGIN");  // one bulk-load transaction
+        if (tuned_) exec(db_, "BEGIN");  // one bulk-load transaction (batched writes)
     }
-    void close() override {
-        if (db_) { sqlite3_close(db_); db_ = nullptr; }
-    }
+    void close() override { if (db_) { sqlite3_close(db_); db_ = nullptr; } }
     void put(const BlockRec& b) override {
         sqlite3_reset(ins_);
         sqlite3_bind_int64(ins_, 1, static_cast<sqlite3_int64>(b.num));
@@ -72,12 +78,9 @@ public:
         sqlite3_step(ins_);
     }
     void flush() override {
-        exec(db_, "COMMIT");   // closes the bulk-load transaction opened in open()
-        exec(db_, "ANALYZE");
+        if (tuned_) { exec(db_, "COMMIT"); exec(db_, "ANALYZE"); }
     }
-    bool getByNum(uint64_t num, Bytes& out) override {
-        return one(byNum_, num, out, false);
-    }
+    bool getByNum(uint64_t num, Bytes& out) override { return one(byNum_, num, out); }
     bool getById(const Bytes& id, Bytes& out) override {
         sqlite3_reset(byId_);
         bindBlob(byId_, 1, id);
@@ -119,7 +122,7 @@ private:
     void prep(sqlite3* db, const char* sql, sqlite3_stmt** st) {
         sqlite3_prepare_v2(db, sql, -1, st, nullptr);
     }
-    bool one(sqlite3_stmt* st, uint64_t k, Bytes& out, bool) {
+    bool one(sqlite3_stmt* st, uint64_t k, Bytes& out) {
         sqlite3_reset(st);
         sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(k));
         if (sqlite3_step(st) == SQLITE_ROW) { out = colBlob(st, 0); return true; }
@@ -138,6 +141,7 @@ private:
     }
     uint64_t cnt(const char* sql) { uint64_t v = 0; agg(sql, v); return v; }
 
+    bool tuned_;
     std::string path_;
     sqlite3* db_ = nullptr;
     sqlite3_stmt* ins_ = nullptr, *byNum_ = nullptr, *byId_ = nullptr;
@@ -146,18 +150,19 @@ private:
 // ---------------------------------------------------------------- coin R2
 class SqliteCoin : public CoinStore {
 public:
-    const char* engine() const override { return "sqlite"; }
-    void open(const std::string& path, const OpenOpts& o) override {
+    explicit SqliteCoin(bool tuned) : tuned_(tuned) {}
+    const char* engine() const override { return tuned_ ? "sqlite" : "sqlite-plain"; }
+    void open(const std::string& path, const OpenOpts&) override {
         path_ = path;
         sqlite3_open(path.c_str(), &db_);
-        configure(db_, o);
+        if (tuned_) configure(db_);
         exec(db_, "CREATE TABLE IF NOT EXISTS coins("
                   "coinid BLOB PRIMARY KEY, addr BLOB, amount INTEGER, proof BLOB)");
         exec(db_, "CREATE INDEX IF NOT EXISTS idx_coins_addr ON coins(addr)");
         exec(db_, "DELETE FROM coins");
-        prep(db_, "INSERT OR REPLACE INTO coins(coinid,addr,amount,proof) VALUES(?,?,?,?)", &ins_);
-        prep(db_, "SELECT coinid,amount,proof FROM coins WHERE coinid=?", &get_);
-        exec(db_, "BEGIN");
+        sqlite3_prepare_v2(db_, "INSERT OR REPLACE INTO coins(coinid,addr,amount,proof) VALUES(?,?,?,?)", -1, &ins_, nullptr);
+        sqlite3_prepare_v2(db_, "SELECT coinid,amount,proof FROM coins WHERE coinid=?", -1, &get_, nullptr);
+        if (tuned_) exec(db_, "BEGIN");
     }
     void close() override { if (db_) { sqlite3_close(db_); db_ = nullptr; } }
     void put(const CoinRec& c) override {
@@ -168,7 +173,7 @@ public:
         bindBlob(ins_, 4, c.proof);
         sqlite3_step(ins_);
     }
-    void flush() override { exec(db_, "COMMIT"); exec(db_, "ANALYZE"); }
+    void flush() override { if (tuned_) { exec(db_, "COMMIT"); exec(db_, "ANALYZE"); } }
     bool get(const Bytes& coinid, Bytes& out) override {
         sqlite3_reset(get_);
         bindBlob(get_, 1, coinid);
@@ -198,9 +203,7 @@ public:
     }
 
 private:
-    void prep(sqlite3* db, const char* sql, sqlite3_stmt** st) {
-        sqlite3_prepare_v2(db, sql, -1, st, nullptr);
-    }
+    bool tuned_;
     std::string path_;
     sqlite3* db_ = nullptr;
     sqlite3_stmt* ins_ = nullptr, *get_ = nullptr;
@@ -208,7 +211,9 @@ private:
 
 }  // namespace
 
-std::unique_ptr<ArchiveStore> make_sqlite_archive() { return std::make_unique<SqliteArchive>(); }
-std::unique_ptr<CoinStore> make_sqlite_coin() { return std::make_unique<SqliteCoin>(); }
+std::unique_ptr<ArchiveStore> make_sqlite_archive() { return std::make_unique<SqliteArchive>(true); }
+std::unique_ptr<CoinStore> make_sqlite_coin() { return std::make_unique<SqliteCoin>(true); }
+std::unique_ptr<ArchiveStore> make_sqlite_plain_archive() { return std::make_unique<SqliteArchive>(false); }
+std::unique_ptr<CoinStore> make_sqlite_plain_coin() { return std::make_unique<SqliteCoin>(false); }
 
 }  // namespace eng

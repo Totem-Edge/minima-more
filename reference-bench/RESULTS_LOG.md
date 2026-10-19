@@ -544,6 +544,24 @@ DuckDB for R3 analytics (wins ~7-17x but ~100-300x slower point gets), RocksDB
 write-optimised. Raw: `results/engines-local-20261019/`. Next: re-run at
 mainnet scale (2.4M/1.7M) on the A1.
 
+## 2026-10-19 — RFC-0003: sqlite-plain baseline (does the SQLite tuning count?)
+Added a `sqlite-plain` engine (stock SQLite defaults, per-row autocommit) alongside
+the node's tuned+batched `sqlite`, to quantify the optimisation inside the harness.
+M1, 30k blocks / 20k coins (single run):
+
+| Metric | sqlite (tuned) | sqlite-plain | LMDB | RocksDB | DuckDB |
+|---|---|---|---|---|---|
+| archive bulk load (rows/s) | 302,412 | **1,932** | 286,444 | 265,100 | 102,249 |
+| coin bulk load (rows/s) | 339,034 | **2,608** | 386,829 | 210,975 | 493,950 |
+| archive get-by-num p50 (µs) | 2.33 | 6.67 | 1.38 | 1.67 | 886.54 |
+| coin get p50 (µs) | 2.08 | 6.75 | 0.71 | 0.87 | 158.79 |
+
+So the node's tuning (WAL + synchronous=NORMAL + temp_store + cache + mmap + busy
+timeout, and batched writes) makes SQLite **~150× faster to bulk-load** than stock
+and ~3× faster on point gets — confirming the earlier standalone result (RESULTS_LOG
+2026-10-18). The engine comparison above is therefore the tuned node config, not
+plain SQLite. Raw: `results/engines-local-20261019/`.
+
 ## Planned next
 - Quiet-host, multi-rep harness mode for decision-grade numbers.
 - Cross-impl / Java two-node sync (C++↔Java) and a **large-chain sync throughput**

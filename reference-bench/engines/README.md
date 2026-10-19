@@ -21,7 +21,8 @@ Output lands in `../results/<ts>-engines-<arch>/`: `ENGINE_BENCH_SUMMARY.md`
 
 | Engine | Status | Notes |
 |---|---|---|
-| SQLite | **built** | baseline; matches the node's current embedded usage |
+| SQLite | **built** | baseline; **the node's tuned+batched config** (WAL, NORMAL, mmap, one bulk txn) |
+| SQLite (plain) | **built** | stock defaults + per-row commits — the untuned reference point |
 | LMDB | **built** | mmap B+tree; secondary-index DBI for getById / prefix scan |
 | RocksDB | **built** | LSM KV; WriteBatch bulk load; Checkpoint snapshot |
 | DuckDB | **built** | columnar; Appender bulk load; loses point lookups, wins analytics |
@@ -37,6 +38,12 @@ Output lands in `../results/<ts>-engines-<arch>/`: `ENGINE_BENCH_SUMMARY.md`
 | coin bulk load (rows/s) | 261,733 | 319,176 | 179,001 | **328,214** |
 | coin get p50 (µs) | 3.29 | **1.75** | 2.08 | 578.75 |
 | coin on-disk (MB) | 44 | 56 | **38** | 42 |
+
+**Tuning is included, and it matters.** "SQLite" above is the node's tuned+batched
+config; an untuned `sqlite-plain` baseline (stock pragmas, per-row commits) loads
+**~150× slower** (archive 1.9k vs 302k rows/s; coin 2.6k vs 339k) with ~3× slower
+point gets. So the comparison pits the *optimised* node config against the other
+engines, not stock SQLite.
 
 As RFC-0001 predicted: **LMDB** leads point lookups (zero-copy mmap), **DuckDB**
 wins analytics (~7–17×) but is ~100–300× slower per point get, SQLite sits in the

@@ -74,6 +74,8 @@ public:
 // was absent at build time), so the runner simply skips it.
 std::unique_ptr<ArchiveStore> make_sqlite_archive();
 std::unique_ptr<CoinStore> make_sqlite_coin();
+std::unique_ptr<ArchiveStore> make_sqlite_plain_archive();  // stock defaults, per-row
+std::unique_ptr<CoinStore> make_sqlite_plain_coin();
 std::unique_ptr<ArchiveStore> make_lmdb_archive();
 std::unique_ptr<CoinStore> make_lmdb_coin();
 std::unique_ptr<ArchiveStore> make_rocksdb_archive();
