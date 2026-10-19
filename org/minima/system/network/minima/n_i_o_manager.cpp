@@ -1026,8 +1026,21 @@ std::shared_ptr<org::minima::objects::Greeting> NIOManager::sendPingMessage(cons
         setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
 
-        // Send the raw MiniData bytes exactly as Java does (MiniData already frames itself)
-        const std::vector<std::uint8_t>& outbuf = msgdata.getBytes();
+        // The NIO wire format is [4-byte big-endian length][payload]. The normal
+        // send path (NIOClient write loop) prepends that length; a raw-socket send
+        // must frame it the same way, otherwise the peer reads the leading payload
+        // bytes as a bogus length and drops the connection (this is why SINGLE_PING
+        // discovery silently failed against live peers).
+        const std::vector<std::uint8_t>& rawpayload = msgdata.getBytes();
+        const std::uint32_t plen = static_cast<std::uint32_t>(rawpayload.size());
+        std::vector<std::uint8_t> outbuf;
+        outbuf.reserve(4 + rawpayload.size());
+        outbuf.push_back(static_cast<std::uint8_t>((plen >> 24) & 0xFF));
+        outbuf.push_back(static_cast<std::uint8_t>((plen >> 16) & 0xFF));
+        outbuf.push_back(static_cast<std::uint8_t>((plen >> 8) & 0xFF));
+        outbuf.push_back(static_cast<std::uint8_t>(plen & 0xFF));
+        outbuf.insert(outbuf.end(), rawpayload.begin(), rawpayload.end());
+
         const char* buf = reinterpret_cast<const char*>(outbuf.data());
         std::size_t remaining = outbuf.size();
         while (remaining > 0) {

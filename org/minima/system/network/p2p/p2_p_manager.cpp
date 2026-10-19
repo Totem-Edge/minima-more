@@ -1,6 +1,7 @@
 #include "org/minima/system/network/p2p/p2_p_manager.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <set>
 #include <thread>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include "org/minima/system/network/p2p/params/p2_p_params.hpp"
 
 #include "org/minima/utils/minima_logger.hpp"
+#include "org/minima/utils/r_p_c_client.hpp"
 
 #include "org/minima/database/minima_d_b.hpp"
 #include "org/minima/system/network/p2p/p2_p_d_b.hpp"
@@ -239,11 +241,65 @@ std::vector<Message> P2PManager::init(P2PState& state) {
     return msgs;
 }
 
+namespace {
+// Baked-in peer-list sources. The node fetches BOTH and merges the host:port
+// entries, to seed discovery when no compiled-in or -p2pnodes list is present.
+std::vector<org::minima::system::network::p2p::params::InetSocketAddress> fetchDefaultPeerSeeds() {
+    static std::vector<org::minima::system::network::p2p::params::InetSocketAddress> cached;
+    static bool loaded = false;
+    if (loaded) return cached;
+    loaded = true;
+
+    static const char* s_urls[] = {
+        "https://eurobuddha.com/minimapeers.txt",
+        "https://spartacusrex.com/minimapeers.txt"
+    };
+
+    std::set<std::string> seen;
+    for (const char* url : s_urls) {
+        std::string body;
+        try {
+            body = org::minima::utils::RPCClient::sendGET(url);
+        } catch (const std::exception& e) {
+            org::minima::utils::MinimaLogger::log(std::string("Peer list fetch failed: ") + url + " : " + e.what());
+            continue;
+        }
+        // Lists are comma / whitespace separated host:port entries.
+        std::size_t i = 0;
+        while (i < body.size()) {
+            while (i < body.size() && (body[i] == ',' || std::isspace(static_cast<unsigned char>(body[i])))) ++i;
+            std::size_t j = i;
+            while (j < body.size() && body[j] != ',' && !std::isspace(static_cast<unsigned char>(body[j]))) ++j;
+            if (j > i) {
+                std::string tok = body.substr(i, j - i);
+                std::size_t colon = tok.rfind(':');
+                if (colon != std::string::npos) {
+                    try {
+                        int p = std::stoi(tok.substr(colon + 1));
+                        if (p > 0 && seen.insert(tok).second) {
+                            cached.emplace_back(tok.substr(0, colon), p);
+                        }
+                    } catch (...) {
+                        // skip malformed entry
+                    }
+                }
+            }
+            i = j;
+        }
+    }
+    if (!cached.empty()) {
+        org::minima::utils::MinimaLogger::log("[+] Loaded " + std::to_string(cached.size())
+                                              + " default peers from peer-list URLs");
+    }
+    return cached;
+}
+} // namespace
+
 void P2PManager::doDiscoveryPing() {
-    // Discovery sources: the compiled-in seed list, otherwise the peers we are
-    // already connected to. Using connected peers lets a node started with only
-    // -p2pnodes learn the wider network instead of staying on one connection
-    // (and it feeds the peer's advertised "peers-list" to the PeersChecker).
+    // Discovery sources, in order: the compiled-in seed list; then the configured
+    // -p2pnodes (excluding peers we already link to); then the baked-in peer-list
+    // URLs. This lets a node with no compiled seed list still bootstrap the wider
+    // network and fan out beyond its single connection.
     auto seeds = P2PParams::DEFAULT_NODE_LIST;
 
     if (seeds.empty() && !org::minima::system::params::GeneralParams::P2P_ADDNODES.empty()) {
@@ -284,6 +340,10 @@ void P2PManager::doDiscoveryPing() {
                 // skip malformed entry
             }
         }
+    }
+
+    if (seeds.empty()) {
+        seeds = fetchDefaultPeerSeeds();
     }
 
     if (seeds.empty()) {
