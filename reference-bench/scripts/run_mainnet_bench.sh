@@ -31,13 +31,22 @@ run_one() {
     pid=$(start_node "$name" "$dir" "$OUT/${name}_mainnet.log" "$port" -p2pnodes "$PEERS")
     wait_ready "$OUT/${name}_mainnet.log" || true
 
-    peak=0; tipms=""
+    # p2p_poll <rpcport> -> NP = connections, NK = known peers
+    p2p_poll() {
+        _n=$(rpc "$1" network 2>/dev/null)
+        NP=$(echo "$_n" | grep -o '"connected":[0-9]*' | head -1 | grep -o '[0-9]*' || true); [ -z "$NP" ] && NP=0
+        NK=$(echo "$_n" | grep -o '"numKnownPeers":[0-9]*' | head -1 | grep -o '[0-9]*' || true); [ -z "$NK" ] && NK=0
+    }
+    peak=0; tipms=""; firstpeer=""; n5=""
     for i in $(seq 1 $((MAX_WAIT * 2))); do
         r=$(rss "$pid"); [ -n "$r" ] && [ "$r" -gt "$peak" ] 2>/dev/null && peak=$r
         if [ -z "$tipms" ]; then
             b=$(rpc "$rpc" block | grep -o '"block":"[0-9]*"' | head -1 | grep -o '[0-9]*' || true)
             if [ -n "$b" ] && [ "$b" -gt 1 ] 2>/dev/null; then tipms=$(now); fi
         fi
+        p2p_poll "$rpc"
+        [ -z "$firstpeer" ] && [ "$NP" -ge 1 ] 2>/dev/null && firstpeer=$(now)
+        [ -z "$n5" ] && [ "$NP" -ge 5 ] 2>/dev/null && n5=$(now)
         [ -n "$tipms" ] && break
         sleep 0.5
     done
@@ -49,9 +58,18 @@ run_one() {
     for k in $(seq 1 "$SETTLE"); do
         r=$(rss "$pid"); [ -z "$r" ] && break
         { [ "$min" -eq 0 ] || [ "$r" -lt "$min" ]; } && min=$r
-        sum=$((sum + r)); n=$((n + 1)); sleep 1
+        sum=$((sum + r)); n=$((n + 1))
+        p2p_poll "$rpc"
+        [ -z "$firstpeer" ] && [ "$NP" -ge 1 ] 2>/dev/null && firstpeer=$(now)
+        [ -z "$n5" ] && [ "$NP" -ge 5 ] 2>/dev/null && n5=$(now)
+        sleep 1
     done
     c1=$(cpusec "$pid"); idle=$(rss "$pid"); thr=$(nthreads "$pid")
+    p2p_poll "$rpc"; peers_reached=$NP; known_peers=$NK
+    p2p_first_s=$(awk -v a="${firstpeer:-$t0}" -v b="$t0" 'BEGIN{printf "%.2f", a-b}')
+    p2p_n5_s=$(awk -v a="${n5:-$t0}" -v b="$t0" 'BEGIN{printf "%.2f", a-b}')
+    [ -z "$firstpeer" ] && p2p_first_s="-"
+    [ -z "$n5" ] && p2p_n5_s="-"
     dk=$(du -sk "$dir" 2>/dev/null | cut -f1)
     cpu_settle=$(awk -v a="$c1" -v b="$c0" 'BEGIN{printf "%.3f", a-b}')
     avg=0; [ "$n" -gt 0 ] && avg=$((sum / n))
@@ -68,6 +86,10 @@ run_one() {
         echo "cpu_seconds_settle	$cpu_settle	s"
         echo "threads	$thr	"
         echo "datadir_kb	$dk	kB"
+        echo "p2p_peers_reached	$peers_reached	"
+        echo "p2p_known_peers	$known_peers	"
+        echo "p2p_time_first_peer_s	$p2p_first_s	s"
+        echo "p2p_time_to_5_peers_s	$p2p_n5_s	s"
     } | tee "$OUT/${name}_mainnet_bench.txt"
 }
 
@@ -90,6 +112,10 @@ if [ -f "$OUT/cpp_mainnet_bench.txt" ] || [ -f "$OUT/java_mainnet_bench.txt" ]; 
         echo "| CPU-seconds over ${SETTLE}s settle | $(g cpp cpu_seconds_settle) | $(g java cpu_seconds_settle) |"
         echo "| threads | $(g cpp threads) | $(g java threads) |"
         echo "| data dir (kB) | $(g cpp datadir_kb) | $(g java datadir_kb) |"
+        echo "| P2P peers reached | $(g cpp p2p_peers_reached) | $(g java p2p_peers_reached) |"
+        echo "| P2P known peers | $(g cpp p2p_known_peers) | $(g java p2p_known_peers) |"
+        echo "| P2P time to first peer (s) | $(g cpp p2p_time_first_peer_s) | $(g java p2p_time_first_peer_s) |"
+        echo "| P2P time to 5 peers (s) | $(g cpp p2p_time_to_5_peers_s) | $(g java p2p_time_to_5_peers_s) |"
     } | tee "$OUT/MAINNET_BENCH_SUMMARY.md"
 fi
 echo "DONE -> $OUT"
