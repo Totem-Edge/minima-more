@@ -3,7 +3,21 @@
 # Resolve paths relative to this script, not the caller's cwd.
 _BENCH_DIR=$(cd "$(dirname "$0")/.." && pwd)          # reference-bench/
 PROJECT_DIR=$(cd "$_BENCH_DIR/.." && pwd)             # this C++ project
-CRYSTAL_LABS=$(cd "$PROJECT_DIR/../.." && pwd)        # CRYSTAL_LABS/
+
+# Locate the workspace root that holds reference/minima-core. The repo lives at
+# different depths across hosts (e.g. CRYSTAL_LABS/SIDE_Projects/<proj> on macOS
+# but ~/pm/src on the ARM bench box), so walk up instead of assuming ../.. depth.
+# Otherwise MINIMA_CORE points at a non-existent dir, the java classpath loses
+# its jars and the node dies with NoClassDefFoundError: org/h2/Driver.
+CRYSTAL_LABS=${CRYSTAL_LABS:-}
+if [ -z "$CRYSTAL_LABS" ]; then
+    _d=$PROJECT_DIR
+    while [ -n "$_d" ] && [ "$_d" != "/" ]; do
+        if [ -d "$_d/reference/minima-core" ]; then CRYSTAL_LABS=$_d; break; fi
+        _d=$(dirname "$_d")
+    done
+fi
+[ -z "$CRYSTAL_LABS" ] && CRYSTAL_LABS=$(cd "$PROJECT_DIR/../.." && pwd)   # legacy fallback
 
 MINIMA_CORE=${MINIMA_CORE:-$CRYSTAL_LABS/reference/minima-core}
 MC_BUILD=${MC_BUILD:-/tmp/minima-core-build}
