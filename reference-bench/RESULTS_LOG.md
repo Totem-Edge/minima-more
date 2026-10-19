@@ -503,6 +503,28 @@ New harness: `run_mainnet_bench.sh` (live mainnet, C++ vs Java) and
 `run_mainnet_commands.sh` (core-command smoke); `run_mainnet_sync.sh` picks a
 unique advertised port per run to avoid the peers' ~30-min IBD rate limit.
 
+## 2026-10-19 — RFC-0003 embedded engine harness (SQLite vs LMDB, first results)
+Added `reference-bench/engines/` per RFC-0003: a common `ArchiveStore`/`CoinStore`
+interface, a deterministic mainnet-shaped dataset, per-engine drivers, and a runner
+that emits `ENGINE_BENCH_SUMMARY.md` + `raw.tsv`. SQLite (baseline) and LMDB are
+built and run here; RocksDB/DuckDB are scaffolds (to be built on the A1 host).
+
+M1, 100k blocks / 60k coins, 2k lookups, scan span 5k (single run, indicative):
+
+| Metric | SQLite | LMDB |
+|---|---|---|
+| archive bulk load (rows/s) | 249,658 | 540,246 |
+| archive point get p50/p95 (us) | 2 / 3 | 1 / 1 |
+| coin point get p50/p95 (us) | 2 / 4 | 1 / 2 |
+| archive analytics (ms) | 11 | 5 |
+| archive on-disk (MB) | 76 | 75 |
+| coin on-disk (MB) | 22 | 28 |
+
+Consistent with RFC-0001: LMDB edges point lookups (zero-copy mmap) and is lighter
+on the analytics scan; SQLite holds its own on bulk load and coin-store footprint.
+Next: RocksDB + DuckDB on the A1, mainnet-scale (2.4M blocks / 1.7M coins), and the
+point-vs-analytics split. Raw: `results/engines-local-20261019/`.
+
 ## Planned next
 - Quiet-host, multi-rep harness mode for decision-grade numbers.
 - Cross-impl / Java two-node sync (C++↔Java) and a **large-chain sync throughput**

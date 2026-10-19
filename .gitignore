@@ -57,3 +57,13 @@ translation_thoughts.log
 # Stray in-tree built artifacts
 /tests/test_sha3
 /g++
+
+# Engine-bench generated stores / binaries / snapshots (RFC-0003)
+reference-bench/results/**/bench_engines
+reference-bench/results/**/*.mdb
+reference-bench/results/**/*.snap
+reference-bench/results/**/sqlite.*
+reference-bench/results/**/*.archive
+reference-bench/results/**/*.coins
+reference-bench/results/**/*.coins.snap
+reference-bench/results/**/*.archive.snap
