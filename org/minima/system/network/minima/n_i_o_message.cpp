@@ -199,6 +199,38 @@ std::string NIOMessage::convertMessageType(const MiniByte& zType) {
     return "UNKNOWN_" + zType.toString();
 }
 
+namespace {
+// Non-owning stream over the message bytes: avoids copying every network
+// message into a std::string and then into an istringstream.
+class ByteVectorStreamBuf : public std::streambuf {
+public:
+    explicit ByteVectorStreamBuf(const std::vector<std::uint8_t>& data) {
+        char* base = const_cast<char*>(reinterpret_cast<const char*>(data.data()));
+        setg(base, base, base + data.size());
+    }
+
+protected:
+    pos_type seekoff(off_type off, std::ios_base::seekdir dir,
+                     std::ios_base::openmode which) override {
+        if (!(which & std::ios_base::in)) return pos_type(off_type(-1));
+        char* base = eback();
+        char* end = egptr();
+        char* target = nullptr;
+        if (dir == std::ios_base::beg) target = base + off;
+        else if (dir == std::ios_base::cur) target = gptr() + off;
+        else if (dir == std::ios_base::end) target = end + off;
+        else return pos_type(off_type(-1));
+        if (target < base || target > end) return pos_type(off_type(-1));
+        setg(base, target, end);
+        return pos_type(target - base);
+    }
+
+    pos_type seekpos(pos_type pos, std::ios_base::openmode which) override {
+        return seekoff(off_type(pos), std::ios_base::beg, which);
+    }
+};
+} // namespace
+
 void NIOMessage::run() {
     if (!mData) {
         return;
@@ -212,8 +244,8 @@ void NIOMessage::run() {
 
     // Convert MiniData bytes to input stream
     const std::vector<std::uint8_t>& raw = mData->getBytes();
-    std::string inbuf(reinterpret_cast<const char*>(raw.data()), raw.size());
-    std::istringstream dis(inbuf, std::ios::binary);
+    ByteVectorStreamBuf msgbuf(raw);
+    std::istream dis(&msgbuf);
 
     try {
         // Type

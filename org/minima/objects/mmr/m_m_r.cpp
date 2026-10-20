@@ -643,6 +643,7 @@ void MMR::readDataStream(std::istream& in) {
     invalidatePeakCache();
 
     int len = MiniNumber::ReadFromStream(in).getAsInt();
+    if (len > 0) mSetEntries.reserve(static_cast<std::size_t>(len));
     for (int i = 0; i < len; ++i) {
         MMREntry entry = MMREntry::ReadFromStream(in);
         setEntry(entry.getRow(), entry.getEntryNumber(), *entry.getMMRData());

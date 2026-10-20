@@ -516,6 +516,7 @@ void IBD::readDataStream(std::istream& in) {
 
     mTxBlocks.clear();
     int len = MiniNumber::ReadFromStream(in).getAsInt();
+    if (len > 0) mTxBlocks.reserve(static_cast<std::size_t>(len));
     for (int i = 0; i < len; ++i) {
         auto blk = org::minima::objects::TxBlock::ReadFromStream(in);
         // Support both unique_ptr/shared_ptr return types by moving into our shared_ptr container
