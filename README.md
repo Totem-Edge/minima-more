@@ -521,6 +521,7 @@ Results land in `reference-bench/results/<timestamp>/`, including
 `SWEEP_SUMMARY.md`. The checked-in one-host run for this README is:
 - [`results/aws8-mainnet-0.2b/`](reference-bench/results/aws8-mainnet-0.2b/) — live mainnet, C++ vs Java (v0.2 + zero-copy build)
 - [`results/aws8-full/`](reference-bench/results/aws8-full/), [`aws8-archive/`](reference-bench/results/aws8-archive/), [`aws8-megammr/`](reference-bench/results/aws8-megammr/) — node modes
+- [`results/aws8-megammr-populated/`](reference-bench/results/aws8-megammr-populated/), [`aws8-archive-full/`](reference-bench/results/aws8-archive-full/) — populated mode findings
 - [`results/aws8-core/`](reference-bench/results/aws8-core/) — WOTS / SHA3 / MMR
 - [`results/aws8-sweep/`](reference-bench/results/aws8-sweep/) — full lifecycle sweep
 - [`results/aws8-engines/`](reference-bench/results/aws8-engines/) — storage engines
