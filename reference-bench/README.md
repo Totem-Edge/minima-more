@@ -128,7 +128,9 @@ Operational notes learned the hard way:
 - Detach long remote runs explicitly (`setsid … </dev/null &`); backgrounded nodes
   otherwise hold the SSH channel open.
 
-See `RESULTS_LOG.md` (2026-10-17 entry) for the A1 MMR-RAM curve and two-node sync.
+See `RESULTS_LOG.md` for the canonical, chronological record. The current
+one-host AWS 8 GB (Neoverse-N1) v0.2 results are in the 2026-10-20 entry, with raw
+output under `results/aws8-*`.
 
 ## Result recording convention
 

@@ -594,3 +594,161 @@ here: `p2p_poll` aborted under `set -e` (non-zero return) and parsed the wrong
 (Done since the prior list: mempool RAM scaling -> `run_mempool_bench.sh`; both
 backlog items - SQLite batched writes + thread-pool sizing - implemented and
 benchmarked; one-command `run_sweep.sh` with Linux-portable toolchain flags.)
+
+# 2026-10-20 — One-host AWS 8 GB (Neoverse-N1) — v0.2 results
+
+All numbers on one host: **AWS `c6g.xlarge` — 4 vCPU / 8 GB / Neoverse-N1
+(aarch64)**, Release build, Java `minima-core` `c2a54a2` where noted.
+
+## Live mainnet — C++ vs Java (zero-copy build)
+
+Fresh sync from the same live peers, 60 s settle, both nodes on the same host.
+
+| Metric | C++ | Java |
+|---|---|---|
+| time to tip (s) | 18.5 | 8.6 |
+| peak RSS during sync | **91 MB** | 478 MB |
+| idle RSS avg | **187 MB** | 711 MB |
+| CPU-seconds / 60 s | 36.5 | 66.6 |
+| threads | **25** | 61 |
+| data dir | **59 MB** | 571 MB |
+| peers reached / known | 3 / 3 | 2 / 8 |
+| time to first peer (s) | 4.8 | 5.3 |
+
+C++ uses the trimmed build (role-based SQLite cache, `malloc_trim`, zero-copy
+`NIOMessage` parsing). Single run; fresh sync is a recent IBD window.
+Raw: `results/aws8-mainnet-0.2b/`.
+
+## Node modes (C++)
+
+Same host, each a fresh sync (60 s settle). Full = the both-node run above;
+Archive/MegaMMR are C++-only dedicated runs.
+
+| Metric | Full | Archive (`-archive`) | MegaMMR (`-megammr`) |
+|---|---|---|---|
+| time to tip (s) | 18.5 | 20.3 | 26.0 |
+| peak RSS | 91 MB | 106 MB | 112 MB |
+| idle RSS | 187 MB | 210 MB | 194 MB |
+| CPU-s / 60 s | 36.5 | 33.1 | 32.3 |
+| threads | 25 | 25 | 25 |
+| data dir | 59 MB | 57 MB | 57 MB |
+| peers reached | 3 | 3 | 2 |
+
+The MegaMMR number here is an **empty** MMR (a normal `-megammr` sync does not
+load the UTXO set); see R2 for the populated cost.
+Raw: `results/aws8-full/`, `aws8-archive/`, `aws8-megammr/`.
+
+## Core crypto / MMR (same host)
+
+| Metric | Java | C++ |
+|---|---|---|
+| WOTS pubkey (ms/op) | 9.91 | 2.25 |
+| WOTS sign batched (ms/op) | 5.24 | 1.10 |
+| WOTS verify (ms/op) | 4.62 | 1.19 |
+| SHA3-256 224B (h/s, 1 thread) | 283k | 967k |
+| MMR addEntry+getRoot (entries/s) | 120k | 212k |
+
+C++ batched WOTS sign is 3.14x scalar and byte-identical.
+Raw: `results/aws8-core/`.
+
+## Storage engines (same host, 200k blocks / 120k coins, 3k lookups)
+
+| Metric | SQLite | sqlite-plain | LMDB | RocksDB |
+|---|---|---|---|---|
+| archive bulk load (rows/s) | 85,140 | 188 | **206,447** | 183,366 |
+| archive get-by-num p50 (us) | 6.46 | 8.71 | **1.71** | 3.62 |
+| archive analytics (ms) | 52 | 83 | **27** | 61 |
+| archive on-disk (MB) | 153 | 153 | 183 | **135** |
+| coin bulk load (rows/s) | 173,643 | 193 | **279,742** | 138,229 |
+| coin get p50 (us) | 4.92 | 11.10 | **1.26** | 3.25 |
+| coin on-disk (MB) | 44 | 44 | 58 | **38** |
+
+DuckDB was not installable on this host; on M1 it was ~2 ms for analytics but
+~100-300x slower per point get, so it is an R3-only candidate. Tuned SQLite is
+~450x faster to bulk-load than `sqlite-plain`.
+Raw: `results/aws8-engines/`.
+
+## Lifecycle (same host)
+
+| Metric | C++ | Java |
+|---|---|---|
+| genesis creation / daemon ready (s) | 3.20 / 3.21 | 5.16 / 5.17 |
+| fully-synced peak / idle RSS | 20 / 21 MB | 207 / 151 MB |
+| initial sync (small chain) | 5.10 s | 4.87 s |
+| CPU at idle (CPU-s/h; %) | **66.8; 1.86%** | 102.5; 2.85% |
+| CPU under tx load (ms/tx) | **2,070** | 2,855 |
+| send latency under load | **569 ms** | 2,298 ms |
+| disk writes at idle (MB/h; MB/day) | **4.18; 100** | 5.90; 142 |
+| threads | 23-25 | 53-58 |
+
+MMR 300k: 635 B/entry (C++ RSS) vs 622 B (Java heap); peak RSS 186 MB vs 585 MB.
+Mempool 100k: `checkForCoinID` **0.97 us vs 20,417 us**; peak RSS 729 MB vs
+1,335 MB. SQLite 25k: per-row 2,183/s vs batched **7,681/s (3.52x)**.
+Raw: `results/aws8-sweep/`.
+
+## Memory campaign (same host)
+
+- **Role-based SQLite cache:** anonymous RSS **224 -> 160 MB** at the same block
+  height (4/8/16 MiB per role instead of 16 MiB x 6 connections).
+- **`malloc_trim`:** steady-state RSS **261-282 -> ~196 MB**; `memreport
+  trim:true` reaches **~169 MB**.
+- **Zero-copy `NIOMessage` + reserves:** C++-only peak **103 -> 87 MB**, idle
+  **186 -> 165 MB**, CPU **33.7 -> 25.1 CPU-s** (single run; the both-node pair
+  is 91 MB / 187 MB / 36.5 CPU-s).
+- **Bounded key precompute:** 16/32/64 by RAM (`MINIMA_INIT_KEYS`).
+- **jemalloc A/B:** **-35 MB** steady-state (219 -> 180 MB).
+- `memreport` reports process/anon/file, DB sizes, chain-byte attribution,
+  SQLite page cache, thread stacks and glibc arena/in-use/free.
+
+## R2 — LMDB coin store (populated MegaMMR)
+
+Real `mega.mmr` (504,893,547 bytes; 465,588 coins), imported then restarted
+`-megammr`.
+
+| Metric | In-memory map | LMDB |
+|---|---|---|
+| anonymous RSS | ~1.23 GB | **~573 MB** |
+| total RSS (idle) | ~1.24 GB | ~1.17 GB (~617 MB reclaimable mmap) |
+| warm idle RSS | — | **~522 MB** |
+| store on disk | — | 608 MB (`coins.lmdb`, 0600) |
+| startup | ~87 s | **22 s first load / 10 s warm restart** |
+
+Warm restart skips the raw coin payload via a sidecar fingerprint
+(`megammr.mmr.meta`) and reads only the MMR. `megammr action:info` reports
+`coin_store:lmdb`. Raw: `results/aws8-megammr-populated/`.
+
+## Archive populated
+
+Raw export 1.41 GB / 2,374,319 blocks.
+
+- Import is **memory-bounded (~495 MB)** after: skipping historical blocks in
+  the RAM TxPoW DB, resync queue backpressure, batched tree recalc, and WAL
+  checkpointing (previously OOM-killed at ~7.5 GB).
+- Uncompressed archive DB: **1.8 GB at 692k blocks -> ~6 GB projected** for the
+  full chain, so an 8 GB disk cannot hold a complete archive uncompressed.
+- **Do not prune a complete archive.** Compression / a compressed engine is the
+  path. Throughput is ~570 blocks/s (per-block inserts; batching is the next win).
+- A live archive-node resync (recent range 2,332,915 -> 2,376,483) produced a
+  **149 MB** DB.
+Raw: `results/aws8-archive-full/`.
+
+## Role-based DB lockdown, bootstrap URLs
+
+- Wallet: `synchronous=FULL` + `secure_delete=ON`; other DBs `NORMAL`;
+  `trusted_schema=OFF`; DB/WAL/SHM and `megammr.mmr`/LMDB files **0600**;
+  process `umask(077)`.
+- Mode-default bootstrap URLs: `https://eurobuddha.com/mega.mmr` and
+  `https://eurobuddha.com/archive.raw.dat`; override with
+  `-megammrurl`/`-archiveurl` or `MINIMA_MEGAMMR_URL`/`MINIMA_ARCHIVE_URL`.
+  `megammr`/`archive action:import` download when no file is given.
+
+## Release
+
+v0.2.0 published with standard + **fully static** tarballs (x86_64/aarch64).
+
+## Planned next
+
+- Searcher: filter over LMDB cursors instead of materialising `getAllCoins()`
+  (transient ~1.2 GB spike on `balance`/`coins`).
+- Archive: block compression + batched inserts.
+- Optional DuckDB R3 analytics; v0.2.1 release.
