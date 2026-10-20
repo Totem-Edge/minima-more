@@ -269,12 +269,22 @@ void Minima::main(const std::vector<std::string>& zArgs) {
         
             const std::unordered_map<std::string, std::string> env = collect_environment();
         
-            configurer.usingConfFile(zArgs);
-        
+            // Node-specific flags are not general params; strip them before the
+            // configurer (otherwise it throws "Unknown argument").
+            std::vector<std::string> cfgArgs;
+            cfgArgs.reserve(zArgs.size());
+            for (std::size_t ci = 0; ci < zArgs.size(); ++ci) {
+                if (zArgs[ci] == "-manifest" || zArgs[ci] == "-memreport") continue;
+                if (zArgs[ci] == "-mcp") { if (ci + 1 < zArgs.size()) ++ci; continue; }
+                cfgArgs.push_back(zArgs[ci]);
+            }
+
+            configurer.usingConfFile(cfgArgs);
+
             configurer.usingEnvVariables(env);
-        
-            configurer.usingProgramArgs(zArgs);
-        
+
+            configurer.usingProgramArgs(cfgArgs);
+
             configurer.configure();
 
             // RFC-0011 §6: `-mcp stdio|http` enables the in-node MCP transport.
@@ -335,6 +345,16 @@ void Minima::main(const std::vector<std::string>& zArgs) {
 
         // ... (rest of your original main function from here) ...
         
+        // Diagnostic snapshot at startup (`-memreport`); the node keeps running.
+        for (const auto& a : zArgs) {
+            if (a == "-memreport") {
+                auto r = CommandRunner::getRunner()->runSingleCommand("memreport");
+                std::ostream& os = GeneralParams::MCP_STDIO ? std::cerr : std::cout;
+                if (r) os << r->toString() << std::endl;
+                break;
+            }
+        }
+
         // RFC-0011 §6 Phase D: run the MCP stdio loop (blocking) instead of the
         // interactive console loop; the node runs on its own threads.
         if (GeneralParams::MCP_STDIO) {

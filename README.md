@@ -331,6 +331,11 @@ at the same block height. Override with `MINIMA_SQLITE_CACHE_KIB` /
 the freed key-generation working set. Enable the optional link with
 `-DMINIMA_USE_JEMALLOC=ON` (or `LD_PRELOAD=libjemalloc.so.2`).
 
+**Live breakdown.** The `memreport` command (console/RPC/MCP) and the `-memreport`
+startup flag report process RSS (total/anonymous/file), per-database sizes
+(including WAL), and the sizes of the TxPoW tree, RAM TxPoW DB, cascade and tip
+MMR — so the next memory target is measured, not guessed.
+
 ![SQLite write throughput: batched vs per-row](assets/sqlite_write.svg)
 
 ### 9. Logging

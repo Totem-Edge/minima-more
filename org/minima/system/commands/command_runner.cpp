@@ -81,6 +81,7 @@
 #include "org/minima/system/commands/base/slavenode.hpp"
 #include "org/minima/system/commands/base/status.hpp"
 #include "org/minima/system/commands/base/capabilities.hpp"
+#include "org/minima/system/commands/base/memreport.hpp"
 #include "org/minima/system/commands/base/systemcheck.hpp"
 #include "org/minima/system/commands/base/test.hpp"
 #include "org/minima/system/commands/base/timemilli.hpp"
@@ -407,6 +408,7 @@ std::vector<std::unique_ptr<Command>>& CommandRunner::getPrototypes() {
         s_protos.push_back(std::make_unique<base::quit>());
         s_protos.push_back(std::make_unique<base::status>());
         s_protos.push_back(std::make_unique<base::capabilities>());
+        s_protos.push_back(std::make_unique<base::memreport>());
         s_protos.push_back(std::make_unique<search::coins>());
         s_protos.push_back(std::make_unique<search::txpow>());
         s_protos.push_back(std::make_unique<network::connect>());

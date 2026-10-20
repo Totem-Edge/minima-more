@@ -177,6 +177,7 @@ set(MINIMA_SOURCES
     org/minima/system/commands/base/block.cpp
     org/minima/system/commands/base/burn.cpp
     org/minima/system/commands/base/capabilities.cpp
+    org/minima/system/commands/base/memreport.cpp
     org/minima/system/commands/base/checkaddress.cpp
     org/minima/system/commands/base/coincheck.cpp
     org/minima/system/commands/base/coinexport.cpp
