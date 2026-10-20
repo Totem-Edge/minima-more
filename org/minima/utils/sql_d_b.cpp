@@ -18,6 +18,7 @@
 #include "org/minima/utils/json/j_s_o_n_array.hpp"
 #include "org/minima/utils/json/parser/j_s_o_n_parser.hpp"
 #include "org/minima/utils/json/parser/parse_exception.hpp"
+#include "org/minima/system/params/general_params.hpp"
 #include "org/minima/utils/minima_logger.hpp"
 
 namespace fs = std::filesystem;
@@ -114,7 +115,10 @@ DbTuning tuningForDb(sqlite3* db) {
                p.find("txpow") != std::string::npos) {
         t = {8192, 64};
     } else if (p.find("archive") != std::string::npos) {
-        t = {16384, 128};
+        // The archive DB is loaded even on non-archive nodes, but it is cold
+        // there. Give it a large cache only in archive mode.
+        t = org::minima::system::params::GeneralParams::ARCHIVE ? DbTuning{16384, 128}
+                                                               : DbTuning{4096, 32};
     } else if (p.find("wallet") != std::string::npos) {
         t = {8192, 64};
     }
