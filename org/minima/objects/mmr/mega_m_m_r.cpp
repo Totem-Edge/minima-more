@@ -4,6 +4,9 @@
 #include <chrono>
 #include <unordered_set>
 #include <filesystem>
+#include <fstream>
+#include <cstring>
+#include <cstdint>
 #include <utility> // <-- FIX: Add for std::move
 #if !defined(_WIN32)
 #include <sys/stat.h>
@@ -310,14 +313,81 @@ void MegaMMR::clear() {
     if (mCoinStore) mCoinStore->clear();
 }
 
+bool MegaMMR::coinCacheMetaMatches(const std::filesystem::path& zRaw) const {
+    if (!mCoinStore) return false;
+    std::error_code ec;
+    if (!std::filesystem::exists(zRaw, ec)) return false;
+
+    std::filesystem::path meta = zRaw;
+    meta += ".meta";
+    std::ifstream in(meta, std::ios::binary);
+    if (!in) return false;
+
+    char magic[8];
+    in.read(magic, 8);
+    if (!in || std::memcmp(magic, "MMRMETA1", 8) != 0) return false;
+
+    std::int64_t rawsize = 0, rawmtime = 0, coins = 0;
+    in.read(reinterpret_cast<char*>(&rawsize), sizeof(rawsize));
+    in.read(reinterpret_cast<char*>(&rawmtime), sizeof(rawmtime));
+    in.read(reinterpret_cast<char*>(&coins), sizeof(coins));
+    if (!in) return false;
+
+    const auto sz = std::filesystem::file_size(zRaw, ec);
+    if (ec) return false;
+    const auto mt = std::filesystem::last_write_time(zRaw, ec);
+    if (ec) return false;
+    const std::int64_t mtime = static_cast<std::int64_t>(mt.time_since_epoch().count());
+
+    return static_cast<std::int64_t>(sz) == rawsize &&
+           mtime == rawmtime &&
+           static_cast<std::int64_t>(mCoinStore->size()) == coins &&
+           coins > 0;
+}
+
+void MegaMMR::writeCoinCacheMeta(const std::filesystem::path& zRaw) const {
+    if (!mCoinStore) return;
+    std::error_code ec;
+    const auto sz = std::filesystem::file_size(zRaw, ec);
+    if (ec) return;
+    const auto mt = std::filesystem::last_write_time(zRaw, ec);
+    if (ec) return;
+
+    std::filesystem::path meta = zRaw;
+    meta += ".meta";
+    std::ofstream out(meta, std::ios::binary | std::ios::trunc);
+    if (!out) return;
+
+    const char magic[8] = {'M','M','R','M','E','T','A','1'};
+    out.write(magic, 8);
+    std::int64_t rawsize = static_cast<std::int64_t>(sz);
+    std::int64_t rawmtime = static_cast<std::int64_t>(mt.time_since_epoch().count());
+    std::int64_t coins = static_cast<std::int64_t>(mCoinStore->size());
+    out.write(reinterpret_cast<const char*>(&rawsize), sizeof(rawsize));
+    out.write(reinterpret_cast<const char*>(&rawmtime), sizeof(rawmtime));
+    out.write(reinterpret_cast<const char*>(&coins), sizeof(coins));
+    out.close();
+#if !defined(_WIN32)
+    ::chmod(meta.c_str(), S_IRUSR | S_IWUSR);
+#endif
+}
+
 void MegaMMR::loadMMR(const std::filesystem::path& zFile) {
     try {
         auto fsize = std::filesystem::file_size(zFile);
         MinimaLogger::log("Loading MegaMMR size : " + MiniFormat::formatSize(static_cast<long long>(fsize)));
     } catch (...) {
     }
+    const bool reuseStore = coinCacheMetaMatches(zFile);
+    mSkipCoinLoad = reuseStore;
     MiniFile::loadObjectSlow(zFile, *this);
-    if (mCoinStore) mCoinStore->sync();
+    mSkipCoinLoad = false;
+    if (mCoinStore) {
+        // A full load (re)populated the store; record the fingerprint for the
+        // next start. A reused store already matches and needs no rewrite.
+        if (!reuseStore) writeCoinCacheMeta(zFile);
+        mCoinStore->sync();
+    }
 #if !defined(_WIN32)
     // The MegaMMR holds the full UTXO/coin set - owner-only.
     ::chmod(zFile.c_str(), S_IRUSR | S_IWUSR);
@@ -326,7 +396,10 @@ void MegaMMR::loadMMR(const std::filesystem::path& zFile) {
 
 void MegaMMR::saveMMR(const std::filesystem::path& zFile) {
     MiniFile::saveObjectDirect(zFile, *this);
-    if (mCoinStore) mCoinStore->sync();
+    if (mCoinStore) {
+        writeCoinCacheMeta(zFile);
+        mCoinStore->sync();
+    }
 #if !defined(_WIN32)
     ::chmod(zFile.c_str(), S_IRUSR | S_IWUSR);
 #endif
@@ -362,11 +435,19 @@ void MegaMMR::readDataStream(std::istream& zIn) {
     mMMR->readDataStream(zIn);
     mMMR->setFinalized(false);
 
+    const int size = MiniNumber::ReadFromStream(zIn).getAsInt();
+
+    // Fast restart: the MMR is loaded and the LMDB store already holds exactly
+    // this many coins (fingerprint matched) - skip the coin payload entirely.
+    if (mSkipCoinLoad && mCoinStore &&
+        mCoinStore->size() == static_cast<std::size_t>(size)) {
+        return;
+    }
+
     mAllUnspentCoins.clear();
     mMaterialized = false;
     if (mCoinStore) mCoinStore->clear();
 
-    int size = MiniNumber::ReadFromStream(zIn).getAsInt();
     if (mCoinStore) {
         std::vector<std::shared_ptr<Coin>> batch;
         batch.reserve(10000);

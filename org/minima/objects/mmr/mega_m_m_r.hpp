@@ -92,9 +92,15 @@ private:
     void scanUnspendable();
     void pruneUnspendable(bool zScanMMR);
 
+    // Fast restart: a sidecar records the raw file fingerprint + coin count so a
+    // populated LMDB store can be reused without re-reading every coin.
+    bool coinCacheMetaMatches(const std::filesystem::path& zRaw) const;
+    void writeCoinCacheMeta(const std::filesystem::path& zRaw) const;
+
     // Members
     std::unique_ptr<org::minima::objects::mmr::MMR> mMMR;
     std::unique_ptr<org::minima::objects::coins::CoinStore> mCoinStore;
+    bool mSkipCoinLoad = false;
     mutable bool mMaterialized = false;
     mutable std::unordered_map<std::string, std::unique_ptr<org::minima::objects::Coin>> mAllUnspentCoins;
 

@@ -231,7 +231,9 @@ node mode.
 populated 465,588-coin MMR, **anonymous RSS dropped from ~1.23 GB to ~573 MB**;
 total RSS is ~1.17 GB but ~617 MB of that is mmap page cache (reclaimable, unlike
 heap). `megammr action:info` reports `coin_store:lmdb`, and `memreport` reports
-`mega_coins`/`mega_coin_store`. Store files are `0600`.
+`mega_coins`/`mega_coin_store`. Store files are `0600`. Warm restart is **~10 s**
+(only the MMR is read; the coin payload is skipped via a sidecar fingerprint),
+down from ~87 s; a first full load is ~22 s.
 
 **Archive completeness vs size.** A complete archive is deliberately *not*
 phone-class on storage: the raw export is 1.41 GB (2.37M blocks) and uncompressed

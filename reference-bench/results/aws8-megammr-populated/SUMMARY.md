@@ -22,3 +22,17 @@ Notes:
   **empty** MegaMMR (a normal `-megammr` sync does not load the UTXO set).
 - glibc in-use ~1.21 GB, negligible retained free — the MMR/coins are live data.
 - Role lockdown verified: `megammr.mmr`, wallet and WAL/SHM are mode 0600.
+
+## R2 (LMDB coin store) update
+
+| Metric | In-memory map | LMDB store |
+|---|---|---|
+| Anonymous RSS | ~1.23 GB | **~573 MB** |
+| Total RSS (idle) | ~1.24 GB | ~1.17 GB (~617 MB mmap page cache) |
+| Warm-restart idle RSS | — | **~522 MB** (coins not touched) |
+| Coin store on disk | — | 608 MB (`coins.lmdb`, 0600) |
+| Startup | ~87 s | **22 s first load / 10 s warm restart** |
+
+Warm restart skips the `megammr.mmr` coin payload when a sidecar fingerprint
+(`megammr.mmr.meta`: raw size/mtime + coin count) matches the populated LMDB
+store; only the MMR is read. `megammr action:info` reports `coin_store:lmdb`.
