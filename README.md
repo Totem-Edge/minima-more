@@ -368,9 +368,18 @@ reduction with no behavioural change.
 **Live breakdown.** The `memreport` command (console/RPC/MCP) and the `-memreport`
 startup flag report process RSS (total/anonymous/file), per-database sizes
 (including WAL), byte attribution for the TxPoW tree / RAM TxPoW DB / cascade /
-MMR, and glibc arena/in-use/free — so the next memory target is measured, not
-guessed. `memreport trim:true` returns free pages; `memreport dump:true` triggers
-a jemalloc heap profile when jemalloc is preloaded with `prof:true`.
+MMR, SQLite page-cache usage, resident thread-stack size, and glibc
+arena/in-use/free — so the next memory target is measured, not guessed.
+`memreport trim:true` returns free pages; `memreport dump:true` triggers a
+jemalloc heap profile when jemalloc is preloaded with `prof:true`.
+
+**Where the in-use heap goes.** tcmalloc profiling of a mainnet node shows the
+remaining memory is **chain state, not caches**: `Cascade`/`CascadeNode`
+(~39 MB), `TxPoW`/`TxHeader` (~42 MB), and `MiniData` + vector growth (~75 MB of
+allocations in the network/IBD path, much of it transient during sync). SQLite
+page cache is only ~7 MB and thread stacks are negligible. The next levers are
+removing `MiniData`/`TxPoW` copies and vector growth in `NIOMessage`/IBD, and
+pruning or moving the cascade off-heap (LMDB).
 
 ![SQLite write throughput: batched vs per-row](assets/sqlite_write.svg)
 

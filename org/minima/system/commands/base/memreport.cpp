@@ -3,7 +3,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
+#include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
+
+#include <sqlite3.h>
 
 #include "org/minima/database/minima_d_b.hpp"
 #include "org/minima/database/txpowdb/tx_po_w_d_b.hpp"
@@ -78,6 +84,79 @@ void readProcessMemory(long long& rss, long long& anon, long long& file) {
     (void)rss; (void)anon; (void)file;
 #endif
 }
+
+#if defined(__linux__)
+struct MapRegion {
+    unsigned long long start = 0;
+    unsigned long long end = 0;
+    long long rssKb = 0;
+};
+
+std::vector<MapRegion> readSmaps() {
+    std::vector<MapRegion> out;
+    std::ifstream in("/proc/self/smaps");
+    if (!in) return out;
+    std::string line;
+    MapRegion cur;
+    while (std::getline(in, line)) {
+        if (!line.empty() && std::isxdigit(static_cast<unsigned char>(line[0]))) {
+            unsigned long long s = 0, e = 0;
+            if (std::sscanf(line.c_str(), "%llx-%llx", &s, &e) == 2) {
+                cur.start = s;
+                cur.end = e;
+                cur.rssKb = 0;
+            }
+        } else if (line.rfind("Rss:", 0) == 0) {
+            long long kb = 0;
+            std::sscanf(line.c_str(), "Rss: %lld", &kb);
+            cur.rssKb = kb;
+            if (cur.end > cur.start) out.push_back(cur);
+        }
+    }
+    return out;
+}
+
+// Resident size of the per-thread stacks: locate each thread's startstack in
+// the process maps and sum that region's Rss (deduped by range).
+long long threadStacksKb() {
+    const std::vector<MapRegion> regions = readSmaps();
+    std::set<std::pair<unsigned long long, unsigned long long>> seen;
+    long long total = 0;
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc/self/task", ec)) {
+        const std::string base = entry.path().filename().string();
+        if (base.empty() || !std::isdigit(static_cast<unsigned char>(base[0]))) continue;
+
+        std::ifstream st(entry.path() / "stat");
+        std::string line;
+        if (!std::getline(st, line)) continue;
+        const auto rp = line.rfind(')');
+        if (rp == std::string::npos) continue;
+
+        std::istringstream iss(line.substr(rp + 1));
+        std::string tok;
+        unsigned long long startstack = 0;
+        int idx = 0;
+        while (iss >> tok) {
+            if (idx == 25) {  // field 28 (startstack); tokens after ')' start at field 3
+                try { startstack = std::stoull(tok); } catch (...) {}
+                break;
+            }
+            ++idx;
+        }
+        if (startstack == 0) continue;
+
+        for (const auto& r : regions) {
+            if (startstack >= r.start && startstack < r.end) {
+                if (seen.insert({r.start, r.end}).second) total += r.rssKb;
+                break;
+            }
+        }
+    }
+    return total;
+}
+#endif
 
 // File size in kB, including the SQLite WAL companion (path + "-wal").
 long long sizeKb(const std::filesystem::path& p) {
@@ -247,6 +326,24 @@ std::unique_ptr<org::minima::utils::json::JSONObject> memreport::runCommand() {
     comp.put("cascade_wire_kb", cascBytes / 1024);
     comp.put("attributed_est_mb",
              (ramBytes + treeBytes + treeMmrEntries * 635 + cascBytes) / (1024 * 1024));
+
+    // SQLite page cache across all connections (global counters).
+    {
+        int cur = 0, hw = 0;
+        long long pageKb = 0, overflowKb = 0;
+        if (sqlite3_status(SQLITE_STATUS_PAGECACHE_USED, &cur, &hw, 0) == SQLITE_OK) {
+            pageKb = static_cast<long long>(cur) * 4096 / 1024;
+        }
+        if (sqlite3_status(SQLITE_STATUS_PAGECACHE_OVERFLOW, &cur, &hw, 0) == SQLITE_OK) {
+            overflowKb = static_cast<long long>(cur) / 1024;
+        }
+        comp.put("sqlite_pagecache_kb", pageKb);
+        comp.put("sqlite_pagecache_overflow_kb", overflowKb);
+    }
+
+#if defined(__linux__)
+    comp.put("thread_stacks_kb", threadStacksKb());
+#endif
 
 #if defined(__linux__) && defined(__GLIBC__)
     {
