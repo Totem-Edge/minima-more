@@ -17,7 +17,7 @@ against the same chain and the same peers. Minima More delivers:
 - **~21,000× faster** mempool double-spend lookups (O(1) coin index)
 
 **A running node — same host, same chain**
-- **On live mainnet:** peak sync RSS **~101 MB vs ~457 MB**, idle **~182 MB vs ~698 MB**, data dir **~64 MB vs ~683 MB**
+- **On live mainnet:** peak sync RSS **~91 MB vs ~478 MB**, idle **~187 MB vs ~711 MB**, data dir **~59 MB vs ~571 MB**
 - **~19 MB** idle RSS on a fresh chain vs ~224 MB — about **11× less memory**
 - **68% lower** peak memory for a 300k-entry MMR
 - **60% fewer** OS threads (25 vs 62 on mainnet)
@@ -71,9 +71,9 @@ the same machine.
 |---|---|---|
 | Idle process RAM (fresh chain) | **~19 MB** | ~224 MB |
 | Peak startup RAM (fresh chain) | **~19 MB** | ~224 MB |
-| Live mainnet — peak sync RAM | **~101 MB** | ~457 MB |
-| Live mainnet — idle RAM | **~182 MB** | ~698 MB |
-| Live mainnet — data dir | **~64 MB** | ~683 MB |
+| Live mainnet — peak sync RAM | **~91 MB** | ~478 MB |
+| Live mainnet — idle RAM | **~187 MB** | ~711 MB |
+| Live mainnet — data dir | **~59 MB** | ~571 MB |
 | Threads (live mainnet) | **25** | 61 |
 | MMR, 300k entries — peak RSS | **186 MB** | 585 MB |
 | MMR, `addEntry`+`getRoot` | **214k entries/s** | 122k entries/s |
@@ -97,14 +97,14 @@ then settling. Measured on the 8 GB AWS `c6g.xlarge` above.
 
 | Metric | C++ node | Java node |
 |---|---|---|
-| Time to tip (s) | 20.9 | 8.0 |
-| Peak RSS during sync | **~101 MB** | ~457 MB |
-| Idle RSS (after 60 s settle) | **~182 MB** | ~698 MB |
-| CPU-seconds over 60 s settle | **33.7** | 72.1 |
+| Time to tip (s) | 18.5 | 8.6 |
+| Peak RSS during sync | **~91 MB** | ~478 MB |
+| Idle RSS (after 60 s settle) | **~187 MB** | ~711 MB |
+| CPU-seconds over 60 s settle | **36.5** | 66.6 |
 | Threads | **25** | 61 |
-| Data dir | **~64 MB** | ~683 MB |
-| P2P peers reached / known | 3 / 3 | 3 / 33 |
-| P2P time to first peer (s) | 7.2 | 5.3 |
+| Data dir | **~59 MB** | ~571 MB |
+| P2P peers reached / known | 3 / 3 | 2 / 8 |
+| P2P time to first peer (s) | 4.8 | 5.3 |
 
 ![Live mainnet: C++ node vs Java node](assets/mainnet.svg)
 
@@ -124,17 +124,17 @@ the Java reference has no MegaMMR mode.
 
 | Metric | Full | Archive (`-archive`) | MegaMMR (`-megammr`) |
 |---|---|---|---|
-| Time to tip (s) | 20.9 | 20.3 | 26.0 |
-| Peak RSS during sync | **101 MB** | **106 MB** | **112 MB** |
-| Idle RSS (60 s) | **182 MB** | **210 MB** | **194 MB** |
-| CPU-seconds / 60 s | 33.7 | 33.1 | 32.3 |
+| Time to tip (s) | 18.5 | 20.3 | 26.0 |
+| Peak RSS during sync | **91 MB** | **106 MB** | **112 MB** |
+| Idle RSS (60 s) | **187 MB** | **210 MB** | **194 MB** |
+| CPU-seconds / 60 s | 36.5 | 33.1 | 32.3 |
 | Threads | 25 | 25 | 25 |
-| Data dir | **64 MB** | **57 MB** | **57 MB** |
+| Data dir | **59 MB** | **57 MB** | **57 MB** |
 | Peers reached / known | 3 / 3 | 3 / 3 | 2 / 3 |
-| Time to first peer (s) | 7.2 | 5.0 | 9.7 |
+| Time to first peer (s) | 4.8 | 5.0 | 9.7 |
 
 Full = the both-node run above; Archive/MegaMMR are C++-only dedicated runs.
-Raw: [`results/aws8-mainnet-0.2/`](reference-bench/results/aws8-mainnet-0.2/),
+Raw: [`results/aws8-mainnet-0.2b/`](reference-bench/results/aws8-mainnet-0.2b/),
 [`results/aws8-full/`](reference-bench/results/aws8-full/),
 [`results/aws8-archive/`](reference-bench/results/aws8-archive/),
 [`results/aws8-megammr/`](reference-bench/results/aws8-megammr/).
@@ -144,7 +144,7 @@ same advertised `host:port` is served an initial block download once, then the p
 keeps greeting but withholds the IBD for ~30 minutes. `run_mainnet_sync.sh` and
 `run_mainnet_bench.sh` therefore advertise a **fresh port per run**.
 
-Raw: [`reference-bench/results/aws8-mainnet-0.2/`](reference-bench/results/aws8-mainnet-0.2/)
+Raw: [`reference-bench/results/aws8-mainnet-0.2b/`](reference-bench/results/aws8-mainnet-0.2b/)
 (C++ vs Java), plus [`aws8-full`](reference-bench/results/aws8-full/),
 [`aws8-archive`](reference-bench/results/aws8-archive/) and
 [`aws8-megammr`](reference-bench/results/aws8-megammr/) for the mode runs.
@@ -504,7 +504,7 @@ reference-bench/engines/run_engine_bench.sh    # embedded storage engines by rol
 
 Results land in `reference-bench/results/<timestamp>/`, including
 `SWEEP_SUMMARY.md`. The checked-in one-host run for this README is:
-- [`results/aws8-mainnet-0.2/`](reference-bench/results/aws8-mainnet-0.2/) — live mainnet, C++ vs Java (v0.2 build)
+- [`results/aws8-mainnet-0.2b/`](reference-bench/results/aws8-mainnet-0.2b/) — live mainnet, C++ vs Java (v0.2 + zero-copy build)
 - [`results/aws8-full/`](reference-bench/results/aws8-full/), [`aws8-archive/`](reference-bench/results/aws8-archive/), [`aws8-megammr/`](reference-bench/results/aws8-megammr/) — node modes
 - [`results/aws8-core/`](reference-bench/results/aws8-core/) — WOTS / SHA3 / MMR
 - [`results/aws8-sweep/`](reference-bench/results/aws8-sweep/) — full lifecycle sweep

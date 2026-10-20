@@ -194,10 +194,10 @@ bars("lifecycle_disk.svg", ["C++ node", "Java node"], [4.18, 5.90], [CPP, JAVA],
 # 12. Live mainnet (fresh both-node run, AWS 8 GB): memory/disk/CPU panels
 fig, axes = plt.subplots(1, 4, figsize=(14, 3.6))
 panels = [
-    ("Peak RSS", [101, 457], "MB", "{:.0f}"),
-    ("Idle RSS", [182, 698], "MB", "{:.0f}"),
-    ("Data dir", [64, 683], "MB", "{:.0f}"),
-    ("CPU / 60 s", [33.7, 72.1], "CPU-s", "{:.0f}"),
+    ("Peak RSS", [91, 478], "MB", "{:.0f}"),
+    ("Idle RSS", [187, 711], "MB", "{:.0f}"),
+    ("Data dir", [59, 571], "MB", "{:.0f}"),
+    ("CPU / 60 s", [36.5, 66.6], "CPU-s", "{:.0f}"),
 ]
 for ax, (title, vals, ylab, fmt) in zip(axes, panels):
     b = ax.bar([0, 1], vals, color=[CPP, JAVA], width=0.6)
