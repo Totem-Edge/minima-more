@@ -55,9 +55,48 @@ jobs:
           name: dist-${{ matrix.arch }}
           path: dist/*
 
+  build-static:
+    name: build ${{ matrix.arch }} (static)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04,     arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config curl file \
+            libssl-dev libsqlite3-dev zlib1g-dev libboost-dev
+
+      - name: Build static binary
+        run: sh scripts/build_static.sh
+
+      - name: Package
+        run: |
+          VER="${{ github.ref_name }}"
+          [ -z "$VER" ] && VER="${{ github.event.inputs.tag }}"
+          BIN="minima-${VER}-linux-${{ matrix.arch }}-static"
+          mkdir -p dist
+          cp build-static/minima "dist/$BIN"
+          tar -C dist -czf "dist/${BIN}.tar.gz" "$BIN"
+          ( cd dist && sha256sum "${BIN}.tar.gz" > "${BIN}.tar.gz.sha256" )
+          ls -l dist
+
+      - name: Upload artifacts (for the release job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-static-${{ matrix.arch }}
+          path: dist/*
+
   release:
     name: publish GitHub release
-    needs: build
+    needs: [build, build-static]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

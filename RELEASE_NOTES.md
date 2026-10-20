@@ -113,11 +113,15 @@ Measured on one host: AWS `c6g.xlarge` (4 vCPU / 8 GB / Neoverse-N1).
   `archive action:import file:….gzip` (or `.raw.dat`).
 - No config migration required; new environment knobs are optional.
 
+## Static builds
+
+A **fully static** variant is included for both architectures
+(`minima-v0.2.0-linux-<arch>-static`): it links SQLite, OpenSSL, zlib and a
+minimal static libcurl (OpenSSL + zlib only) so it has no runtime library
+dependencies. (Static glibc still uses the host’s NSS config for DNS, as usual.)
+
 ## Known issues / in progress
 
-- **Fully static release variant** is in progress (a minimal static libcurl is
-  being used to avoid the distro’s GSSAPI dependency). Standard tarballs are
-  unaffected.
 - The H2 importer covers the **SQL script** export
   (`SCRIPT … COMPRESSION GZIP`); a raw H2 database file (`.mv.db`) requires
   running `SCRIPT TO` on the legacy node first.
@@ -130,9 +134,10 @@ Measured on one host: AWS `c6g.xlarge` (4 vCPU / 8 GB / Neoverse-N1).
 Download the tarball for your architecture and verify the checksum:
 
 ```sh
-tar -xzf minima-v0.2.0-linux-<arch>.tar.gz
-sha256sum -c minima-v0.2.0-linux-<arch>.tar.gz.sha256
-./minima-v0.2.0-linux-<arch> -manifest
+# standard (dynamic libs) or -static (fully statically linked)
+tar -xzf minima-v0.2.0-linux-<arch>[-static].tar.gz
+sha256sum -c minima-v0.2.0-linux-<arch>[-static].tar.gz.sha256
+./minima-v0.2.0-linux-<arch>[-static] -manifest
 ```
 
 ## Full changelog (since v0.1.0)

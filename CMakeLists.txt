@@ -6,6 +6,8 @@ include(CTest)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+option(MINIMA_STATIC "Fully static link (requires static deps)" OFF)
+
 set(MINIMA_SOURCES
     org/minima/database/minima_d_b.cpp
     org/minima/database/archive/archive_manager.cpp
@@ -422,17 +424,37 @@ target_link_libraries(minima PRIVATE SQLite::SQLite3)
 
 # OpenSSL (for crypto, SSL, signature verification)
 find_package(OpenSSL REQUIRED)
-target_link_libraries(minima PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+if(NOT MINIMA_STATIC)
+    target_link_libraries(minima PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
 
 # zlib (for password_crypto.cpp, mini_file.cpp)
 find_package(ZLIB REQUIRED)
 target_link_directories(minima PRIVATE ${ZLIB_LIBRARIES_DIR})
 target_include_directories(minima PRIVATE ${ZLIB_INCLUDE_DIRS})
-target_link_libraries(minima PRIVATE ZLIB::ZLIB)
+if(NOT MINIMA_STATIC)
+    target_link_libraries(minima PRIVATE ZLIB::ZLIB)
+endif()
 
 # libcurl (for r_p_c_client.cpp)
 find_package(CURL REQUIRED)
-target_link_libraries(minima PRIVATE CURL::libcurl)
+if(NOT MINIMA_STATIC)
+    target_link_libraries(minima PRIVATE CURL::libcurl)
+endif()
+
+# Fully static link. Static curl must precede its OpenSSL/zlib deps; the early
+# target links above are skipped in this mode so CMake cannot reorder/dedupe.
+if(MINIMA_STATIC)
+    target_link_options(minima PRIVATE -static)
+    target_link_libraries(minima PRIVATE
+        "${CURL_LIBRARY}"
+        "${OPENSSL_SSL_LIBRARY}"
+        "${OPENSSL_CRYPTO_LIBRARY}"
+        "${ZLIB_LIBRARY}")
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(minima PRIVATE m)
+    endif()
+endif()
 
 # Optional allocator: jemalloc measurably reduces steady-state RSS (freed
 # key-generation memory is returned to the OS instead of retained by glibc).
