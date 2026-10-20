@@ -110,7 +110,7 @@ drive() {
 }
 
 case "$NODE" in
-  cpp|both)  drive cpp 20201 "$CPP_BIN" -data /tmp/nbtp-cpp -solo -daemon -clean -port 20201 -rpcenable -rpcpassword test ;;
+  cpp|both)  drive cpp 20201 "$CPP_BIN" -data /tmp/nbtp-cpp -solo -daemon -clean $(mode_flags) -port 20201 -rpcenable -rpcpassword test ;;
 esac
 case "$NODE" in
   java|both)

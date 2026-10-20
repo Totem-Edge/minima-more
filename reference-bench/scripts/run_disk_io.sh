@@ -76,7 +76,7 @@ disk_soak() {
 }
 
 case "$NODE" in
-  cpp|both)  disk_soak cpp  /tmp/diskio-cpp  "$CPP_BIN" -data /tmp/diskio-cpp -solo -daemon -clean -port 21501 ;;
+  cpp|both)  disk_soak cpp  /tmp/diskio-cpp  "$CPP_BIN" -data /tmp/diskio-cpp -solo -daemon -clean $(mode_flags) -port 21501 ;;
 esac
 case "$NODE" in
   java|both) disk_soak java /tmp/diskio-java "$JDK/java" -cp "$(jcp)" org.minima.Minima -data /tmp/diskio-java -solo -daemon -clean -port 21601 ;;

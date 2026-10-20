@@ -96,10 +96,10 @@ load() {
 }
 
 case "$NODE" in
-  cpp|both)  load cpp  21301 "$CPP_BIN"  -data /tmp/txload-cpp  -solo -daemon -clean -port 21301 -rpcenable -rpcpassword test ;;
+  cpp|both)  load cpp  21301 "$CPP_BIN"  -data /tmp/txload-cpp  -solo -daemon -clean $(mode_flags) -port 21301 -rpcenable -rpcpassword test ;;
 esac
 case "$NODE" in
-  java|both) load java 21401 "$JDK/java" -cp "$(jcp)" org.minima.Minima -data /tmp/txload-java -solo -daemon -clean -port 21401 -rpcenable -rpcpassword test ;;
+  java|both) load java 21401 "$JDK/java" -cp "$(jcp)" org.minima.Minima -data /tmp/txload-java -solo -daemon -clean $(mode_flags) -port 21401 -rpcenable -rpcpassword test ;;
 esac
 
 g() { grep -E "^$2\b" "$OUT/$1_txload_summary.txt" 2>/dev/null | head -1 | cut -f2; }

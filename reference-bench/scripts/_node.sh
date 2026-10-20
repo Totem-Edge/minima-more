@@ -62,10 +62,21 @@ sendable() { rpc "$1" balance | grep -o '"sendable":"[0-9]*"' | head -1 | grep -
 
 # --- node launch -----------------------------------------------------------
 
+# MODE=full|archive|megammr -> extra node flags (C++ only; Java has no MegaMMR
+# mode). Archive/MegaMMR benchmarks are run separately, after the regular-node
+# optimisation work, so results stay comparable.
+mode_flags() {
+    case "${MODE:-full}" in
+        archive) printf '%s' "-archive" ;;
+        megammr) printf '%s' "-megammr" ;;
+        *)       printf '%s' "" ;;
+    esac
+}
+
 start_cpp() {  # datadir logfile port extra...
     _d=$1; _l=$2; _p=$3; shift 3
     "$CPP_BIN" -data "$_d" -daemon -allowallip -port "$_p" \
-        -rpcenable -rpcpassword test "$@" > "$_l" 2>&1 &
+        -rpcenable -rpcpassword test $(mode_flags) "$@" > "$_l" 2>&1 &
     echo $!
 }
 

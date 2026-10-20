@@ -19,7 +19,7 @@ SETTLE=${SETTLE:-60}        # idle sampling window after sync (s)
 MAX_WAIT=${MAX_WAIT:-180}   # max wait for first tip (s)
 OUT=${1:-$_BENCH_DIR/results/$(date +%Y%m%d-%H%M%S)-$(uname -m)}
 mkdir -p "$OUT"
-echo "Results dir: $OUT  (peers=$PEERS settle=${SETTLE}s)"
+echo "Results dir: $OUT  (mode=${MODE:-full} peers=$PEERS settle=${SETTLE}s)"
 
 BASE=$((24000 + ($$ % 3000)))
 

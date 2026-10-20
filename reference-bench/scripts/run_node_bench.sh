@@ -81,7 +81,7 @@ run_one() {
 
 echo "== C++ node (solo, fresh) =="
 run_one cpp /tmp/nb-cpp "$OUT/cpp_node.log" \
-    "$CPP_BIN" -data /tmp/nb-cpp -solo -daemon -clean -port 19401
+    "$CPP_BIN" -data /tmp/nb-cpp -solo -daemon -clean $(mode_flags) -port 19401
 
 echo "== Java node (solo, fresh) =="
 CP=$(ls "$MINIMA_CORE"/lib/*.jar | tr '\n' ':')"$MC_BUILD"

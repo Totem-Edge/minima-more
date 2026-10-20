@@ -50,7 +50,7 @@ soak() {
 
 case "$NODE" in
   cpp|both)
-    soak cpp "$CPP_BIN" -data /tmp/nbram-cpp -solo -daemon -clean -port 19501 ;;
+    soak cpp "$CPP_BIN" -data /tmp/nbram-cpp -solo -daemon -clean $(mode_flags) -port 19501 ;;
 esac
 case "$NODE" in
   java|both)

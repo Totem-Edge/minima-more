@@ -60,7 +60,7 @@ cpu_soak() {
 }
 
 case "$NODE" in
-  cpp|both)  cpu_soak cpp  "$CPP_BIN" -data /tmp/cpuidle-cpp -solo -daemon -clean -port 21101 ;;
+  cpp|both)  cpu_soak cpp  "$CPP_BIN" -data /tmp/cpuidle-cpp -solo -daemon -clean $(mode_flags) -port 21101 ;;
 esac
 case "$NODE" in
   java|both) cpu_soak java "$JDK/java" -cp "$(jcp)" org.minima.Minima -data /tmp/cpuidle-java -solo -daemon -clean -port 21201 ;;
