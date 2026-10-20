@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -220,6 +221,19 @@ namespace minima {
 namespace system {
 namespace commands {
 namespace backup {
+
+namespace {
+std::string isoTimestamp(long long zMillis) {
+    std::time_t secs = static_cast<std::time_t>(zMillis / 1000);
+    std::tm tm{};
+    gmtime_r(&secs, &tm);
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+    return std::string(buf);
+}
+} // namespace
+
+
 
 archive::archive()
     : org::minima::system::commands::Command(
@@ -591,7 +605,7 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                 // Notify
                 NotifyListener(minimalistener,
                                "Loading " + startblk.getTxPoW().getBlockNumber().toString() +
-                               " @ " + currentTimeString(startblk.getTxPoW().getTimeMilli().getAsLong()));
+                               " @ " + isoTimestamp(startblk.getTxPoW().getTimeMilli().getAsLong()));
             } else {
                 MinimaLogger::log("No Archive TxBlocks left..");
             }
@@ -613,7 +627,7 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                                std::chrono::system_clock::now().time_since_epoch()).count());
             if ((now - lastlogmessage) > 5000) {
                 MinimaLogger::log("IBD Processed.. next block:" + startblock.toString() +
-                                  " @ " + currentTimeString(starttime));
+                                  " @ " + isoTimestamp(starttime));
                 lastlogmessage = now;
             }
 
@@ -924,7 +938,7 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                 TxBlock& block = *sibd->getTxBlocks().back();
                 long long starttime = block.getTxPoW().getTimeMilli().getAsLong();
                 MinimaLogger::log("Processing block:" + block.getTxPoW().getBlockNumber().toString() +
-                                  " @ " + currentTimeString(starttime));
+                                  " @ " + isoTimestamp(starttime));
                 
                 // Fix: resetMemFull() is private, comment out
                 // Main::getInstance()->resetMemFull();

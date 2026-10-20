@@ -983,7 +983,7 @@ if(LMDB_LIBRARY)
     list(APPEND MINIMA_TEST_LIBS ${LMDB_LIBRARY})
 endif()
 
-foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import gen_command_reference)
+foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import test_archive_records gen_command_reference)
     add_executable(${tgt} EXCLUDE_FROM_ALL
         tests/${tgt}.cpp
         $<TARGET_OBJECTS:minima_core>)

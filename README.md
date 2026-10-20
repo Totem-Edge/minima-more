@@ -237,19 +237,18 @@ down from ~87 s; a first full load is ~22 s. `balance`/`coins` filter over the
 LMDB cursor (`forEach`/`forEachUntil`) — no full-map materialisation; RSS stays
 ~600 MB with 465k coins.
 
-**Archive completeness vs size.** A complete archive is deliberately *not*
-phone-class on storage: the raw export is 1.41 GB (2.37M blocks) and uncompressed
-SQLite grows to ~6 GB. The importer is memory-bounded (~495–629 MB, down from an
-OOM at 7.5 GB) with queue backpressure, batched tree recalculation and WAL
-checkpointing. Blocks are **zlib-compressed in 256-block chunks** (`ZCHN`;
-each row indexes `(chunkid, offset, len)`, and legacy per-row `ZBLK` rows still
-read), with reused prepared statements and one transaction per chunk. On a
-256 MiB leading slice of the live archive: **3.95×** (1.15 GB serialised payload
-→ 291 MB compressed; 480 MB DB including indexes), integrity **618,496 blocks /
-0 errors**, **610 blocks/s**, peak RSS **629 MB**. The full 2.37M-block archive
-projects to **~1.85 GB DB** (~1.12 GB compressed payload), so it fits the 8 GB
-box. **Do not prune a complete archive**; pruning is only for a deliberately
-recent archive. A full node remains the
+**Archive completeness vs size.** A complete archive is now comfortably
+phone-class: the raw export is 1.51 GB (2.37M blocks) and serialises to 6.61 GB.
+Blocks are **zlib-compressed in 256-block chunks** (`ZCHN`; each row indexes
+`(chunkid, offset, len)`, legacy per-row `ZBLK` rows still read), with reused
+prepared statements and one transaction per chunk. Measured full import on the
+8 GB host: **2,375,034 blocks**, 6.61 GB payload → **1.73 GB compressed (3.83×)**,
+archive DB **2.45 GB** (+495 MB on-chain ≈ **3.0 GB total**), **498 blocks/s**,
+peak RSS **918 MB**, integrity **2,375,034 blocks / 0 errors**. A 260-height
+record battery (genesis 2023-01-13 to 2026-10-19) passes block/ID lookup, parent
+linkage, round-trip and chunk-boundary range checks at **2.2 ms** average. **Do
+not prune a complete archive**; pruning is only for a deliberately recent
+archive. Orphaned chunks are garbage-collected when pruning. A full node remains the
 phone-class option (59 MB).
 
 **Is the node's SQLite tuning included?** Yes — "SQLite" here is the node's own

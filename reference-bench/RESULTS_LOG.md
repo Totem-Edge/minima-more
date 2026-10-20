@@ -785,7 +785,33 @@ v0.2.0 published with standard + **fully static** tarballs (x86_64/aarch64).
 - **Shutdown:** a partial chunk inside an open batch is flushed and committed
   (`saveAllDB` + `flushPending`) instead of being rolled back on close.
 
+## Full archive + record battery (follow-up, post-v0.2.0)
+
+- Streamed the live raw archive through a **FIFO** (no 1.5 GB temp file; the
+  importer's open fd otherwise keeps the unlinked raw blocks allocated). The
+  stream ended at **2,371,584** blocks; its header advertises 2,374,319 (stale).
+  Online IBD backfilled **+3,450** to **2,375,034**; a peer reported top
+  2,377,085, but further IBD was rate-limited for 30 minutes.
+- Full import: **79.4 min**, **498 blocks/s**, peak RSS **918 MB** on the 8 GB
+  host (steady ~628 MB during most of the run).
+- Storage: 6.61 GB serialised payload -> **1.726 GB compressed (3.83x)**, 9,264
+  chunks; archive DB **2.454 GB** incl. indexes; on-chain DB 495 MB; **~2.96 GB
+  total**. The earlier slice-based 1.85 GB projection under-estimated because
+  later blocks are larger.
+- `archive action:integrity`: **2,375,034 blocks, 0 errors**.
+- Record battery over 260 heights (1, 2, 3, …, every era, 200+ seeded random,
+  chunk boundaries, tip): all pass — block-number and TxPoW-id lookup, parent
+  linkage, serialization round-trip, range loads across chunk boundaries,
+  first/last. **2.23 ms** average lookup, 142.9 ms worst cold outlier; 108 MB
+  test RSS. Timestamps span **2023-01-13T12:30:03Z** (block 1) to
+  **2026-10-19T18:18:52Z** (tip). One **6.39 s** backwards step at block
+  2,142,113 (miner clock skew, not corrupt data).
+- Bugs found/fixed: `loadFirstBlock`/`loadLastBlock` were inverted (DESC/ASC
+  swapped), `cleanDB` now deletes orphaned `blockchunks` + incremental vacuum,
+  and the IBD log now prints ISO-8601 dates instead of “54 Years…” since 1970.
+- Artifact: `reference-bench/results/aws8-archive-full/SUMMARY.md`.
+
 ## Planned next
 
-- Full-archive import with chunked storage and end-to-end re-measure.
 - Optional DuckDB R3 analytics; v0.2.1 release.
+- Retry the last ~2k blocks once the peer IBD cooldown expires.

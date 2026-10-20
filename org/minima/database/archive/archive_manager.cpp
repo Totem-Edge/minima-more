@@ -651,8 +651,8 @@ std::unique_ptr<TxBlock> ArchiveManager::loadFirstBlock() {
         checkOpen();
         openConnIfNeeded();
 
-        // Get highest block number
-        const char* sql1 = "SELECT block FROM syncblock ORDER BY block DESC LIMIT 1;";
+        // Get lowest block number
+        const char* sql1 = "SELECT block FROM syncblock ORDER BY block ASC LIMIT 1;";
         sqlite3_stmt* stmt = nullptr;
         int rc = sqlite3_prepare_v2(mConn, sql1, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
@@ -712,8 +712,8 @@ std::unique_ptr<TxBlock> ArchiveManager::loadLastBlock() {
         checkOpen();
         openConnIfNeeded();
 
-        // Get lowest block number
-        const char* sql1 = "SELECT block FROM syncblock ORDER BY block ASC LIMIT 1;";
+        // Get highest block number
+        const char* sql1 = "SELECT block FROM syncblock ORDER BY block DESC LIMIT 1;";
         sqlite3_stmt* stmt = nullptr;
         int rc = sqlite3_prepare_v2(mConn, sql1, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
@@ -1029,6 +1029,15 @@ int ArchiveManager::cleanDB() {
 
         int changes = sqlite3_changes(mConn);
         sqlite3_finalize(stmt);
+
+        if (changes > 0) {
+            sqlite3_exec(mConn,
+                "DELETE FROM blockchunks WHERE id NOT IN "
+                "(SELECT chunkid FROM syncblock WHERE chunkid >= 0);",
+                nullptr, nullptr, nullptr);
+            sqlite3_exec(mConn, "PRAGMA incremental_vacuum;", nullptr, nullptr, nullptr);
+            mChunkCache.clear();
+        }
         return changes;
     } catch (const std::exception& e) {
         MinimaLogger::log(e);
