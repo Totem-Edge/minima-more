@@ -17,6 +17,8 @@ bool GeneralParams::GENESIS = false;
 bool GeneralParams::CLEAN = false;
 bool GeneralParams::ARCHIVE = false;
 bool GeneralParams::TXBLOCK_NODE = false;
+std::string GeneralParams::MEGAMMR_URL = "https://eurobuddha.com/mega.mmr";
+std::string GeneralParams::ARCHIVE_URL = "https://eurobuddha.com/archive.raw.dat";
 
 bool GeneralParams::IS_MAIN_DBPASSWORD_SET = false;
 std::string GeneralParams::MAIN_DBPASSWORD = "minima";
@@ -113,6 +115,14 @@ void GeneralParams::resetDefaults() {
     CLEAN = false;
     ARCHIVE = false;
     TXBLOCK_NODE = false;
+    {
+        const char* e = std::getenv("MINIMA_MEGAMMR_URL");
+        MEGAMMR_URL = (e && *e) ? e : "https://eurobuddha.com/mega.mmr";
+    }
+    {
+        const char* e = std::getenv("MINIMA_ARCHIVE_URL");
+        ARCHIVE_URL = (e && *e) ? e : "https://eurobuddha.com/archive.raw.dat";
+    }
     IS_MAIN_DBPASSWORD_SET = false;
     MAIN_DBPASSWORD = "minima";
     DATA_FOLDER = "";

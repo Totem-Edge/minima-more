@@ -25,6 +25,7 @@
   #include <windows.h>
 #else
   #include <unistd.h>
+  #include <sys/stat.h>
   extern char** environ;
 #endif
 
@@ -47,6 +48,11 @@
  * @brief The GLOBAL C++ entry point for the application.
  */
 int main(int argc, char* argv[]) {
+#if !defined(_WIN32)
+    // Node data (DBs, WAL/SHM, MMR, logs, backups) is owner-only by default.
+    umask(0077);
+#endif
+
     // 1. Convert C-style args to a C++ vector of strings
     std::vector<std::string> args;
     for (int i = 0; i < argc; ++i) {

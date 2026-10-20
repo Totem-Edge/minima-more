@@ -142,6 +142,7 @@ set(MINIMA_SOURCES
     org/minima/objects/keys/tree_key_node.cpp
     org/minima/objects/keys/winternitz.cpp
     org/minima/objects/mmr/mega_m_m_r.cpp
+    org/minima/objects/coins/coin_store.cpp
     org/minima/objects/mmr/m_m_r.cpp
     org/minima/objects/mmr/m_m_r_data.cpp
     org/minima/objects/mmr/m_m_r_entry.cpp
@@ -325,6 +326,7 @@ set(MINIMA_SOURCES
     org/minima/utils/json_d_b.cpp
     org/minima/utils/maths.cpp
     org/minima/utils/minima_logger.cpp
+    org/minima/utils/file_downloader.cpp
     org/minima/utils/minima_r_p_c_client.cpp
     org/minima/utils/minima_uncaught_exception.cpp
     org/minima/utils/mini_file.cpp
@@ -442,6 +444,22 @@ if(NOT MINIMA_STATIC)
     target_link_libraries(minima PRIVATE CURL::libcurl)
 endif()
 
+# LMDB (RFC-0001 R2 coin store: mmap-backed UTXO/coin store). Optional: without
+# it MegaMMR falls back to its in-memory coin map.
+find_path(LMDB_INCLUDE_DIR lmdb.h)
+find_library(LMDB_LIBRARY lmdb)
+if(LMDB_INCLUDE_DIR AND LMDB_LIBRARY)
+    target_compile_definitions(minima PRIVATE MINIMA_HAVE_LMDB)
+    target_include_directories(minima PRIVATE ${LMDB_INCLUDE_DIR})
+    target_link_libraries(minima PRIVATE ${LMDB_LIBRARY})
+    target_compile_definitions(minima_core PRIVATE MINIMA_HAVE_LMDB)
+    target_include_directories(minima_core PRIVATE ${LMDB_INCLUDE_DIR})
+    target_link_libraries(minima_core PRIVATE ${LMDB_LIBRARY})
+    message(STATUS "minima: using LMDB (${LMDB_LIBRARY})")
+else()
+    message(STATUS "minima: LMDB not found - MegaMMR coin store uses memory")
+endif()
+
 # Fully static link. Static curl must precede its OpenSSL/zlib deps; the early
 # target links above are skipped in this mode so CMake cannot reorder/dedupe.
 if(MINIMA_STATIC)
@@ -451,6 +469,9 @@ if(MINIMA_STATIC)
         "${OPENSSL_SSL_LIBRARY}"
         "${OPENSSL_CRYPTO_LIBRARY}"
         "${ZLIB_LIBRARY}")
+    if(LMDB_LIBRARY)
+        target_link_libraries(minima PRIVATE "${LMDB_LIBRARY}")
+    endif()
     if(UNIX AND NOT APPLE)
         target_link_libraries(minima PRIVATE m)
     endif()
@@ -957,6 +978,9 @@ if(TARGET CURL::libcurl)
 endif()
 if(UNIX AND NOT APPLE)
     list(APPEND MINIMA_TEST_LIBS ${CMAKE_DL_LIBS})
+endif()
+if(LMDB_LIBRARY)
+    list(APPEND MINIMA_TEST_LIBS ${LMDB_LIBRARY})
 endif()
 
 foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import gen_command_reference)

@@ -30,7 +30,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake pkg-config \
-            libssl-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libboost-dev
+            libssl-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev libboost-dev \
+            liblmdb-dev
 
       - name: Configure (Release, static OpenSSL/SQLite preferred)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -72,7 +73,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake pkg-config curl file \
-            libssl-dev libsqlite3-dev zlib1g-dev libboost-dev
+            libssl-dev libsqlite3-dev zlib1g-dev libboost-dev liblmdb-dev
 
       - name: Build static binary
         run: sh scripts/build_static.sh

@@ -1,0 +1,14 @@
+node	java	
+port	25843	
+synced_seconds	8.55	s
+tip_block	2375499	
+peak_sync_rss_kb	489476	kB
+idle_rss_avg_kb	728422	kB
+idle_rss_last_kb	894256	kB
+cpu_seconds_settle	66.560	s
+threads	61	
+datadir_kb	584244	kB
+p2p_peers_reached	2	
+p2p_known_peers	8	
+p2p_time_first_peer_s	5.32	s
+p2p_time_to_5_peers_s	-	s

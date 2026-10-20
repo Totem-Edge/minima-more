@@ -298,6 +298,19 @@ bool ArchiveManager::saveBlock(TxBlock& zBlock) {
     }
 }
 
+void ArchiveManager::checkpoint() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    try {
+        checkOpen();
+        openConnIfNeeded();
+        if (mConn) {
+            sqlite3_wal_checkpoint_v2(mConn, nullptr, SQLITE_CHECKPOINT_PASSIVE, nullptr, nullptr);
+        }
+    } catch (...) {
+        // best effort
+    }
+}
+
 bool ArchiveManager::_intSaveBlock(TxBlock& zBlock) {
     checkOpen();
     openConnIfNeeded();

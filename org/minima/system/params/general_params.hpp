@@ -24,6 +24,12 @@ public:
     static bool ARCHIVE;
     static bool TXBLOCK_NODE;
 
+    // Bootstrap sources used by `megammr action:import` / `archive action:import`
+    // when no local file is supplied. Override with -megammrurl / -archiveurl
+    // or MINIMA_MEGAMMR_URL / MINIMA_ARCHIVE_URL.
+    static std::string MEGAMMR_URL;
+    static std::string ARCHIVE_URL;
+
     static bool IS_MAIN_DBPASSWORD_SET;
     static std::string MAIN_DBPASSWORD;
 

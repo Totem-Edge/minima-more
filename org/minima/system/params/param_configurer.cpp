@@ -130,6 +130,10 @@ const std::vector<ParamKeyEntry>& getParamKeyEntries() {
           [](const std::string& args, ParamConfigurer&) {
               org::minima::system::params::GeneralParams::ARCHIVE = (args == "true");
           } },
+        { ParamConfigurer::ParamKeys::archiveurl, "archiveurl", "Default archive file URL (archive action:import)",
+          [](const std::string& args, ParamConfigurer&) {
+              org::minima::system::params::GeneralParams::ARCHIVE_URL = trim(args);
+          } },
         { ParamConfigurer::ParamKeys::conf, "conf", "Specify a configuration file (absolute)",
           [](const std::string&, ParamConfigurer&) {
               // do nothing
@@ -262,6 +266,10 @@ const std::vector<ParamKeyEntry>& getParamKeyEntries() {
               if (args == "true") {
                   org::minima::system::params::GeneralParams::IS_MEGAMMR = true;
               }
+          } },
+        { ParamConfigurer::ParamKeys::megammrurl, "megammrurl", "Default MegaMMR file URL (megammr action:import)",
+          [](const std::string& args, ParamConfigurer&) {
+              org::minima::system::params::GeneralParams::MEGAMMR_URL = trim(args);
           } },
         { ParamConfigurer::ParamKeys::notifyalltxpow, "notifyalltxpow", "Send notification messages for ALL TxPoW (not just relevant)",
           [](const std::string& args, ParamConfigurer&) {

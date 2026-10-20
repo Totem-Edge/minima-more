@@ -12,6 +12,10 @@
 #include <cctype>
 #include <string>
 
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
+
 #include "org/minima/objects/base/mini_data.hpp"
 #include "org/minima/objects/base/mini_string.hpp"
 #include "org/minima/utils/json/j_s_o_n_object.hpp"
@@ -98,6 +102,8 @@ std::string mainDatabasePath(sqlite3* db) {
 struct DbTuning {
     int cacheKib;
     int mmapMb;
+    bool synchronousFull;
+    bool secureDelete;
 };
 
 // Role-based cache budget. Six connections at the old 16 MiB each cost ~96 MiB
@@ -106,21 +112,23 @@ struct DbTuning {
 // without changing signatures. Override with MINIMA_SQLITE_CACHE_KIB /
 // MINIMA_SQLITE_MMAP_MB.
 DbTuning tuningForDb(sqlite3* db) {
-    DbTuning t{8192, 64};
+    DbTuning t{8192, 64, false, false};
     const std::string p = lowerCopy(mainDatabasePath(db));
     if (p.find("p2p") != std::string::npos || p.find("userprefs") != std::string::npos) {
-        t = {4096, 32};
+        t = {4096, 32, false, false};
     } else if (p.find("chaintree") != std::string::npos ||
                p.find("cascade") != std::string::npos ||
                p.find("txpow") != std::string::npos) {
-        t = {8192, 64};
+        t = {8192, 64, false, false};
     } else if (p.find("archive") != std::string::npos) {
         // The archive DB is loaded even on non-archive nodes, but it is cold
         // there. Give it a large cache only in archive mode.
-        t = org::minima::system::params::GeneralParams::ARCHIVE ? DbTuning{16384, 128}
-                                                               : DbTuning{4096, 32};
+        t = org::minima::system::params::GeneralParams::ARCHIVE
+                ? DbTuning{16384, 128, false, false}
+                : DbTuning{4096, 32, false, false};
     } else if (p.find("wallet") != std::string::npos) {
-        t = {8192, 64};
+        // Wallet: full durability + wipe deleted content.
+        t = {8192, 64, true, true};
     }
     if (const char* e = std::getenv("MINIMA_SQLITE_CACHE_KIB")) {
         int v = std::atoi(e);
@@ -144,13 +152,16 @@ void SqlDB::applySQLiteTuning(sqlite3* db) {
     const std::string cacheName = "cache_size=-" + std::to_string(t.cacheKib);
     const std::string mmapName = "mmap_size=" + std::to_string(t.mmapMb) + "MB";
 
+    const std::string syncSql = t.synchronousFull ? "PRAGMA synchronous=FULL;"
+                                                   : "PRAGMA synchronous=NORMAL;";
+    const std::string syncName = t.synchronousFull ? "synchronous=FULL" : "synchronous=NORMAL";
+
     // One PRAGMA statement per call avoids error-short-circuit and gives clearer logging.
     struct PragmaItem { std::string sql; std::string name; bool required; };
-    const PragmaItem pragmas[] = {
+    std::vector<PragmaItem> pragmas = {
         // WAL mode allows readers and writers to coexist; much faster under concurrent load.
         { "PRAGMA journal_mode=WAL;", "journal_mode=WAL", true },
-        // NORMAL is safe with WAL and avoids fsync on every transaction commit.
-        { "PRAGMA synchronous=NORMAL;", "synchronous=NORMAL", false },
+        { syncSql, syncName, false },
         { cacheSql, cacheName, false },
         // 30 s busy timeout so concurrent writers retry instead of returning SQLITE_BUSY.
         { "PRAGMA busy_timeout=30000;", "busy_timeout=30000", false },
@@ -159,7 +170,15 @@ void SqlDB::applySQLiteTuning(sqlite3* db) {
         { "PRAGMA temp_store=MEMORY;", "temp_store=MEMORY", false },
         // 4 KiB pages match most filesystem block sizes.
         { "PRAGMA page_size=4096;", "page_size=4096", false },
+        // Bound the WAL during bulk imports (archive replay).
+        { "PRAGMA wal_autocheckpoint=1000;", "wal_autocheckpoint=1000", false },
+        { "PRAGMA journal_size_limit=67108864;", "journal_size_limit=64MB", false },
+        // Do not let schema content execute functions.
+        { "PRAGMA trusted_schema=OFF;", "trusted_schema=OFF", false },
     };
+    if (t.secureDelete) {
+        pragmas.push_back({ "PRAGMA secure_delete=ON;", "secure_delete=ON", false });
+    }
 
     for (const auto& item : pragmas) {
         char* errMsg = nullptr;
@@ -175,6 +194,19 @@ void SqlDB::applySQLiteTuning(sqlite3* db) {
             org::minima::utils::MinimaLogger::log("[SQLDB] " + msg);
         }
     }
+
+#if !defined(_WIN32)
+    // Node databases (and their WAL/SHM companions) are owner-only.
+    const std::string dbpath = mainDatabasePath(db);
+    if (!dbpath.empty()) {
+        auto chmodIf = [](const std::string& p) {
+            if (!p.empty()) ::chmod(p.c_str(), S_IRUSR | S_IWUSR);
+        };
+        chmodIf(dbpath);
+        chmodIf(dbpath + "-wal");
+        chmodIf(dbpath + "-shm");
+    }
+#endif
 }
 
 void SqlDB::loadDB(const std::string& zFile) {

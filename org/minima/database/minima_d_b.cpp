@@ -374,6 +374,8 @@ void MinimaDB::loadAllDB() {
 
         // MEGA MMR
         if (org::minima::system::params::GeneralParams::IS_MEGAMMR) {
+            // R2 coin store: LMDB when available (mmap-backed), else in-memory.
+            mMegaMMR->openCoinStore(basedb / "coins.lmdb");
             mMegaMMR->loadMMR(basedb / "megammr.mmr");
         } else {
             org::minima::utils::MiniFile::deleteFileOrFolder(basedb.string(), basedb / "megammr.mmr");

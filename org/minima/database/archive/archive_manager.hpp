@@ -47,6 +47,9 @@ public:
 
     // Save/load blocks
     bool saveBlock(org::minima::objects::TxBlock& zBlock);
+
+    // Bound the WAL during bulk archive replay.
+    void checkpoint();
     std::unique_ptr<org::minima::objects::TxBlock> loadBlock(const std::string& zTxPoWID);
 
     std::unique_ptr<org::minima::objects::TxBlock> loadFirstBlock();

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <string>
 #include <filesystem>
+#include <functional>
 #include <ostream>
 #include <istream>
 
@@ -26,6 +27,10 @@ class MMR;
 class MMREntry;
 class MMRProof;
 class MMREntryNumber;
+} } } }
+
+namespace org { namespace minima { namespace objects { namespace coins {
+class CoinStore;
 } } } }
 
 namespace org {
@@ -52,6 +57,13 @@ public:
 
     std::unordered_map<std::string, std::unique_ptr<org::minima::objects::Coin>>& getAllCoins();
     const std::unordered_map<std::string, std::unique_ptr<org::minima::objects::Coin>>& getAllCoins() const;
+
+    // R2 coin store (LMDB when the build supports it; otherwise in-memory map).
+    bool openCoinStore(const std::filesystem::path& zDir);
+    std::size_t coinCount() const;
+    void forEachCoin(const std::function<void(const org::minima::objects::Coin&)>& fn) const;
+    std::unique_ptr<org::minima::objects::Coin> getCoin(const std::string& zCoinID) const;
+    const char* coinStoreEngine() const;
 
     bool isEmpty() const;
 
@@ -82,7 +94,9 @@ private:
 
     // Members
     std::unique_ptr<org::minima::objects::mmr::MMR> mMMR;
-    std::unordered_map<std::string, std::unique_ptr<org::minima::objects::Coin>> mAllUnspentCoins;
+    std::unique_ptr<org::minima::objects::coins::CoinStore> mCoinStore;
+    mutable bool mMaterialized = false;
+    mutable std::unordered_map<std::string, std::unique_ptr<org::minima::objects::Coin>> mAllUnspentCoins;
 
     // Logging toggle (Java: private static boolean)
     static bool s_PRUNE_LOGS;

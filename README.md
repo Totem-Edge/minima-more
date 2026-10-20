@@ -226,6 +226,21 @@ these for R3) wins columnar aggregation but is ~100–300× slower per point get
 plan is a thin storage interface per role, with these embedded engines selectable by
 node mode.
 
+**R2 in the node: LMDB coin store.** The MegaMMR UTXO/coin store now runs on
+**LMDB** when available (optional; falls back to the in-memory map). With the
+populated 465,588-coin MMR, **anonymous RSS dropped from ~1.23 GB to ~573 MB**;
+total RSS is ~1.17 GB but ~617 MB of that is mmap page cache (reclaimable, unlike
+heap). `megammr action:info` reports `coin_store:lmdb`, and `memreport` reports
+`mega_coins`/`mega_coin_store`. Store files are `0600`.
+
+**Archive completeness vs size.** A complete archive is deliberately *not*
+phone-class on storage: the raw export is 1.41 GB (2.37M blocks) and uncompressed
+SQLite grows to ~6 GB. The importer is now memory-bounded (~495 MB, down from an
+OOM at 7.5 GB) with queue backpressure, batched tree recalculation and WAL
+checkpointing. A full archive needs compressed block storage or a larger disk —
+**do not prune a complete archive**; pruning is only for a deliberately recent
+archive. A full node remains the phone-class option (59 MB).
+
 **Is the node's SQLite tuning included?** Yes — "SQLite" here is the node's own
 configuration (**WAL, `synchronous=NORMAL`, memory temp store, larger cache,
 memory-mapped I/O, busy timeout**, plus **batched writes** — one bulk transaction).
@@ -519,7 +534,8 @@ whole-process peak-RSS row). Heap ≠ RSS. Single runs on one host, indicative o
 ## Build
 
 Requirements: a C++17 compiler, CMake ≥ 3.16, and **OpenSSL**, **SQLite3**,
-**Threads**, **zlib** and **libcurl** (optional `libzip` / MySQL connector).
+**Threads**, **zlib** and **libcurl** (optional **LMDB** via `liblmdb-dev` for
+the R2 coin store; optional `libzip` / MySQL connector).
 Tested with AppleClang on macOS (arm64) and GCC 13 on Ubuntu 24.04 (aarch64/x86_64).
 
 ```sh

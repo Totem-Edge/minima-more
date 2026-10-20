@@ -5,6 +5,9 @@
 #include <unordered_set>
 #include <filesystem>
 #include <utility> // <-- FIX: Add for std::move
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
 
 #include "org/minima/objects/coin.hpp"
 #include "org/minima/objects/coin_proof.hpp"
@@ -25,6 +28,7 @@
 #include "org/minima/objects/mmr/m_m_r_entry.hpp"
 #include "org/minima/objects/mmr/m_m_r_proof.hpp"
 #include "org/minima/objects/mmr/m_m_r_entry_number.hpp"
+#include "org/minima/objects/coins/coin_store.hpp"
 
 namespace org {
 namespace minima {
@@ -61,11 +65,59 @@ const org::minima::objects::mmr::MMR& MegaMMR::getMMR() const {
     return *mMMR;
 }
 
+bool MegaMMR::openCoinStore(const std::filesystem::path& zDir) {
+    auto store = org::minima::objects::coins::createCoinStore();
+    if (!store) return false;
+    if (!store->open(zDir)) return false;
+    mCoinStore = std::move(store);
+    return true;
+}
+
+std::size_t MegaMMR::coinCount() const {
+    if (mCoinStore) return mCoinStore->size();
+    return mAllUnspentCoins.size();
+}
+
+void MegaMMR::forEachCoin(const std::function<void(const Coin&)>& fn) const {
+    if (mCoinStore) {
+        mCoinStore->forEach(fn);
+        return;
+    }
+    for (const auto& kv : mAllUnspentCoins) {
+        if (kv.second) fn(*kv.second);
+    }
+}
+
+std::unique_ptr<Coin> MegaMMR::getCoin(const std::string& zCoinID) const {
+    if (mCoinStore) return mCoinStore->get(zCoinID);
+    auto it = mAllUnspentCoins.find(zCoinID);
+    if (it == mAllUnspentCoins.end() || !it->second) return nullptr;
+    return it->second->deepCopy();
+}
+
+const char* MegaMMR::coinStoreEngine() const {
+    return mCoinStore ? mCoinStore->engine() : "memory";
+}
+
 std::unordered_map<std::string, std::unique_ptr<Coin>>& MegaMMR::getAllCoins() {
+    if (mCoinStore && !mMaterialized) {
+        mAllUnspentCoins.clear();
+        mCoinStore->forEach([this](const Coin& c) {
+            mAllUnspentCoins.emplace(c.getCoinID().to0xString(), c.deepCopy());
+        });
+        mMaterialized = true;
+    }
     return mAllUnspentCoins;
 }
 
 const std::unordered_map<std::string, std::unique_ptr<Coin>>& MegaMMR::getAllCoins() const {
+    if (mCoinStore && !mMaterialized) {
+        mAllUnspentCoins.clear();
+        mCoinStore->forEach([this](const Coin& c) {
+            mAllUnspentCoins.emplace(c.getCoinID().to0xString(), c.deepCopy());
+        });
+        mMaterialized = true;
+    }
     return mAllUnspentCoins;
 }
 
@@ -119,7 +171,10 @@ void MegaMMR::addBlock(const TxBlock& zBlock) {
 
         mMMR->updateEntry(entrynumber, input.getMMRProof(), mmrdata);
 
-        mAllUnspentCoins.erase(input.getCoin().getCoinID().to0xString());
+        const std::string spentid = input.getCoin().getCoinID().to0xString();
+        if (mCoinStore) mCoinStore->erase(spentid);
+        mAllUnspentCoins.erase(spentid);
+        mMaterialized = false;
     }
 
     const auto& outputs = zBlock.getOutputCoins();
@@ -139,8 +194,14 @@ void MegaMMR::addBlock(const TxBlock& zBlock) {
 
         mMMR->addEntry(mmrdata);
 
-        std::string key = newcoin->getCoinID().to0xString();
-        mAllUnspentCoins.emplace(std::move(key), std::move(newcoin));
+        if (mCoinStore) {
+            mCoinStore->put(*newcoin);
+            mAllUnspentCoins.clear();
+            mMaterialized = false;
+        } else {
+            std::string key = newcoin->getCoinID().to0xString();
+            mAllUnspentCoins.emplace(std::move(key), std::move(newcoin));
+        }
     }
 
     MiniData mroot = mMMR->getRoot()->getData();
@@ -171,9 +232,7 @@ bool MegaMMR::isPrunable(const Coin& zCoin) const {
 }
 
 void MegaMMR::scanUnspendable() {
-    for (auto& kv : mAllUnspentCoins) {
-        Coin& cc = *kv.second;
-
+    forEachCoin([this](const Coin& cc) {
         org::minima::objects::mmr::MMREntry ment = mMMR->getEntry(0, cc.getMMREntryNumber());
 
         if (!ment.isEmpty()) {
@@ -183,7 +242,7 @@ void MegaMMR::scanUnspendable() {
         } else {
             MinimaLogger::log(std::string("[!] Coin with no MMREntry in MegaMMR! @ ") + cc.toString());
         }
-    }
+    });
 }
 
 void MegaMMR::pruneUnspendable(bool zScanMMR) {
@@ -205,22 +264,34 @@ void MegaMMR::pruneUnspendable(bool zScanMMR) {
         prunedset.insert(s);
     }
 
-    std::unordered_map<std::string, std::unique_ptr<Coin>> newAllCoins;
-    newAllCoins.reserve(mAllUnspentCoins.size());
+    if (mCoinStore) {
+        std::vector<std::string> eraseids;
+        mCoinStore->forEach([&](const Coin& c) {
+            if (prunedset.find(c.getMMREntryNumber().toString()) != prunedset.end()) {
+                eraseids.push_back(c.getCoinID().to0xString());
+            }
+        });
+        for (const auto& id : eraseids) mCoinStore->erase(id);
+        mAllUnspentCoins.clear();
+        mMaterialized = false;
+    } else {
+        std::unordered_map<std::string, std::unique_ptr<Coin>> newAllCoins;
+        newAllCoins.reserve(mAllUnspentCoins.size());
 
-    for (auto& kv : mAllUnspentCoins) {
-        const std::string& key = kv.first;
-        std::unique_ptr<Coin>& ccptr = kv.second;
+        for (auto& kv : mAllUnspentCoins) {
+            const std::string& key = kv.first;
+            std::unique_ptr<Coin>& ccptr = kv.second;
 
-        const org::minima::objects::mmr::MMREntryNumber entry = ccptr->getMMREntryNumber();
+            const org::minima::objects::mmr::MMREntryNumber entry = ccptr->getMMREntryNumber();
 
-        std::string entrystr = entry.toString();
-        if (prunedset.find(entrystr) == prunedset.end()) {
-            newAllCoins.emplace(key, std::move(ccptr));
+            std::string entrystr = entry.toString();
+            if (prunedset.find(entrystr) == prunedset.end()) {
+                newAllCoins.emplace(key, std::move(ccptr));
+            }
         }
-    }
 
-    mAllUnspentCoins = std::move(newAllCoins);
+        mAllUnspentCoins = std::move(newAllCoins);
+    }
 
     if (s_PRUNE_LOGS) {
         auto timediff = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -235,6 +306,8 @@ void MegaMMR::pruneUnspendable(bool zScanMMR) {
 void MegaMMR::clear() {
     mMMR = std::make_unique<org::minima::objects::mmr::MMR>();
     mAllUnspentCoins.clear();
+    mMaterialized = false;
+    if (mCoinStore) mCoinStore->clear();
 }
 
 void MegaMMR::loadMMR(const std::filesystem::path& zFile) {
@@ -244,10 +317,19 @@ void MegaMMR::loadMMR(const std::filesystem::path& zFile) {
     } catch (...) {
     }
     MiniFile::loadObjectSlow(zFile, *this);
+    if (mCoinStore) mCoinStore->sync();
+#if !defined(_WIN32)
+    // The MegaMMR holds the full UTXO/coin set - owner-only.
+    ::chmod(zFile.c_str(), S_IRUSR | S_IWUSR);
+#endif
 }
 
 void MegaMMR::saveMMR(const std::filesystem::path& zFile) {
     MiniFile::saveObjectDirect(zFile, *this);
+    if (mCoinStore) mCoinStore->sync();
+#if !defined(_WIN32)
+    ::chmod(zFile.c_str(), S_IRUSR | S_IWUSR);
+#endif
     if (s_PRUNE_LOGS) {
         try {
             auto fsize = std::filesystem::file_size(zFile);
@@ -265,13 +347,11 @@ void MegaMMR::writeDataStream(std::ostream& zOut) {
     MiniNumber::WriteToStream(zOut, 1);
     mMMR->writeDataStream(zOut);
 
-    int size = static_cast<int>(mAllUnspentCoins.size());
-    MiniNumber::WriteToStream(zOut, size);
+    MiniNumber::WriteToStream(zOut, static_cast<int>(coinCount()));
 
-    for (auto& kv : mAllUnspentCoins) {
-        Coin& cc = *kv.second;
-        cc.writeDataStream(zOut);
-    }
+    forEachCoin([&](const Coin& c) {
+        const_cast<Coin&>(c).writeDataStream(zOut);
+    });
 }
 
 void MegaMMR::readDataStream(std::istream& zIn) {
@@ -283,10 +363,29 @@ void MegaMMR::readDataStream(std::istream& zIn) {
     mMMR->setFinalized(false);
 
     mAllUnspentCoins.clear();
+    mMaterialized = false;
+    if (mCoinStore) mCoinStore->clear();
+
     int size = MiniNumber::ReadFromStream(zIn).getAsInt();
-    for (int i = 0; i < size; ++i) {
-        auto cc = Coin::ReadFromStream(zIn);
-        mAllUnspentCoins.emplace(cc->getCoinID().to0xString(), std::move(cc));
+    if (mCoinStore) {
+        std::vector<std::shared_ptr<Coin>> batch;
+        batch.reserve(10000);
+        for (int i = 0; i < size; ++i) {
+            auto cc = Coin::ReadFromStream(zIn);
+            if (!cc) continue;
+            batch.emplace_back(std::shared_ptr<Coin>(std::move(cc)));
+            if (batch.size() >= 10000) {
+                mCoinStore->putBatch(batch);
+                batch.clear();
+            }
+        }
+        if (!batch.empty()) mCoinStore->putBatch(batch);
+    } else {
+        for (int i = 0; i < size; ++i) {
+            auto cc = Coin::ReadFromStream(zIn);
+            if (!cc) continue;
+            mAllUnspentCoins.emplace(cc->getCoinID().to0xString(), std::move(cc));
+        }
     }
 
     if (GeneralParams::MEGAMMR_MEGAPRUNE) {

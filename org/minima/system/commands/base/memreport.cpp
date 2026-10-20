@@ -19,6 +19,7 @@
 #include "org/minima/database/txpowtree/tx_pow_tree.hpp"
 #include "org/minima/database/txpowtree/tx_po_w_tree_node.hpp"
 #include "org/minima/objects/mmr/m_m_r.hpp"
+#include "org/minima/objects/mmr/mega_m_m_r.hpp"
 #include "org/minima/objects/tx_po_w.hpp"
 #include "org/minima/objects/base/mini_data.hpp"
 #include "org/minima/system/params/general_params.hpp"
@@ -275,6 +276,8 @@ std::unique_ptr<org::minima::utils::json::JSONObject> memreport::runCommand() {
     comp.put("txpow_tree_nodes", db->getTxPoWTree().getSize());
     comp.put("ram_txpow", db->getTxPoWDB().getRamSize());
     comp.put("cascade_length", db->getCascade().getLength());
+    comp.put("mega_coins", static_cast<long long>(db->getMegaMMR().coinCount()));
+    comp.put("mega_coin_store", std::string(db->getMegaMMR().coinStoreEngine()));
 
     long long mmrEntries = 0;
     if (auto tip = db->getTxPoWTree().getTip()) {
@@ -363,6 +366,14 @@ std::unique_ptr<org::minima::utils::json::JSONObject> memreport::runCommand() {
     cache.put("role_budget", std::string("4/8/16 MiB (p2p-userprefs / hot / archive)"));
     if (const char* e = std::getenv("MINIMA_SQLITE_CACHE_KIB")) cache.put("env_cache_kib", std::string(e));
     if (const char* e = std::getenv("MINIMA_SQLITE_MMAP_MB")) cache.put("env_mmap_mb", std::string(e));
+
+    JSONObject roles;
+    roles.put("wallet", std::string("SQLite WAL/FULL, secure_delete, 8 MiB, owner-only"));
+    roles.put("chaintree/cascade", std::string("SQLite WAL/NORMAL, 8 MiB, owner-only"));
+    roles.put("txpow/onchain", std::string("SQLite WAL/NORMAL, 8 MiB, owner-only"));
+    roles.put("p2p/userprefs", std::string("SQLite WAL/NORMAL, 4 MiB, owner-only"));
+    roles.put("archive", std::string("SQLite WAL/NORMAL, 4/16 MiB, owner-only"));
+    cache.put("roles", roles);
     ret->put("sqlite", cache);
 
     // Optional: ask jemalloc (if preloaded and prof:true) to dump a heap profile.

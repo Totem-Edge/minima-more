@@ -24,6 +24,8 @@
 #include "org/minima/system/main.hpp"
 
 #include "org/minima/utils/mini_file.hpp"
+#include "org/minima/utils/file_downloader.hpp"
+#include "org/minima/objects/base/mini_number.hpp"
 #include "org/minima/utils/mini_format.hpp"
 #include "org/minima/utils/mini_util.hpp"
 #include "org/minima/utils/minima_logger.hpp"
@@ -45,20 +47,37 @@ namespace {
 // Load either the versioned MegaMMRBackup envelope (Minima More export) or a
 // legacy raw MegaMMR file (a Java node's megammr.mmr). Returns true when the
 // legacy raw form was used (no IBD).
-bool loadMegaMMRFile(const std::filesystem::path& file, MegaMMRBackup& back) {
-    // Versioned envelope first.
+// Envelope starts [backupVersion][megaMMRVersion]; a legacy raw MegaMMR starts
+// [megaMMRVersion][blockTime]. Both versions are small; blockTime is not.
+bool looksLikeEnvelope(const std::filesystem::path& file) {
+    std::ifstream fis(file, std::ios::binary);
+    if (!fis) return false;
     try {
-        std::ifstream fis(file, std::ios::binary);
-        if (!fis) throw std::runtime_error("cannot open " + file.string());
-        back.readDataStream(fis);
-        // A valid envelope is accepted even when the MegaMMR is empty (a
-        // normal -megammr node has not necessarily populated it yet).
-        return false;
-    } catch (const std::exception& e) {
-        org::minima::utils::MinimaLogger::log(
-            std::string("MegaMMR backup read failed (") + e.what() + ") - trying legacy raw");
+        using org::minima::objects::base::MiniNumber;
+        const int v1 = MiniNumber::ReadFromStream(fis).getAsInt();
+        if (v1 < 1 || v1 > 8) return false;
+        const int v2 = MiniNumber::ReadFromStream(fis).getAsInt();
+        return v2 >= 1 && v2 <= 8;
     } catch (...) {
-        org::minima::utils::MinimaLogger::log("MegaMMR backup read failed (unknown) - trying legacy raw");
+        return false;
+    }
+}
+
+bool loadMegaMMRFile(const std::filesystem::path& file, MegaMMRBackup& back) {
+    if (looksLikeEnvelope(file)) {
+        try {
+            std::ifstream fis(file, std::ios::binary);
+            if (!fis) throw std::runtime_error("cannot open " + file.string());
+            back.readDataStream(fis);
+            // A valid envelope is accepted even when the MegaMMR is empty (a
+            // normal -megammr node has not necessarily populated it yet).
+            return false;
+        } catch (const std::exception& e) {
+            org::minima::utils::MinimaLogger::log(
+                std::string("MegaMMR backup read failed (") + e.what() + ") - trying legacy raw");
+        } catch (...) {
+            org::minima::utils::MinimaLogger::log("MegaMMR backup read failed (unknown) - trying legacy raw");
+        }
     }
 
     std::ifstream fis(file, std::ios::binary);
@@ -128,7 +147,8 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
         JSONObject resp;
         resp.put("enabled", GeneralParams::IS_MEGAMMR);
         resp.put("mmr", megammrdb.getMMR().toJSON(false));
-        resp.put("coins", megammrdb.getAllCoins().size());
+        resp.put("coins", static_cast<long long>(megammrdb.coinCount()));
+        resp.put("coin_store", std::string(megammrdb.coinStoreEngine()));
 
         ret->put("response", resp);
         return ret;
@@ -196,12 +216,23 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
 
         std::string file = getParam("file", "");
         if (file.empty()) {
-            throw CommandException("MUST specify a file to restore from");
+            // Mode default: the configured MegaMMR bootstrap URL.
+            file = GeneralParams::MEGAMMR_URL;
         }
 
-        std::filesystem::path restorefile = MiniFile::createBaseFile(file);
-        if (!std::filesystem::exists(restorefile)) {
-            throw CommandException(std::string("Restore file doesn't exist : ") + std::filesystem::absolute(restorefile).string());
+        std::filesystem::path restorefile;
+        bool downloaded = false;
+        if (file.rfind("http://", 0) == 0 || file.rfind("https://", 0) == 0) {
+            restorefile = std::filesystem::path(GeneralParams::DATA_FOLDER) / "megammr-download.mmr";
+            if (!org::minima::utils::downloadFile(file, restorefile, 2LL * 1024 * 1024 * 1024)) {
+                throw CommandException("Failed to download MegaMMR from " + file);
+            }
+            downloaded = true;
+        } else {
+            restorefile = MiniFile::createBaseFile(file);
+            if (!std::filesystem::exists(restorefile)) {
+                throw CommandException(std::string("Restore file doesn't exist : ") + std::filesystem::absolute(restorefile).string());
+            }
         }
 
         org::minima::system::commands::backup::mmrsync::MegaMMRBackup mmrback;
@@ -221,6 +252,11 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
         MinimaDB::getDB()->getMegaMMR().clear();
         // mmrback.getMegaMMR() returns a pointer; hardSetMegaMMR expects a reference
         MinimaDB::getDB()->hardSetMegaMMR(*mmrback.getMegaMMR());
+
+        if (downloaded) {
+            std::error_code ec;
+            std::filesystem::remove(restorefile, ec);
+        }
 
         // Respond to caller (we cannot call TxPoWProcessor methods without their headers)
         JSONObject resp;
@@ -258,7 +294,7 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
         resp.put("legacyraw", legacyraw);
         auto* mega = mmrback.getMegaMMR();
         resp.put("mmr_entries", static_cast<long long>(mega->getMMR().getTotalEntries()));
-        resp.put("coins", static_cast<long long>(mega->getAllCoins().size()));
+        resp.put("coins", static_cast<long long>(mega->coinCount()));
         if (mmrback.getIBD()) {
             auto weight = checkMegaMMR(mmrback);
             resp.put("chaintip", mmrback.getIBD()->getTreeTip().toString());
@@ -346,13 +382,11 @@ boost::multiprecision::cpp_int megammr::checkMegaMMR(org::minima::system::comman
 
     MinimaLogger::log("Now check all coin proofs..");
 
-    // Check integrity of all coins
-    auto& allcoins = mega->getAllCoins();
-    int size = static_cast<int>(allcoins.size());
-
+    // Check integrity of all coins (iterate the store; do not materialise it)
+    const int size = static_cast<int>(mega->coinCount());
     int maxcheck = 0;
-    for (auto& kv : allcoins) {
-        Coin& coin = *kv.second;
+    mega->forEachCoin([&](const Coin& ccoin) {
+        Coin& coin = const_cast<Coin&>(ccoin);
 
         // Create MMRData leaf node for coin
         std::unique_ptr<MMRData> mmrdata = MMRData::CreateMMRDataLeafNode(coin, coin.getAmount());
@@ -375,7 +409,7 @@ boost::multiprecision::cpp_int megammr::checkMegaMMR(org::minima::system::comman
         if (maxcheck % 5000 == 0) {
             MinimaLogger::log(std::string("Checking coins @ ") + std::to_string(maxcheck) + " / " + std::to_string(size));
         }
-    }
+    });
 
     MinimaLogger::log(std::string("All coins checked ") + std::to_string(maxcheck) + " / " + std::to_string(size));
 

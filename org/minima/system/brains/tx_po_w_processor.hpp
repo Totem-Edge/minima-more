@@ -76,6 +76,9 @@ private:
 
     // When processing IBD for MegaMMR check if finished..
     bool mIBDSyncFinished { false };
+
+    // Archive replay: recalculate the tree in batches rather than per IBD.
+    int mArchiveSinceRecalc { 0 };
 };
 
 } // namespace brains

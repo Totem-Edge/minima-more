@@ -40,6 +40,7 @@
 #include "org/minima/database/archive/archive_manager.hpp"
 #include "org/minima/database/archive/raw_archive_input.hpp"
 #include "org/minima/database/archive/h2_sql_import.hpp"
+#include "org/minima/utils/file_downloader.hpp"
 #include "org/minima/database/cascade/cascade.hpp"
 #include "org/minima/database/cascade/cascade_node.hpp"
 #include "org/minima/database/wallet/wallet.hpp"
@@ -598,7 +599,14 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             // Post it
             std::shared_ptr<IBD> sibd(ibd.release());
             // Fix: Use . not -> for getTxPoWProcessor()
-            Main::getInstance()->getTxPoWProcessor().postProcessArchiveIBD(sibd, "0x00");
+            auto& archproc = Main::getInstance()->getTxPoWProcessor();
+            archproc.postProcessArchiveIBD(sibd, "0x00");
+
+            // Bound the processor queue: a fast raw reader must not accumulate
+            // IBDs (each holds 256 TxBlocks) faster than the tree recalculates.
+            while (archproc.getSize() > 4) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
 
             // Do we print a log..
             long long now = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -761,11 +769,34 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         ret->put("response", resp);
         return ret;
     } else if (action == "import") {
-        std::string file = getParam("file");
+        std::string file = getParam("file", "");
+        if (file.empty()) {
+            // Mode default: the configured archive bootstrap URL.
+            file = org::minima::system::params::GeneralParams::ARCHIVE_URL;
+        }
 
-        std::filesystem::path restorefile = MiniFile::createBaseFile(file);
-        if (!std::filesystem::exists(restorefile)) {
-            throw CommandException("Restore file doesn't exist : " + std::filesystem::absolute(restorefile).string());
+        std::filesystem::path restorefile;
+        bool downloaded = false;
+        if (file.rfind("http://", 0) == 0 || file.rfind("https://", 0) == 0) {
+            const std::string url = file;
+            std::string base = url;
+            const auto q = base.find_first_of("?#");
+            if (q != std::string::npos) base = base.substr(0, q);
+            const auto slash = base.find_last_of('/');
+            if (slash != std::string::npos) base = base.substr(slash + 1);
+            if (base.empty()) base = "archive-download.raw.dat";
+            file = base;  // local filename (keeps extension for format detection)
+            restorefile = std::filesystem::path(
+                org::minima::system::params::GeneralParams::DATA_FOLDER) / base;
+            if (!org::minima::utils::downloadFile(url, restorefile, 8LL * 1024 * 1024 * 1024)) {
+                throw CommandException("Failed to download archive from " + url);
+            }
+            downloaded = true;
+        } else {
+            restorefile = MiniFile::createBaseFile(file);
+            if (!std::filesystem::exists(restorefile)) {
+                throw CommandException("Restore file doesn't exist : " + std::filesystem::absolute(restorefile).string());
+            }
         }
 
         bool h2import = true;
@@ -802,6 +833,14 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         STATIC_RAW = std::make_unique<RawArchiveInput>(rawfile);
         STATIC_RAW->connect();
 
+        // The stream holds an open fd; unlink a downloaded source now so it does
+        // not consume disk while the archive DB grows.
+        if (downloaded) {
+            std::error_code ec;
+            std::filesystem::remove(restorefile, ec);
+            downloaded = false;
+        }
+
         // Build the resync command to reuse the same flow (including phrase/keys/anyphrase)
         std::string command = "archive action:resync host:" + LOCAL_ARCHIVE;
         if (existsParam("phrase")) {
@@ -830,6 +869,10 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         if (!tmpraw.empty()) {
             std::error_code ec;
             std::filesystem::remove(tmpraw, ec);
+        }
+        if (downloaded) {
+            std::error_code ec;
+            std::filesystem::remove(restorefile, ec);
         }
 
         // Package response
@@ -872,6 +915,10 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             std::shared_ptr<IBD> sibd(std::move(syncibd));
             proc.postProcessArchiveIBD(sibd, "0x00");
             ibdcount++;
+
+            while (proc.getSize() > 4) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
 
             if (ibdcount % 20 == 0) {
                 TxBlock& block = *sibd->getTxBlocks().back();

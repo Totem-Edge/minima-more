@@ -492,12 +492,22 @@ bool TxPoWProcessor::processSyncBlock(const std::shared_ptr<TxBlock>& zTxBlock) 
     // FIX: Use . (dot operator)
     MinimaDB::getDB()->getTxBlockDB().addTxBlock(zTxBlock);
 
-    // Ensure TxPoW is in DB
-    // FIX: We cannot copy the TxPoW (deleted constructor).
-    // Use the deepCopy() method, then move it into a shared_ptr.
-    auto txpow_copy_sync_uniq = zTxBlock->getTxPoW().deepCopy();
-    auto txpow_copy_sync = std::shared_ptr<org::minima::objects::TxPoW>(std::move(txpow_copy_sync_uniq));
-    txpdb->addTxPoW(txpow_copy_sync);
+    // Ensure TxPoW is in DB. Historical archive blocks live in the archive DB,
+    // not in the RAM/SQL TxPoW DB; keeping every replay block there exhausted RAM
+    // (2.37M blocks) and caused OOM during archive import.
+    const long long blktime = zTxBlock->getTxPoW().getTimeMilli().getAsLong();
+    const long long nowms = now_millis();
+    const long long ramWindowMs =
+        static_cast<long long>(org::minima::system::params::GeneralParams::NUMBER_HOURS_RAMTXPOWDB) *
+        60LL * 60LL * 1000LL;
+    const bool historical = blktime > 0 && blktime < (nowms - ramWindowMs);
+    if (!historical) {
+        // FIX: We cannot copy the TxPoW (deleted constructor).
+        // Use the deepCopy() method, then move it into a shared_ptr.
+        auto txpow_copy_sync_uniq = zTxBlock->getTxPoW().deepCopy();
+        auto txpow_copy_sync = std::shared_ptr<org::minima::objects::TxPoW>(std::move(txpow_copy_sync_uniq));
+        txpdb->addTxPoW(txpow_copy_sync);
+    }
 
     // If we already have a tree root, ignore any SyncBlock at/before the current root.
     // These are either part of our cascade or come from overlapping IBDs of other peers.
@@ -661,6 +671,9 @@ void TxPoWProcessor::recalculateTree() {
 
             // And finally..
             cascdb->cascadeChain();
+
+            // Bound the archive WAL during bulk replay.
+            arch->checkpoint();
 
             // Clear the TxBlockDB
             if (newroot) {
@@ -940,11 +953,6 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
             try {
                 processSyncBlock(block);
                 additions++;
-
-                if (additions > 1000) {
-                    recalculateTree();
-                    additions = 0;
-                }
             } catch (const std::exception& exc) {
                 MinimaLogger::log(exc.what());
                 Main::getInstance()->getNIOManager().disconnect(uid);
@@ -952,7 +960,13 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
             }
         }
 
-        recalculateTree();
+        // Recalculate in batches (tree/cascade/archive work is expensive); the
+        // empty end-of-stream IBD forces a final recalculation.
+        mArchiveSinceRecalc += additions;
+        if (mArchiveSinceRecalc >= 2048 || blocks.empty()) {
+            recalculateTree();
+            mArchiveSinceRecalc = 0;
+        }
 
     } else if (zMessage.isMessageType(TXPOWPROCESSOR_CHECKER_CALL)) {
         MinimaLogger::log("TXPOWPROCESSOR Checker Call Recieved..");
