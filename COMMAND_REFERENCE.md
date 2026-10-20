@@ -11,7 +11,7 @@ Commands: 111.
 
 | Command | Access | Parameters | Summary |
 |---|---|---|---|
-| `archive` | destructive | `action`, `host`, `phrase`, `anyphrase`, `keys`, `keyuses`, `file`, `address`, `statecheck`, `logs`, `maxexport` | [action:] (host:) (phrase:) (keys:) (keyuses:) - Resync your chain with seed phrase if necessary (otherwise wallet remains the same) |
+| `archive` | destructive | `action`, `host`, `phrase`, `anyphrase`, `keys`, `keyuses`, `file`, `address`, `statecheck`, `logs`, `maxexport`, `raw` | [action:] (host:) (phrase:) (keys:) (keyuses:) - Resync your chain with seed phrase if necessary (otherwise wallet remains the same) |
 | `backup` | destructive | `debug`, `password`, `file`, `auto`, `confirm`, `maxhistory` | (password:) (file:) (auto:) (maxhistory:) - Backup the system. Uses a timestamped name by default |
 | `coinexport` | destructive | `coinid` | [coinid:] - Export a coin |
 | `coinimport` | destructive | `data`, `track` | [data:] (track:true\|false) - Import a coin, and keep tracking it |

@@ -508,6 +508,22 @@ Useful flags: `-data <dir>`, `-solo`, `-daemon`, `-clean`, `-port`, `-rpcenable`
 `-rpcpassword`, `-allowallip` (P2P to localhost). See `PORTABILITY.md` for
 platform notes.
 
+## Importing legacy node data
+
+Two import paths accept **both** Minima More exports and legacy (Java) node files:
+
+- **MegaMMR** — `megammr action:import file:<path>` accepts the versioned
+  `.megammr` export **and** a legacy raw `megammr.mmr` (detected automatically;
+  the reply reports `legacyraw:true`). A legacy file has no IBD, so the chain
+  resyncs normally while the MMR/coins are reused. `megammr action:integrity
+  file:<path>` validates either form.
+- **Archive (raw)** — `archive action:import file:<path>.raw.dat` accepts the
+  gzip/raw archive stream written by this node's `action:exportraw` **and** by a
+  legacy node's `action:exportraw` (identical format). Legacy H2 `.gzip` exports
+  (`action:export`) are **not** importable — run `exportraw` on the legacy node
+  first, or resync from an archive node. If a raw export was renamed, pass
+  `raw:true`.
+
 ## Verify
 
 ```sh

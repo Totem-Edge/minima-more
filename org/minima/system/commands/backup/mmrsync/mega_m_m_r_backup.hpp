@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <ostream>
 #include <istream>
 
@@ -21,6 +22,7 @@ public:
     MegaMMRBackup();
     MegaMMRBackup(org::minima::objects::mmr::MegaMMR* zMMR,
                   org::minima::objects::IBD* zIDB);
+    ~MegaMMRBackup() override;
 
     // Non-owning setters (caller manages lifetime)
     void setMegaMMR(org::minima::objects::mmr::MegaMMR* zMMR);
@@ -34,10 +36,17 @@ public:
     void writeDataStream(std::ostream& out) override;
     void readDataStream(std::istream& in) override;
 
+    // Read a legacy raw MegaMMR file (a Java node's megammr.mmr): version +
+    // MMR + coins, with no backup envelope and no IBD.
+    void readLegacyMegaMMR(std::istream& in);
+
 private:
-    // Non-owning raw pointers to avoid incomplete-type destructor issues
+    // Pointers are non-owning for export (DB objects); for import they point at
+    // the owned instances below (mirrors Java's readDataStream allocation).
     org::minima::objects::mmr::MegaMMR* mMegaMMR;
     org::minima::objects::IBD* mIBD;
+    std::unique_ptr<org::minima::objects::mmr::MegaMMR> mOwnedMMR;
+    std::unique_ptr<org::minima::objects::IBD> mOwnedIBD;
 };
 
 } // namespace mmrsync

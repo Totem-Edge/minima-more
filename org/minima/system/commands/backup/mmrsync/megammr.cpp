@@ -41,6 +41,41 @@ namespace commands {
 namespace backup {
 namespace mmrsync {
 
+namespace {
+// Load either the versioned MegaMMRBackup envelope (Minima More export) or a
+// legacy raw MegaMMR file (a Java node's megammr.mmr). Returns true when the
+// legacy raw form was used (no IBD).
+bool loadMegaMMRFile(const std::filesystem::path& file, MegaMMRBackup& back) {
+    // Versioned envelope first.
+    try {
+        std::ifstream fis(file, std::ios::binary);
+        if (!fis) throw std::runtime_error("cannot open " + file.string());
+        back.readDataStream(fis);
+        // A valid envelope is accepted even when the MegaMMR is empty (a
+        // normal -megammr node has not necessarily populated it yet).
+        return false;
+    } catch (const std::exception& e) {
+        org::minima::utils::MinimaLogger::log(
+            std::string("MegaMMR backup read failed (") + e.what() + ") - trying legacy raw");
+    } catch (...) {
+        org::minima::utils::MinimaLogger::log("MegaMMR backup read failed (unknown) - trying legacy raw");
+    }
+
+    std::ifstream fis(file, std::ios::binary);
+    if (!fis) throw std::runtime_error("cannot open " + file.string());
+    back.readLegacyMegaMMR(fis);
+    auto* m = back.getMegaMMR();
+    if (!m) {
+        throw std::runtime_error("not a valid MegaMMR file: " + file.string());
+    }
+    if (m->getMMR().getTotalEntries() == 0) {
+        org::minima::utils::MinimaLogger::log(
+            "WARNING: legacy MegaMMR file contains no entries: " + file.string());
+    }
+    return true;
+}
+} // namespace
+
 megammr::megammr()
     : org::minima::system::commands::Command("megammr", "(action:) (file:) - Get Info on or Import / Export the MegaMMR data") {}
 
@@ -142,8 +177,8 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
             MinimaDB::getDB()->readLock(false);
 
             JSONObject resp;
-            resp.put("megammrtip", megammrdb.getMMR().getBlockTime());
-            resp.put("ibdtip", ibd.getTreeTip());
+            resp.put("megammrtip", megammrdb.getMMR().getBlockTime().toString());
+            resp.put("ibdtip", ibd.getTreeTip().toString());
             resp.put("backup", std::filesystem::absolute(backupfile).string());
             resp.put("size", MiniFormat::formatSize(static_cast<long long>(std::filesystem::file_size(backupfile))));
 
@@ -170,11 +205,12 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
         }
 
         org::minima::system::commands::backup::mmrsync::MegaMMRBackup mmrback;
+        bool legacyraw = false;
 
         try {
             org::minima::utils::MinimaLogger::log(std::string("Loading MegaMMR.. size:") +
                                                   org::minima::utils::MiniFormat::formatSize(static_cast<long long>(std::filesystem::file_size(restorefile))));
-            MiniFile::loadObjectSlow(restorefile, mmrback);
+            legacyraw = loadMegaMMRFile(restorefile, mmrback);
         } catch (const std::exception& exc) {
             throw CommandException(exc.what());
         }
@@ -189,6 +225,7 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
         // Respond to caller (we cannot call TxPoWProcessor methods without their headers)
         JSONObject resp;
         resp.put("message", std::string("MegaMMR import finished.. please restart"));
+        resp.put("legacyraw", legacyraw);
         ret->put("response", resp);
 
         // Perform shutdown sequence using available APIs
@@ -207,18 +244,29 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
         }
 
         org::minima::system::commands::backup::mmrsync::MegaMMRBackup mmrback;
+        bool legacyraw = false;
 
-        org::minima::utils::MinimaLogger::log(std::string("Load MegaMMR.. ") +
-                                              org::minima::utils::MiniFormat::formatSize(static_cast<long long>(std::filesystem::file_size(restorefile))));
-        MiniFile::loadObjectSlow(restorefile, mmrback);
+        try {
+            org::minima::utils::MinimaLogger::log(std::string("Load MegaMMR.. ") +
+                                                  org::minima::utils::MiniFormat::formatSize(static_cast<long long>(std::filesystem::file_size(restorefile))));
+            legacyraw = loadMegaMMRFile(restorefile, mmrback);
+        } catch (const std::exception& exc) {
+            throw CommandException(exc.what());
+        }
 
-        auto weight = checkMegaMMR(mmrback);
-
-        // Build response with available IBD info
         JSONObject resp;
-        auto ibd = mmrback.getIBD();
-        resp.put("chaintip", ibd->getTreeTip());
-        resp.put("weight", weight.convert_to<std::string>());
+        resp.put("legacyraw", legacyraw);
+        auto* mega = mmrback.getMegaMMR();
+        resp.put("mmr_entries", static_cast<long long>(mega->getMMR().getTotalEntries()));
+        resp.put("coins", static_cast<long long>(mega->getAllCoins().size()));
+        if (mmrback.getIBD()) {
+            auto weight = checkMegaMMR(mmrback);
+            resp.put("chaintip", mmrback.getIBD()->getTreeTip().toString());
+            resp.put("weight", weight.convert_to<std::string>());
+        } else {
+            resp.put("chaintip", std::string("unknown (legacy raw MMR)"));
+            resp.put("weight", std::string("unknown"));
+        }
 
         ret->put("response", resp);
         return ret;
@@ -241,7 +289,7 @@ boost::multiprecision::cpp_int megammr::checkMegaMMR(const std::filesystem::path
 
     MinimaLogger::log(std::string("Load MegaMMR.. ") +
                       MiniFormat::formatSize(static_cast<long long>(std::filesystem::file_size(zMegaMMR))));
-    MiniFile::loadObjectSlow(zMegaMMR, mmrback);
+    loadMegaMMRFile(zMegaMMR, mmrback);
 
     return checkMegaMMR(mmrback);
 }
@@ -260,33 +308,37 @@ boost::multiprecision::cpp_int megammr::checkMegaMMR(org::minima::system::comman
     MegaMMR* mega = mmrback.getMegaMMR();
     MMR& mmr = mega->getMMR();
 
-    // Validate IBD
+    // Validate IBD (absent for a legacy raw MMR)
     auto ibd = mmrback.getIBD();
-    MinimaLogger::log("Check IBD..");
-    bool validibd = ibd->checkValidData();
-    if (!validibd) {
-        throw CommandException("Invalid IBD");
+
+    // Start/end block as per tip of the MMR. If the MMR is empty, seed from the
+    // first IBD block so an empty-but-valid backup still validates its IBD.
+    MiniNumber lastblock = mmr.getBlockTime();
+    if (mmr.getTotalEntries() == 0 && ibd && !ibd->getTxBlocks().empty()) {
+        lastblock = ibd->getTxBlocks().front()->getTxPoW().getBlockNumber().decrement();
     }
 
-    // Start/end block as per tip of the MMR
-    MiniNumber lastblock = mmr.getBlockTime();
-
-    // Load IBD blocks into the MegaMMR
-    auto& blocks = ibd->getTxBlocks();
-    for (const auto& blocksptr : blocks) {
-        const TxBlock& block = *blocksptr;
-
-        MiniNumber blknum = block.getTxPoW().getBlockNumber();
-        if (!blknum.isEqual(lastblock.increment())) {
-            throw CommandException(std::string("Invalid block number.. not incremental.. last_in_mega:") +
-                                   lastblock.toString() + " new_block:" + blknum.toString());
+    if (ibd) {
+        MinimaLogger::log("Check IBD..");
+        if (!ibd->checkValidData()) {
+            throw CommandException("Invalid IBD");
         }
 
-        // Update
-        lastblock = blknum;
+        auto& blocks = ibd->getTxBlocks();
+        for (const auto& blocksptr : blocks) {
+            const TxBlock& block = *blocksptr;
 
-        // Add to MegaMMR
-        mega->addBlock(block);
+            MiniNumber blknum = block.getTxPoW().getBlockNumber();
+            if (!blknum.isEqual(lastblock.increment())) {
+                throw CommandException(std::string("Invalid block number.. not incremental.. last_in_mega:") +
+                                       lastblock.toString() + " new_block:" + blknum.toString());
+            }
+
+            lastblock = blknum;
+            mega->addBlock(block);
+        }
+    } else {
+        MinimaLogger::log("No IBD in file (legacy raw MMR) - checking MMR coins only");
     }
 
     // Finalize
@@ -327,8 +379,8 @@ boost::multiprecision::cpp_int megammr::checkMegaMMR(org::minima::system::comman
 
     MinimaLogger::log(std::string("All coins checked ") + std::to_string(maxcheck) + " / " + std::to_string(size));
 
-    // Return total weight
-    return ibd->getTotalWeight();
+    // Return total weight (0 when there is no IBD in the file)
+    return ibd ? ibd->getTotalWeight() : boost::multiprecision::cpp_int(0);
 }
 
 } // namespace mmrsync

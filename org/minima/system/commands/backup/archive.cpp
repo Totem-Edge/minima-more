@@ -225,7 +225,7 @@ archive::archive()
 
 std::vector<std::string> archive::getValidParams() const {
     return std::vector<std::string>{
-        "action","host","phrase","anyphrase","keys","keyuses","file","address","statecheck","logs","maxexport"
+        "action","host","phrase","anyphrase","keys","keyuses","file","address","statecheck","logs","maxexport","raw"
     };
 }
 
@@ -769,10 +769,21 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         if (file.size() >= 4 && file.substr(file.size()-4) == ".dat") {
             h2import = false;
         }
+        // Escape hatch for a raw export that was renamed (e.g. .gzip).
+        if (getBooleanParam("raw", false)) {
+            h2import = false;
+        }
 
         if (h2import) {
-            // Not supported in this C++/SQLite build (Java used H2 restoreFromFile)
-            throw CommandException("H2 archive import (.gzip) is not supported in this build. Use a RAW .dat file.");
+            // Java's legacy `archive action:export` writes an H2 database dump
+            // (.gzip). That is not the raw stream format; importing it would need
+            // an H2 reader. Legacy *raw* exports (.raw.dat, gzip-compressed raw
+            // archive) ARE supported.
+            throw CommandException(
+                "Legacy H2 .gzip archives are not importable in this build. "
+                "On the legacy node run: archive action:exportraw file:chain.raw.dat "
+                "(or resync from an archive node), then import that .raw.dat file. "
+                "If the file is actually a raw export, pass raw:true.");
         } else {
             MinimaLogger::log("RAW archive import started..");
             H2_TEMPARCHIVE = false;

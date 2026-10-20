@@ -936,7 +936,7 @@ if(UNIX AND NOT APPLE)
     list(APPEND MINIMA_TEST_LIBS ${CMAKE_DL_LIBS})
 endif()
 
-foreach(tgt test_capabilities test_mcp_server test_docs_manifest gen_command_reference)
+foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import gen_command_reference)
     add_executable(${tgt} EXCLUDE_FROM_ALL
         tests/${tgt}.cpp
         $<TARGET_OBJECTS:minima_core>)
@@ -951,3 +951,4 @@ endforeach()
 add_test(NAME capabilities COMMAND test_capabilities)
 add_test(NAME mcp_server COMMAND test_mcp_server)
 add_test(NAME docs_manifest COMMAND test_docs_manifest ${CMAKE_CURRENT_SOURCE_DIR}/COMMAND_REFERENCE.md)
+add_test(NAME megammr_import COMMAND test_megammr_import)
