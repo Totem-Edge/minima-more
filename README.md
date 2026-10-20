@@ -519,10 +519,13 @@ Two import paths accept **both** Minima More exports and legacy (Java) node file
   file:<path>` validates either form.
 - **Archive (raw)** — `archive action:import file:<path>.raw.dat` accepts the
   gzip/raw archive stream written by this node's `action:exportraw` **and** by a
-  legacy node's `action:exportraw` (identical format). Legacy H2 `.gzip` exports
-  (`action:export`) are **not** importable — run `exportraw` on the legacy node
-  first, or resync from an archive node. If a raw export was renamed, pass
-  `raw:true`.
+  legacy node's `action:exportraw` (identical format). If a raw export was
+  renamed, pass `raw:true`.
+- **Archive (legacy H2 `.gzip`)** — `archive action:import file:<path>.gzip` now
+  reads the gzipped **H2 SQL script** produced by a legacy `action:export`
+  (`CREATE`/`INSERT` for `SYNCBLOCK`/`CASCADEDATA`, blobs as `X'…'`), converts it
+  to the raw archive stream and runs the normal resync. This is a focused reader
+  for the archive schema, not a general H2 engine.
 
 ## Verify
 

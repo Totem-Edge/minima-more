@@ -10,6 +10,7 @@ set(MINIMA_SOURCES
     org/minima/database/minima_d_b.cpp
     org/minima/database/archive/archive_manager.cpp
     org/minima/database/archive/raw_archive_input.cpp
+    org/minima/database/archive/h2_sql_import.cpp
     org/minima/database/archive/tx_block_d_b.cpp
     org/minima/database/cascade/cascade.cpp
     org/minima/database/cascade/cascade_node.cpp
@@ -936,7 +937,7 @@ if(UNIX AND NOT APPLE)
     list(APPEND MINIMA_TEST_LIBS ${CMAKE_DL_LIBS})
 endif()
 
-foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import gen_command_reference)
+foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import gen_command_reference)
     add_executable(${tgt} EXCLUDE_FROM_ALL
         tests/${tgt}.cpp
         $<TARGET_OBJECTS:minima_core>)
@@ -952,3 +953,4 @@ add_test(NAME capabilities COMMAND test_capabilities)
 add_test(NAME mcp_server COMMAND test_mcp_server)
 add_test(NAME docs_manifest COMMAND test_docs_manifest ${CMAKE_CURRENT_SOURCE_DIR}/COMMAND_REFERENCE.md)
 add_test(NAME megammr_import COMMAND test_megammr_import)
+add_test(NAME h2_import COMMAND test_h2_import)

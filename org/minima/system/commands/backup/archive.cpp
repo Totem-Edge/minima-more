@@ -39,6 +39,7 @@
 #include "org/minima/database/minima_d_b.hpp"
 #include "org/minima/database/archive/archive_manager.hpp"
 #include "org/minima/database/archive/raw_archive_input.hpp"
+#include "org/minima/database/archive/h2_sql_import.hpp"
 #include "org/minima/database/cascade/cascade.hpp"
 #include "org/minima/database/cascade/cascade_node.hpp"
 #include "org/minima/database/wallet/wallet.hpp"
@@ -71,6 +72,8 @@
 using org::minima::database::MinimaDB;
 using org::minima::database::archive::ArchiveManager;
 using org::minima::database::archive::RawArchiveInput;
+using org::minima::database::archive::h2SqlToRawArchive;
+using org::minima::database::archive::H2SqlImportResult;
 using org::minima::database::cascade::Cascade;
 using org::minima::database::wallet::Wallet;
 using org::minima::objects::Address;
@@ -774,63 +777,75 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             h2import = false;
         }
 
+        std::filesystem::path rawfile = restorefile;
+        std::filesystem::path tmpraw;
+
         if (h2import) {
-            // Java's legacy `archive action:export` writes an H2 database dump
-            // (.gzip). That is not the raw stream format; importing it would need
-            // an H2 reader. Legacy *raw* exports (.raw.dat, gzip-compressed raw
-            // archive) ARE supported.
-            throw CommandException(
-                "Legacy H2 .gzip archives are not importable in this build. "
-                "On the legacy node run: archive action:exportraw file:chain.raw.dat "
-                "(or resync from an archive node), then import that .raw.dat file. "
-                "If the file is actually a raw export, pass raw:true.");
-        } else {
-            MinimaLogger::log("RAW archive import started..");
-            H2_TEMPARCHIVE = false;
-
-            STATIC_RAW = std::make_unique<RawArchiveInput>(restorefile);
-            STATIC_RAW->connect();
-
-            // Build the resync command to reuse the same flow (including phrase/keys/anyphrase)
-            std::string command = "archive action:resync host:" + LOCAL_ARCHIVE;
-            if (existsParam("phrase")) {
-                std::string phr = getParam("phrase");
-                // Quote as Java did
-                command += " phrase:\"" + phr + "\"";
+            // Legacy `archive action:export` is an H2 SQL script (gzip).
+            // Convert it to the raw archive stream, then reuse the normal flow.
+            tmpraw = restorefile;
+            tmpraw += ".raw.tmp";
+            H2SqlImportResult hr = h2SqlToRawArchive(restorefile, tmpraw);
+            MinimaLogger::log("H2 archive converted: blocks=" + std::to_string(hr.blocks) +
+                              " cascade=" + (hr.cascade ? "yes" : "no"));
+            if (hr.blocks == 0 && !hr.cascade) {
+                std::error_code ec;
+                std::filesystem::remove(tmpraw, ec);
+                throw CommandException("H2 archive contains no blocks or cascade");
             }
-            if (existsParam("keys")) {
-                command += " keys:" + getParam("keys");
-            }
-            if (existsParam("keyuses")) {
-                command += " keyuses:" + getParam("keyuses");
-            }
-            if (existsParam("anyphrase")) {
-                command += " anyphrase:" + getParam("anyphrase");
-            }
+            rawfile = tmpraw;
+        }
 
-            // Run the resync command through the runner
-            auto runner = CommandRunner::getRunner();
-            std::unique_ptr<JSONArray> res = runner->runMultiCommand(command);
+        MinimaLogger::log(h2import ? "H2 archive import started.." : "RAW archive import started..");
+        H2_TEMPARCHIVE = h2import;
 
-            // Shutdown RAW reader
-            STATIC_RAW->stop();
-            STATIC_RAW.reset();
+        STATIC_RAW = std::make_unique<RawArchiveInput>(rawfile);
+        STATIC_RAW->connect();
 
-            // Package response
-            JSONObject resp;
-            if (res && res->size() > 0) {
-                const std::any& a0 = res->at(0);
-                if (a0.type() == typeid(JSONObject)) {
-                    resp.put("archiveresync", std::any_cast<JSONObject>(a0));
-                } else {
-                    resp.put("archiveresync", "resync started");
-                }
+        // Build the resync command to reuse the same flow (including phrase/keys/anyphrase)
+        std::string command = "archive action:resync host:" + LOCAL_ARCHIVE;
+        if (existsParam("phrase")) {
+            std::string phr = getParam("phrase");
+            // Quote as Java did
+            command += " phrase:\"" + phr + "\"";
+        }
+        if (existsParam("keys")) {
+            command += " keys:" + getParam("keys");
+        }
+        if (existsParam("keyuses")) {
+            command += " keyuses:" + getParam("keyuses");
+        }
+        if (existsParam("anyphrase")) {
+            command += " anyphrase:" + getParam("anyphrase");
+        }
+
+        // Run the resync command through the runner
+        auto runner = CommandRunner::getRunner();
+        std::unique_ptr<JSONArray> res = runner->runMultiCommand(command);
+
+        // Shutdown RAW reader
+        STATIC_RAW->stop();
+        STATIC_RAW.reset();
+
+        if (!tmpraw.empty()) {
+            std::error_code ec;
+            std::filesystem::remove(tmpraw, ec);
+        }
+
+        // Package response
+        JSONObject resp;
+        if (res && res->size() > 0) {
+            const std::any& a0 = res->at(0);
+            if (a0.type() == typeid(JSONObject)) {
+                resp.put("archiveresync", std::any_cast<JSONObject>(a0));
             } else {
                 resp.put("archiveresync", "resync started");
             }
-            ret->put("response", resp);
-            return ret;
+        } else {
+            resp.put("archiveresync", "resync started");
         }
+        ret->put("response", resp);
+        return ret;
     } else if (action == "importraw") {
         std::string file = getParam("file");
 
