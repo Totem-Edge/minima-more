@@ -191,4 +191,27 @@ _save(fig, "lifecycle_tx_load.svg")
 bars("lifecycle_disk.svg", ["C++ node", "Java node"], [4.18, 5.90], [CPP, JAVA],
      "Disk writes at idle - MB per hour (lower is better)", "MB / hour", fmt="{:.2f}")
 
+# 12. Live mainnet (fresh both-node run, AWS 8 GB): memory/disk/CPU panels
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.6))
+panels = [
+    ("Peak RSS", [101, 457], "MB", "{:.0f}"),
+    ("Idle RSS", [182, 698], "MB", "{:.0f}"),
+    ("Data dir", [64, 683], "MB", "{:.0f}"),
+    ("CPU / 60 s", [33.7, 72.1], "CPU-s", "{:.0f}"),
+]
+for ax, (title, vals, ylab, fmt) in zip(axes, panels):
+    b = ax.bar([0, 1], vals, color=[CPP, JAVA], width=0.6)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["C++", "Java"])
+    ax.set_ylabel(ylab)
+    ax.set_title(title, fontweight="bold", fontsize=11)
+    ax.set_ylim(0, max(vals) * 1.2)
+    for r, v in zip(b, vals):
+        ax.annotate(fmt.format(v), (r.get_x() + r.get_width() / 2, v),
+                    textcoords="offset points", xytext=(0, 4), ha="center",
+                    fontsize=9, fontweight="bold")
+fig.suptitle("Live mainnet — C++ node vs Java node (same host, same chain)",
+             fontweight="bold", y=1.02)
+_save(fig, "mainnet.svg")
+
 print("done")

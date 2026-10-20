@@ -21,12 +21,12 @@ CPP, JAVA, BLUE = "#3fb950", "#f0883e", "#58a6ff"
 
 # title, C++ value, Java value, unit, badge, badge colour
 CARDS = [
-    ("Mainnet peak RAM", 115, 426, "MB", "3.7× less", CPP),
-    ("Mainnet idle RAM", 193, 741, "MB", "3.8× less", CPP),
-    ("Mainnet data dir", 53, 721, "MB", "13.6× smaller", CPP),
-    ("OS threads", 25, 62, "", "60% fewer", CPP),
+    ("Mainnet peak RAM", 101, 457, "MB", "4.5× less", CPP),
+    ("Mainnet idle RAM", 182, 698, "MB", "3.8× less", CPP),
+    ("Mainnet data dir", 64, 683, "MB", "10.7× smaller", CPP),
+    ("OS threads", 25, 61, "", "59% fewer", CPP),
     ("MMR RAM (300k)", 186, 585, "MB", "3.1× less", CPP),
-    ("CPU (mainnet 60 s)", 34, 76, "CPU-s", "2.2× less", CPP),
+    ("CPU (mainnet 60 s)", 34, 72, "CPU-s", "2.1× less", CPP),
     ("Disk writes (idle)", 4.2, 5.9, "MB/h", "29% less", CPP),
     ("Synced RAM (solo)", 20, 207, "MB", "11× less", CPP),
     ("Mempool lookup", 1.0, 20417, "µs", "21,000×", BLUE),
