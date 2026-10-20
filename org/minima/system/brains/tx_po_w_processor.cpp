@@ -628,6 +628,8 @@ void TxPoWProcessor::recalculateTree() {
             // Add these nodes to the cascade
             // MinimaLogger::log("DEBUG: Processing " + std::to_string(cascade.size()) + " nodes for cascade");
 
+            arch->beginSaveBatch();
+            try {
             for (const auto& txpnode : cascade) {
                 auto& txpowsp = txpnode->getTxPoW();
 
@@ -663,6 +665,11 @@ void TxPoWProcessor::recalculateTree() {
                 if (GeneralParams::IS_MEGAMMR) {
                     megammr->addBlock(txpnode->getTxBlock());
                 }
+            }
+            arch->endSaveBatch(true);
+            } catch (...) {
+                arch->endSaveBatch(false);
+                throw;
             }
 
             if (GeneralParams::IS_MEGAMMR) {

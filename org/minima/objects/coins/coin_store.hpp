@@ -38,6 +38,12 @@ public:
 
     virtual void forEach(const std::function<void(const Coin&)>& fn) const = 0;
 
+    // Iterate until fn returns false (early exit without materialising).
+    virtual void forEachUntil(const std::function<bool(const Coin&)>& fn) const {
+        bool cont = true;
+        forEach([&](const Coin& c) { if (cont && !fn(c)) cont = false; });
+    }
+
     virtual std::size_t size() const = 0;
     virtual bool empty() const { return size() == 0; }
 

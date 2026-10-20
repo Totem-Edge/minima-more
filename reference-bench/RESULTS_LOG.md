@@ -746,6 +746,23 @@ Raw: `results/aws8-archive-full/`.
 
 v0.2.0 published with standard + **fully static** tarballs (x86_64/aarch64).
 
+## Searcher LMDB + archive compression/batching (follow-up)
+
+- **Searcher:** `balance`/`coins` now filter over the MegaMMR LMDB cursor
+  (`forEach`/`forEachUntil`) instead of materialising `getAllCoins()`. On the
+  populated 465,588-coin MMR with a live tip, RSS stayed **602 MB before and
+  after** the calls (previously a ~1.2 GB transient spike).
+- **Archive compression:** each `syncdata` row is zlib-compressed (`ZBLK` +
+  uncompressed length; old uncompressed rows still read). Integrity check over
+  40,928 blocks: **valid, 0 errors**; `exportraw`/`inspectraw` round-trip works.
+  - Per-block ratio **1.37x** (78.4 MB compressed payload for 40,928 rows; 119 MB
+    DB). Cross-block gzip on the same data is ~3.4x, so a **chunked** codec is
+    required for a complete archive to fit on 8 GB.
+- **Batched writes:** archive inserts share one transaction per tree
+  recalculation (BEGIN/COMMIT), with WAL checkpointing; resync throughput remains
+  ~500 blocks/s (per-block prepare/serialize dominates; prepared-statement reuse
+  is the next speed lever).
+
 ## Planned next
 
 - Searcher: filter over LMDB cursors instead of materialising `getAllCoins()`

@@ -153,80 +153,47 @@ TxPoWSearcher::searchCoins(const std::shared_ptr<TxPoWTreeNode>& zStartNode, boo
     int depth = 0;
     bool MEGACHECK = false;
 
+    // Shared per-coin filter (tree coins and MegaMMR store coins).
+    auto processCoin = [&](const Coin& coin) {
+        if (zCheckTokenID && !coin.getTokenID().isEqual(zTokenID)) return;
+        if (zCheckCoinID && !coin.getCoinID().isEqual(zCoinID)) return;
+        if (zCheckAmount && !coin.getAmount().isEqual(zAmount)) return;
+        if (zCheckAddress && !coin.getAddress().isEqual(zAddress)) return;
+        if (zCheckState && !coin.checkForStateVariable(zState, zWildCardState)) return;
+
+        const std::string coinid = coin.getCoinID().to0xString();
+        if (coin.getSpent()) {
+            spentcoins.insert(coinid);
+            return;
+        }
+        if (spentcoins.find(coinid) == spentcoins.end()) {
+            coinentry.push_back(std::shared_ptr<Coin>(coin.deepCopy()));
+            spentcoins.insert(coinid);
+        }
+    };
+
     while (tip || MEGACHECK) {
         if (depth++ > zDepth) {
             break;
         }
 
-        std::vector<const Coin*> coins;
-
         if (!MEGACHECK) {
             if (tip) {
                 if (zRelevant) {
                     const auto& rc = tip->getRelevantCoins();
-                    coins.reserve(rc.size());
-                    for (const auto& sp : rc) {
-                        coins.push_back(&sp);
-                    }
+                    for (const auto& sp : rc) processCoin(sp);
                 } else {
                     const auto& ac = tip->getAllCoins();
-                    coins.reserve(ac.size());
-                    for (const auto& sp : ac) {
-                        coins.push_back(&sp);
-                    }
+                    for (const auto& sp : ac) processCoin(sp);
                 }
             }
         } else {
-            // Lock DB while accessing MEGAMMR
+            // Lock DB while accessing the MegaMMR store; filter over the LMDB
+            // cursor instead of materialising the whole coin map.
             MinimaDB::getDB()->readLock(true);
-
-            //
-            // FIX: Get MegaMMR as a reference (auto&) to avoid deleted copy constructor
-            //
             auto& mega = MinimaDB::getDB()->getMegaMMR();
-            //
-            // FIX: Use dot '.' operator
-            //
-            const auto& allmap = mega.getAllCoins(); // assumed map-like with shared_ptr<Coin> values
-            coins.reserve(allmap.size());
-            for (const auto& kv : allmap) {
-                coins.push_back(kv.second.get());
-            }
-        }
-
-        for (const auto* coin : coins) {
-            if (zCheckTokenID && !coin->getTokenID().isEqual(zTokenID)) {
-                continue;
-            }
-            if (zCheckCoinID && !coin->getCoinID().isEqual(zCoinID)) {
-                continue;
-            }
-            if (zCheckAmount && !coin->getAmount().isEqual(zAmount)) {
-                continue;
-            }
-            if (zCheckAddress && !coin->getAddress().isEqual(zAddress)) {
-                continue;
-            }
-            if (zCheckState && !coin->checkForStateVariable(zState, zWildCardState)) {
-                continue;
-            }
-
-            std::string coinid = coin->getCoinID().to0xString();
-            bool spent = coin->getSpent();
-
-            if (spent) {
-                spentcoins.insert(coinid);
-            } else {
-                if (spentcoins.find(coinid) == spentcoins.end()) {
-                    // Deep copy then store as shared_ptr
-                    std::unique_ptr<Coin> copy = coin->deepCopy();
-                    std::shared_ptr<Coin> scopy(std::move(copy));
-                    coinentry.push_back(std::move(scopy));
-
-                    // Mark to prevent future duplicates
-                    spentcoins.insert(coinid);
-                }
-            }
+            mega.forEachCoin([&](const Coin& c) { processCoin(c); });
+            MinimaDB::getDB()->readLock(false);
         }
 
         if (!MEGACHECK) {
@@ -238,9 +205,7 @@ TxPoWSearcher::searchCoins(const std::shared_ptr<TxPoWTreeNode>& zStartNode, boo
                 MEGACHECK = true;
             }
         } else {
-            // Unlock DB after MEGAMMR access
-            MinimaDB::getDB()->readLock(false);
-            break; // MEGAMMR only checked once
+            break; // MEGAMMR only checked once (lock released in the branch)
         }
     }
 
@@ -614,7 +579,6 @@ TxPoWSearcher::getToken(const MiniData& zTokenID) {
     std::shared_ptr<TxPoWTreeNode> tip = tree.getTip();
 
     bool MEGACHECK = false;
-    bool locked = false;
 
     while (tip || MEGACHECK) {
         std::vector<std::shared_ptr<Coin>> coins;
@@ -630,32 +594,26 @@ TxPoWSearcher::getToken(const MiniData& zTokenID) {
             }
         } else {
             MinimaDB::getDB()->readLock(true);
-            locked = true;
-
-            //
-            // FIX: Get MegaMMR as a reference (auto&)
-            //
             auto& mega = MinimaDB::getDB()->getMegaMMR();
-            //
-            // FIX: Use dot '.' operator
-            //
-            const auto& allmap = mega.getAllCoins();
-            coins.reserve(allmap.size());
-            auto null_deleter = [](org::minima::objects::Coin*){};
-            for (const auto& kv : allmap) {
-                coins.emplace_back(kv.second.get(), null_deleter);
-            }
+
+            // Early-exit LMDB scan: stop at the first matching token instead of
+            // materialising the full coin map.
+            std::shared_ptr<Token> found;
+            mega.forEachCoinUntil([&](const Coin& c) {
+                if (!c.getTokenID().isEqual(zTokenID)) return true;
+                std::shared_ptr<Coin> holder(c.deepCopy());
+                Token* rawtok = holder->getToken();
+                found = std::shared_ptr<Token>(holder, rawtok);
+                return false;
+            });
+            MinimaDB::getDB()->readLock(false);
+            if (found) return found;
         }
 
         for (const auto& spcoin : coins) {
             if (spcoin->getTokenID().isEqual(zTokenID)) {
                 Token* rawtok = spcoin->getToken();
-                std::shared_ptr<Token> ret(spcoin, rawtok);
-                if (locked) {
-                    MinimaDB::getDB()->readLock(false);
-                    locked = false;
-                }
-                return ret;
+                return std::shared_ptr<Token>(spcoin, rawtok);
             }
         }
 
@@ -665,10 +623,6 @@ TxPoWSearcher::getToken(const MiniData& zTokenID) {
                 MEGACHECK = true;
             }
         } else {
-            if (locked) {
-                MinimaDB::getDB()->readLock(false);
-                locked = false;
-            }
             break;
         }
     }

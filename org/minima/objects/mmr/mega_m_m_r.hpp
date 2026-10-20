@@ -62,6 +62,7 @@ public:
     bool openCoinStore(const std::filesystem::path& zDir);
     std::size_t coinCount() const;
     void forEachCoin(const std::function<void(const org::minima::objects::Coin&)>& fn) const;
+    void forEachCoinUntil(const std::function<bool(const org::minima::objects::Coin&)>& fn) const;
     std::unique_ptr<org::minima::objects::Coin> getCoin(const std::string& zCoinID) const;
     const char* coinStoreEngine() const;
 

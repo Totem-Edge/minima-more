@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <cstdint>
 #include <stdexcept>
 #include <sqlite3.h>
+#include <zlib.h>
 
 #include "org/minima/database/cascade/cascade.hpp"
 #include "org/minima/database/cascade/cascade_node.hpp"
@@ -29,6 +31,46 @@ using org::minima::objects::base::MiniNumber;
 using org::minima::database::cascade::Cascade;
 using org::minima::utils::MinimaLogger;
 using org::minima::system::params::GeneralParams;
+
+namespace {
+// Blocks are stored compressed in `syncdata` (R1). Format: "ZBLK" + uint32
+// uncompressed length + zlib deflate. Old uncompressed rows (no magic) still
+// read fine, so existing archive DBs remain compatible.
+std::vector<std::uint8_t> packBlockBlob(const std::vector<std::uint8_t>& raw) {
+    if (raw.size() < 64) return raw;
+    const uLongf bound = compressBound(static_cast<uLong>(raw.size()));
+    std::vector<std::uint8_t> out(8 + static_cast<std::size_t>(bound));
+    std::memcpy(out.data(), "ZBLK", 4);
+    const std::uint32_t n = static_cast<std::uint32_t>(raw.size());
+    std::memcpy(out.data() + 4, &n, sizeof(n));
+    uLongf destLen = bound;
+    if (compress2(out.data() + 8, &destLen, raw.data(), static_cast<uLong>(raw.size()), 1) != Z_OK) {
+        return raw;
+    }
+    out.resize(8 + static_cast<std::size_t>(destLen));
+    if (out.size() >= raw.size()) return raw;
+    return out;
+}
+
+bool unpackBlockBlob(const void* blob, int blen, MiniData& out) {
+    if (!blob || blen <= 0) return false;
+    const auto* p = static_cast<const std::uint8_t*>(blob);
+    if (blen >= 8 && std::memcmp(p, "ZBLK", 4) == 0) {
+        std::uint32_t n = 0;
+        std::memcpy(&n, p + 4, sizeof(n));
+        std::vector<std::uint8_t> raw(n);
+        uLongf destLen = n;
+        if (uncompress(raw.data(), &destLen, p + 8,
+                       static_cast<uLong>(blen - 8)) != Z_OK || destLen != n) {
+            return false;
+        }
+        out = MiniData(raw);
+        return true;
+    }
+    out = MiniData(std::vector<std::uint8_t>(p, p + blen));
+    return true;
+}
+} // namespace
 
 ArchiveManager::ArchiveManager()
 : SqlDB()
@@ -298,6 +340,30 @@ bool ArchiveManager::saveBlock(TxBlock& zBlock) {
     }
 }
 
+void ArchiveManager::beginSaveBatch() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    try {
+        checkOpen();
+        openConnIfNeeded();
+        if (mConn && !mInBatch) {
+            if (sqlite3_exec(mConn, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr) == SQLITE_OK) {
+                mInBatch = true;
+            }
+        }
+    } catch (...) {
+        // best effort
+    }
+}
+
+void ArchiveManager::endSaveBatch(bool zCommit) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!mInBatch) return;
+    if (mConn) {
+        sqlite3_exec(mConn, zCommit ? "COMMIT;" : "ROLLBACK;", nullptr, nullptr, nullptr);
+    }
+    mInBatch = false;
+}
+
 void ArchiveManager::checkpoint() {
     std::lock_guard<std::mutex> lock(m_mutex);
     try {
@@ -343,8 +409,8 @@ bool ArchiveManager::_intSaveBlock(TxBlock& zBlock) {
     rc = sqlite3_bind_int64(stmt, 3, timemilli);
     if (rc != SQLITE_OK) { MinimaLogger::log("saveBlock bind timemilli failed"); sqlite3_finalize(stmt); return false; }
 
-    const std::vector<std::uint8_t>& bytes = syncdata->getBytes();
-    rc = sqlite3_bind_blob(stmt, 4, bytes.data(), static_cast<int>(bytes.size()), SQLITE_TRANSIENT);
+    const std::vector<std::uint8_t> packed = packBlockBlob(syncdata->getBytes());
+    rc = sqlite3_bind_blob(stmt, 4, packed.data(), static_cast<int>(packed.size()), SQLITE_TRANSIENT);
     if (rc != SQLITE_OK) { MinimaLogger::log("saveBlock bind blob failed"); sqlite3_finalize(stmt); return false; }
 
     rc = sqlite3_step(stmt);
@@ -379,10 +445,8 @@ std::unique_ptr<TxBlock> ArchiveManager::loadBlock(const std::string& zTxPoWID) 
         if (rc == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
             int blen = sqlite3_column_bytes(stmt, 0);
-            if (blob && blen > 0) {
-                std::vector<std::uint8_t> v(static_cast<const std::uint8_t*>(blob),
-                                            static_cast<const std::uint8_t*>(blob) + blen);
-                MiniData minisync(v);
+            MiniData minisync;
+            if (unpackBlockBlob(blob, blen, minisync)) {
                 result = TxBlock::convertMiniDataVersion(minisync);
             }
         } else if (rc != SQLITE_DONE) {
@@ -439,10 +503,8 @@ std::unique_ptr<TxBlock> ArchiveManager::loadFirstBlock() {
         if (rc == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
             int blen = sqlite3_column_bytes(stmt, 0);
-            if (blob && blen > 0) {
-                std::vector<std::uint8_t> v(static_cast<const std::uint8_t*>(blob),
-                                            static_cast<const std::uint8_t*>(blob) + blen);
-                MiniData minisync(v);
+            MiniData minisync;
+            if (unpackBlockBlob(blob, blen, minisync)) {
                 result = TxBlock::convertMiniDataVersion(minisync);
             }
         } else if (rc != SQLITE_DONE) {
@@ -499,10 +561,8 @@ std::unique_ptr<TxBlock> ArchiveManager::loadLastBlock() {
         if (rc == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
             int blen = sqlite3_column_bytes(stmt, 0);
-            if (blob && blen > 0) {
-                std::vector<std::uint8_t> v(static_cast<const std::uint8_t*>(blob),
-                                            static_cast<const std::uint8_t*>(blob) + blen);
-                MiniData minisync(v);
+            MiniData minisync;
+            if (unpackBlockBlob(blob, blen, minisync)) {
                 result = TxBlock::convertMiniDataVersion(minisync);
             }
         } else if (rc != SQLITE_DONE) {
@@ -552,10 +612,8 @@ ArchiveManager::loadSyncBlockRange(const MiniNumber& zStartBlock) {
 
             const void* blob = sqlite3_column_blob(stmt, 0);
             int blen = sqlite3_column_bytes(stmt, 0);
-            if (blob && blen > 0) {
-                std::vector<std::uint8_t> v(static_cast<const std::uint8_t*>(blob),
-                                            static_cast<const std::uint8_t*>(blob) + blen);
-                MiniData md(v);
+            MiniData md;
+            if (unpackBlockBlob(blob, blen, md)) {
                 auto sb = TxBlock::convertMiniDataVersion(md);
                 if (sb) {
                     blocks.push_back(std::move(sb));
@@ -643,10 +701,8 @@ ArchiveManager::loadBlockRange(const MiniNumber& zStartBlock, const MiniNumber& 
         while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
             int blen = sqlite3_column_bytes(stmt, 0);
-            if (blob && blen > 0) {
-                std::vector<std::uint8_t> v(static_cast<const std::uint8_t*>(blob),
-                                            static_cast<const std::uint8_t*>(blob) + blen);
-                MiniData md(v);
+            MiniData md;
+            if (unpackBlockBlob(blob, blen, md)) {
                 auto sb = TxBlock::convertMiniDataVersion(md);
                 if (sb) {
                     blocks.push_back(std::move(sb));
@@ -701,10 +757,8 @@ ArchiveManager::loadBlockFromNumber(const MiniNumber& zBlock) {
         if (rc == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
             int blen = sqlite3_column_bytes(stmt, 0);
-            if (blob && blen > 0) {
-                std::vector<std::uint8_t> v(static_cast<const std::uint8_t*>(blob),
-                                            static_cast<const std::uint8_t*>(blob) + blen);
-                MiniData md(v);
+            MiniData md;
+            if (unpackBlockBlob(blob, blen, md)) {
                 result = TxBlock::convertMiniDataVersion(md);
             }
         } else if (rc != SQLITE_DONE) {

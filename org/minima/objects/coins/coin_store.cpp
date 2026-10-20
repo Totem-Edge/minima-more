@@ -146,6 +146,28 @@ public:
         mdb_txn_abort(txn);
     }
 
+    void forEachUntil(const std::function<bool(const Coin&)>& fn) const override {
+        if (!mEnv) return;
+        MDB_txn* txn = nullptr;
+        if (mdb_txn_begin(mEnv, nullptr, MDB_RDONLY, &txn) != 0) return;
+
+        MDB_cursor* cur = nullptr;
+        if (mdb_cursor_open(txn, mDbi, &cur) != 0) {
+            mdb_txn_abort(txn);
+            return;
+        }
+
+        MDB_val k{}, v{};
+        int rc = mdb_cursor_get(cur, &k, &v, MDB_FIRST);
+        while (rc == 0) {
+            auto coin = deserializeCoin(v.mv_data, v.mv_size);
+            if (coin && !fn(*coin)) break;
+            rc = mdb_cursor_get(cur, &k, &v, MDB_NEXT);
+        }
+        mdb_cursor_close(cur);
+        mdb_txn_abort(txn);
+    }
+
     std::size_t size() const override {
         if (!mEnv) return 0;
         MDB_txn* txn = nullptr;

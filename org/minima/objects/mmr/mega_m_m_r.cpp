@@ -91,6 +91,16 @@ void MegaMMR::forEachCoin(const std::function<void(const Coin&)>& fn) const {
     }
 }
 
+void MegaMMR::forEachCoinUntil(const std::function<bool(const Coin&)>& fn) const {
+    if (mCoinStore) {
+        mCoinStore->forEachUntil(fn);
+        return;
+    }
+    for (const auto& kv : mAllUnspentCoins) {
+        if (kv.second && !fn(*kv.second)) break;
+    }
+}
+
 std::unique_ptr<Coin> MegaMMR::getCoin(const std::string& zCoinID) const {
     if (mCoinStore) return mCoinStore->get(zCoinID);
     auto it = mAllUnspentCoins.find(zCoinID);

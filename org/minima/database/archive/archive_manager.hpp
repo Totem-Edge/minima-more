@@ -50,6 +50,10 @@ public:
 
     // Bound the WAL during bulk archive replay.
     void checkpoint();
+
+    // Batch archive inserts inside one transaction (bulk replay).
+    void beginSaveBatch();
+    void endSaveBatch(bool zCommit = true);
     std::unique_ptr<org::minima::objects::TxBlock> loadBlock(const std::string& zTxPoWID);
 
     std::unique_ptr<org::minima::objects::TxBlock> loadFirstBlock();
@@ -98,6 +102,7 @@ private:
 private:
     // Our own SQLite connection used for prepared statements and BLOBs
     sqlite3* mConn {nullptr};
+    bool mInBatch {false};
 
     // Mutex for synchronized methods
     std::mutex m_mutex;

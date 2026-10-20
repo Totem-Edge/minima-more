@@ -239,9 +239,13 @@ down from ~87 s; a first full load is ~22 s.
 phone-class on storage: the raw export is 1.41 GB (2.37M blocks) and uncompressed
 SQLite grows to ~6 GB. The importer is now memory-bounded (~495 MB, down from an
 OOM at 7.5 GB) with queue backpressure, batched tree recalculation and WAL
-checkpointing. A full archive needs compressed block storage or a larger disk —
-**do not prune a complete archive**; pruning is only for a deliberately recent
-archive. A full node remains the phone-class option (59 MB).
+checkpointing. Blocks are now **zlib-compressed per row** (`ZBLK`, with
+backward-compatible reads) and inserts are batched in one transaction per tree
+recalculation. Per-block compression is **~1.37×** (78 MB payload for ~41k rows,
+119 MB DB); cross-block gzip reaches ~3.4×, so a **chunked codec** is the next
+step for a complete archive to fit on 8 GB. **Do not prune a complete archive**;
+pruning is only for a deliberately recent archive. A full node remains the
+phone-class option (59 MB).
 
 **Is the node's SQLite tuning included?** Yes — "SQLite" here is the node's own
 configuration (**WAL, `synchronous=NORMAL`, memory temp store, larger cache,

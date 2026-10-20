@@ -134,6 +134,8 @@ output under `results/aws8-*`.
 
 ## Result recording convention
 
+- The **canonical, chronological log is `RESULTS_LOG.md`**; every campaign gets a
+  dated entry pointing at its `results/<dir>/`.
 - Every run writes a timestamped directory under `results/` containing the
   captured environment/provenance, raw tool output, and a `SUMMARY.md` table.
 - Keep raw output verbatim; put interpretation in `SUMMARY.md` / this README.
