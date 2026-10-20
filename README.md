@@ -331,10 +331,20 @@ at the same block height. Override with `MINIMA_SQLITE_CACHE_KIB` /
 the freed key-generation working set. Enable the optional link with
 `-DMINIMA_USE_JEMALLOC=ON` (or `LD_PRELOAD=libjemalloc.so.2`).
 
+**Allocator retention — the biggest single win.** `memreport` showed a synced
+mainnet node at **261–282 MB RSS while only ~97 MB was actually in use**: glibc
+was holding **~150–175 MB of free arena** after the bursty IBD/key-generation
+phases. The node now calls `malloc_trim(0)` after key generation and in the
+periodic checker/cleanup, so freed pages go back to the OS: steady-state RSS is
+**~196 MB** (and `memreport trim:true` pushes it to **~169 MB**) — a **70–95 MB**
+reduction with no behavioural change.
+
 **Live breakdown.** The `memreport` command (console/RPC/MCP) and the `-memreport`
 startup flag report process RSS (total/anonymous/file), per-database sizes
-(including WAL), and the sizes of the TxPoW tree, RAM TxPoW DB, cascade and tip
-MMR — so the next memory target is measured, not guessed.
+(including WAL), byte attribution for the TxPoW tree / RAM TxPoW DB / cascade /
+MMR, and glibc arena/in-use/free — so the next memory target is measured, not
+guessed. `memreport trim:true` returns free pages; `memreport dump:true` triggers
+a jemalloc heap profile when jemalloc is preloaded with `prof:true`.
 
 ![SQLite write throughput: batched vs per-row](assets/sqlite_write.svg)
 

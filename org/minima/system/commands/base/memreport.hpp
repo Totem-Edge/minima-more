@@ -20,6 +20,7 @@ public:
 
     std::string getFullHelp() const override;
     std::vector<std::string> getValidParams() const override;
+    std::vector<ParamSpec> getParamSpecs() const override;
     CommandAnnotations getAnnotations() const override;
 
     std::unique_ptr<org::minima::utils::json::JSONObject> runCommand() override;

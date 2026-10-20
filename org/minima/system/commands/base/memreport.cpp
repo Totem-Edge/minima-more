@@ -7,10 +7,14 @@
 
 #include "org/minima/database/minima_d_b.hpp"
 #include "org/minima/database/txpowdb/tx_po_w_d_b.hpp"
+#include "org/minima/database/txpowdb/ram/ram_data.hpp"
 #include "org/minima/database/cascade/cascade.hpp"
+#include "org/minima/database/cascade/cascade_node.hpp"
 #include "org/minima/database/txpowtree/tx_pow_tree.hpp"
 #include "org/minima/database/txpowtree/tx_po_w_tree_node.hpp"
 #include "org/minima/objects/mmr/m_m_r.hpp"
+#include "org/minima/objects/tx_po_w.hpp"
+#include "org/minima/objects/base/mini_data.hpp"
 #include "org/minima/system/params/general_params.hpp"
 #include "org/minima/utils/json/j_s_o_n_object.hpp"
 
@@ -18,6 +22,11 @@
 #include <mach/mach.h>
 #elif !defined(_WIN32)
 #include <unistd.h>
+#include <dlfcn.h>
+#endif
+
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
 #endif
 
 namespace org {
@@ -82,6 +91,18 @@ long long sizeKb(const std::filesystem::path& p) {
     return total / 1024;
 }
 
+// Wire size of a TxPoW (bytes). This undercounts C++ object overhead, so it is
+// a lower bound for the in-RAM cost; useful for relative attribution.
+long long txpowWireBytes(const org::minima::objects::TxPoW& t) {
+    try {
+        auto md = org::minima::objects::base::MiniData::getMiniDataVersion(
+            const_cast<org::minima::objects::TxPoW&>(t));
+        return md ? static_cast<long long>(md->getBytes().size()) : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
 } // namespace
 
 memreport::memreport()
@@ -100,7 +121,23 @@ std::string memreport::getFullHelp() const {
 }
 
 std::vector<std::string> memreport::getValidParams() const {
-    return {};
+    return {"dump", "trim"};
+}
+
+std::vector<ParamSpec> memreport::getParamSpecs() const {
+    ParamSpec d;
+    d.name = "dump";
+    d.type = "boolean";
+    d.required = false;
+    d.defaultValue = "false";
+    d.description = "Trigger a jemalloc heap profile dump (needs jemalloc + prof:true)";
+    ParamSpec t;
+    t.name = "trim";
+    t.type = "boolean";
+    t.required = false;
+    t.defaultValue = "false";
+    t.description = "Return free glibc arena pages to the OS (malloc_trim) before measuring";
+    return {d, t};
 }
 
 CommandAnnotations memreport::getAnnotations() const {
@@ -122,6 +159,17 @@ std::unique_ptr<org::minima::utils::json::JSONObject> memreport::runCommand() {
         ret->put("error", std::string("database not available"));
         return ret;
     }
+
+    // Return free arena pages first so the report reflects the trimmed state.
+    const bool trim = getBooleanParam("trim", false);
+#if defined(__linux__) && defined(__GLIBC__)
+    if (trim) {
+        malloc_trim(0);
+        ret->put("trimmed", std::string("malloc_trim(0)"));
+    }
+#else
+    if (trim) ret->put("trimmed", std::string("unsupported"));
+#endif
 
     long long rss = 0, anon = 0, file = 0;
     readProcessMemory(rss, anon, file);
@@ -155,6 +203,62 @@ std::unique_ptr<org::minima::utils::json::JSONObject> memreport::runCommand() {
     }
     comp.put("tip_mmr_entries", mmrEntries);
     comp.put("tip_mmr_est_kb", (mmrEntries * 635) / 1024);  // measured B/entry
+
+    // Byte accounting (wire size; shared TxPoW objects are counted per
+    // structure, so the sum is an upper bound).
+    long long ramBytes = 0;
+    for (const auto& kv : db->getTxPoWDB().getCompleteMemPool()) {
+        if (kv.second) {
+            if (auto tp = kv.second->getTxPoW()) ramBytes += txpowWireBytes(*tp);
+        }
+    }
+
+    long long treeBytes = 0, treeNodesWalked = 0, treeMmrEntries = 0;
+    {
+        auto node = db->getTxPoWTree().getTip();
+        const int maxNodes = db->getTxPoWTree().getSize() + 8;
+        while (node && treeNodesWalked < maxNodes) {
+            treeBytes += txpowWireBytes(node->getTxPoW());
+            try { treeMmrEntries += node->getMMR().getTotalEntries(); } catch (...) {}
+            ++treeNodesWalked;
+            auto parent = node->getParent();
+            if (!parent || parent == node) break;
+            node = parent;
+        }
+    }
+
+    long long cascBytes = 0, cascNodesWalked = 0;
+    {
+        auto node = db->getCascade().getTip();
+        const int maxNodes = db->getCascade().getLength() + 8;
+        while (node && cascNodesWalked < maxNodes) {
+            cascBytes += txpowWireBytes(node->getTxPoW());
+            ++cascNodesWalked;
+            auto parent = db->getCascade().getParent(node);
+            if (!parent || parent == node) break;
+            node = parent;
+        }
+    }
+
+    comp.put("ram_txpow_wire_kb", ramBytes / 1024);
+    comp.put("tree_wire_kb", treeBytes / 1024);
+    comp.put("tree_mmr_entries", treeMmrEntries);
+    comp.put("tree_mmr_est_kb", (treeMmrEntries * 635) / 1024);
+    comp.put("cascade_wire_kb", cascBytes / 1024);
+    comp.put("attributed_est_mb",
+             (ramBytes + treeBytes + treeMmrEntries * 635 + cascBytes) / (1024 * 1024));
+
+#if defined(__linux__) && defined(__GLIBC__)
+    {
+        struct mallinfo2 mi = mallinfo2();
+        comp.put("glibc_arena_kb", static_cast<long long>(mi.arena) / 1024);
+        comp.put("glibc_inuse_kb", static_cast<long long>(mi.uordblks) / 1024);
+        comp.put("glibc_free_kb", static_cast<long long>(mi.fordblks) / 1024);
+        comp.put("glibc_mmap_kb", static_cast<long long>(mi.hblkhd) / 1024);
+        comp.put("glibc_retained_kb",
+                 (static_cast<long long>(mi.fordblks) + static_cast<long long>(mi.keepcost)) / 1024);
+    }
+#endif
     ret->put("components", comp);
 
     // SQLite cache budget in effect.
@@ -163,6 +267,22 @@ std::unique_ptr<org::minima::utils::json::JSONObject> memreport::runCommand() {
     if (const char* e = std::getenv("MINIMA_SQLITE_CACHE_KIB")) cache.put("env_cache_kib", std::string(e));
     if (const char* e = std::getenv("MINIMA_SQLITE_MMAP_MB")) cache.put("env_mmap_mb", std::string(e));
     ret->put("sqlite", cache);
+
+    // Optional: ask jemalloc (if preloaded and prof:true) to dump a heap profile.
+    if (getBooleanParam("dump", false)) {
+        const char* pfx = std::getenv("MINIMA_HEAPDUMP_PREFIX");
+        const std::string prefix = pfx ? pfx : "/tmp/jeprof";
+        bool ok = false;
+#if defined(__linux__)
+        using mallctl_t = int (*)(const char*, void*, std::size_t*, void*, std::size_t);
+        auto fn = reinterpret_cast<mallctl_t>(dlsym(RTLD_DEFAULT, "mallctl"));
+        if (fn) {
+            const char* p = prefix.c_str();
+            ok = (fn("prof.dump", nullptr, nullptr, const_cast<char**>(&p), sizeof(p)) == 0);
+        }
+#endif
+        ret->put("heapdump", ok ? prefix : std::string("unavailable"));
+    }
 
     ret->put("note", std::string(
         "database kB includes -wal; some state DBs persist on save/checkpoint; "

@@ -51,7 +51,7 @@ Commands: 111.
 | `logs` | destructive | `scripts`, `mining`, `maxima`, `blocks`, `networking`, `ibd`, `peerschecker`, `txpowdb` | (scripts:) (mining:) (maxima:) (networking:) (blocks:) (ibd:) (txpowdb:) - Enable full logs for various parts of Minima |
 | `maths` | read | `calculate`, `logs` | [calculate:] (logs:)- Run maths with Minima precision MiniNumber |
 | `mempool` | read | - | Check the mempool |
-| `memreport` | read | - | Live memory breakdown (process, databases, in-RAM structures) |
+| `memreport` | read | `dump`, `trim` | Live memory breakdown (process, databases, in-RAM structures) |
 | `mmrcreate` | destructive | `nodes` | [nodes:[]] - Create an MMR Tree of data. Nodes can be STRING / HEX |
 | `mmrproof` | destructive | `data`, `proof`, `root` | [data:] [proof:] [root:] - Check an MMR proof |
 | `multisig` | destructive | `id`, `action`, `root`, `required`, `file`, `publickeys`, `amount`, `tokenid`, `coinid`, `address`, `password`, `mine` | Create a multisig coin that can be used by root OR n of m txns |
