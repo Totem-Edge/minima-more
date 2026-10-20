@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <unordered_map>
 
 #include "org/minima/utils/sql_d_b.hpp"
 
@@ -54,6 +55,10 @@ public:
     // Batch archive inserts inside one transaction (bulk replay).
     void beginSaveBatch();
     void endSaveBatch(bool zCommit = true);
+
+    // Flush any buffered blocks into their compressed chunk (called on
+    // save/shutdown so the last <256 blocks are not lost).
+    void flushPending();
     std::unique_ptr<org::minima::objects::TxBlock> loadBlock(const std::string& zTxPoWID);
 
     std::unique_ptr<org::minima::objects::TxBlock> loadFirstBlock();
@@ -99,10 +104,29 @@ private:
     bool saveCascade(org::minima::database::cascade::Cascade& zCascade);
     int cleanDB();
 
+    // Chunked storage (R1): buffer N blocks, compress the concatenation once.
+    void ensureSchemaAndStatements();
+    bool flushPendingChunkLocked();
+    std::shared_ptr<const std::vector<std::uint8_t>> loadChunkLocked(long long zChunkID);
+    bool extractBlockBytes(const void* blob, int blen, long long zChunkID,
+                           int zOffset, int zLen,
+                           org::minima::objects::base::MiniData& out);
+
+    struct PendingBlock {
+        std::string txpowid;
+        long long block = 0;
+        long long timemilli = 0;
+        std::vector<std::uint8_t> data;
+    };
+
 private:
     // Our own SQLite connection used for prepared statements and BLOBs
     sqlite3* mConn {nullptr};
     bool mInBatch {false};
+    sqlite3_stmt* mStmtInsertRow {nullptr};
+    sqlite3_stmt* mStmtInsertChunk {nullptr};
+    std::vector<PendingBlock> mPending;
+    std::unordered_map<long long, std::shared_ptr<const std::vector<std::uint8_t>>> mChunkCache;
 
     // Mutex for synchronized methods
     std::mutex m_mutex;

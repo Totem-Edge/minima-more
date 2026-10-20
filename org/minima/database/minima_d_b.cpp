@@ -547,6 +547,7 @@ void MinimaDB::saveSQL(bool zCompact) {
         
         org::minima::utils::MinimaLogger::log("ArchiveDB shutdown..");
         // std::cerr << "[DEBUG] Starting ArchiveDB save..." << std::endl;
+        mArchive->flushPending();
         mArchive->saveDB(zCompact);
         // std::cerr << "[DEBUG] ArchiveDB save completed" << std::endl;
         
@@ -574,6 +575,7 @@ void MinimaDB::fullDBRestartMemFree() {
 
         // Save all
         mTxPoWDB->saveDB(false);
+        mArchive->flushPending();
         mArchive->saveDB(false);
         mWallet->saveDB(false);
 

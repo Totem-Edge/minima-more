@@ -33,23 +33,39 @@ using org::minima::utils::MinimaLogger;
 using org::minima::system::params::GeneralParams;
 
 namespace {
-// Blocks are stored compressed in `syncdata` (R1). Format: "ZBLK" + uint32
-// uncompressed length + zlib deflate. Old uncompressed rows (no magic) still
-// read fine, so existing archive DBs remain compatible.
-std::vector<std::uint8_t> packBlockBlob(const std::vector<std::uint8_t>& raw) {
-    if (raw.size() < 64) return raw;
+// R1 chunked storage: `blockchunks.data` = "ZCHN" + uint32 rawsize + zlib
+// deflate of N concatenated serialized blocks. Per-row (chunkid, offset, len)
+// indexes into it. Compressing N blocks together captures cross-block
+// redundancy that per-block compression misses (~1.37x vs ~3.4x).
+std::vector<std::uint8_t> packChunkBlob(const std::vector<std::uint8_t>& raw) {
+    if (raw.empty()) return {};
     const uLongf bound = compressBound(static_cast<uLong>(raw.size()));
     std::vector<std::uint8_t> out(8 + static_cast<std::size_t>(bound));
-    std::memcpy(out.data(), "ZBLK", 4);
+    std::memcpy(out.data(), "ZCHN", 4);
     const std::uint32_t n = static_cast<std::uint32_t>(raw.size());
     std::memcpy(out.data() + 4, &n, sizeof(n));
     uLongf destLen = bound;
     if (compress2(out.data() + 8, &destLen, raw.data(), static_cast<uLong>(raw.size()), 1) != Z_OK) {
-        return raw;
+        return {};
     }
     out.resize(8 + static_cast<std::size_t>(destLen));
-    if (out.size() >= raw.size()) return raw;
     return out;
+}
+
+bool unpackChunkBlob(const void* blob, int blen, std::vector<std::uint8_t>& out) {
+    if (!blob || blen < 8) return false;
+    const auto* p = static_cast<const std::uint8_t*>(blob);
+    if (std::memcmp(p, "ZCHN", 4) != 0) return false;
+    std::uint32_t n = 0;
+    std::memcpy(&n, p + 4, sizeof(n));
+    out.resize(n);
+    uLongf destLen = n;
+    if (uncompress(out.data(), &destLen, p + 8,
+                   static_cast<uLong>(blen - 8)) != Z_OK || destLen != n) {
+        out.clear();
+        return false;
+    }
+    return true;
 }
 
 bool unpackBlockBlob(const void* blob, int blen, MiniData& out) {
@@ -79,6 +95,20 @@ ArchiveManager::ArchiveManager()
 }
 
 ArchiveManager::~ArchiveManager() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    try {
+        if (mConn && !mPending.empty()) {
+            flushPendingChunkLocked();
+        }
+        if (mConn && mInBatch) {
+            sqlite3_exec(mConn, "COMMIT;", nullptr, nullptr, nullptr);
+            mInBatch = false;
+        }
+    } catch (...) {
+        // best effort on teardown
+    }
+    if (mStmtInsertRow) { sqlite3_finalize(mStmtInsertRow); mStmtInsertRow = nullptr; }
+    if (mStmtInsertChunk) { sqlite3_finalize(mStmtInsertChunk); mStmtInsertChunk = nullptr; }
     if (mConn) {
         sqlite3_close(mConn);
         mConn = nullptr;
@@ -94,7 +124,16 @@ void ArchiveManager::createSQL() {
             "  txpowid TEXT NOT NULL UNIQUE,"
             "  block INTEGER NOT NULL UNIQUE,"
             "  timemilli INTEGER NOT NULL,"
-            "  syncdata BLOB NOT NULL"
+            "  syncdata BLOB NOT NULL,"
+            "  chunkid INTEGER DEFAULT -1,"
+            "  offset INTEGER DEFAULT 0,"
+            "  len INTEGER DEFAULT 0"
+            ");";
+
+        const std::string create_blockchunks =
+            "CREATE TABLE IF NOT EXISTS blockchunks ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  data BLOB NOT NULL"
             ");";
 
         // Create cascade table
@@ -111,6 +150,7 @@ void ArchiveManager::createSQL() {
 
         // Execute
         executeGenericSQL(create_syncblock);
+        executeGenericSQL(create_blockchunks);
         executeGenericSQL(create_cascade);
         executeGenericSQL(create_index);
     } catch (...) {
@@ -140,6 +180,43 @@ void ArchiveManager::openConnIfNeeded() {
         throw std::runtime_error(err);
     }
     org::minima::utils::SqlDB::applySQLiteTuning(mConn);
+    ensureSchemaAndStatements();
+}
+
+void ArchiveManager::ensureSchemaAndStatements() {
+    if (!mConn) return;
+
+    auto tryExec = [this](const char* sql) {
+        sqlite3_exec(mConn, sql, nullptr, nullptr, nullptr);
+    };
+    // R1 migration: existing DBs only have (txpowid, block, timemilli, syncdata).
+    tryExec("ALTER TABLE syncblock ADD COLUMN chunkid INTEGER DEFAULT -1;");
+    tryExec("ALTER TABLE syncblock ADD COLUMN offset INTEGER DEFAULT 0;");
+    tryExec("ALTER TABLE syncblock ADD COLUMN len INTEGER DEFAULT 0;");
+    tryExec("CREATE TABLE IF NOT EXISTS blockchunks ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  data BLOB NOT NULL"
+            ");");
+    tryExec("CREATE INDEX IF NOT EXISTS blockchunk_idx ON syncblock (chunkid);");
+
+    if (!mStmtInsertChunk) {
+        const char* sql = "INSERT INTO blockchunks (data) VALUES (?);";
+        if (sqlite3_prepare_v2(mConn, sql, -1, &mStmtInsertChunk, nullptr) != SQLITE_OK) {
+            MinimaLogger::log(std::string("ArchiveManager: prepare chunk insert failed: ") +
+                              (mConn ? sqlite3_errmsg(mConn) : "no db"));
+            mStmtInsertChunk = nullptr;
+        }
+    }
+    if (!mStmtInsertRow) {
+        const char* sql =
+            "INSERT OR IGNORE INTO syncblock (txpowid, block, timemilli, syncdata, chunkid, offset, len) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?);";
+        if (sqlite3_prepare_v2(mConn, sql, -1, &mStmtInsertRow, nullptr) != SQLITE_OK) {
+            MinimaLogger::log(std::string("ArchiveManager: prepare block insert failed: ") +
+                              (mConn ? sqlite3_errmsg(mConn) : "no db"));
+            mStmtInsertRow = nullptr;
+        }
+    }
 }
 
 std::int64_t ArchiveManager::nowMillis() {
@@ -327,15 +404,9 @@ std::unique_ptr<Cascade> ArchiveManager::loadCascade() {
 bool ArchiveManager::saveBlock(TxBlock& zBlock) {
     std::lock_guard<std::mutex> lock(m_mutex);
     try {
-        if (_intSaveBlock(zBlock)) {
-            return true;
-        }
-    } catch (...) {
-        // Retry once
-    }
-    try {
         return _intSaveBlock(zBlock);
-    } catch (...) {
+    } catch (const std::exception& e) {
+        MinimaLogger::log(e);
         return false;
     }
 }
@@ -359,6 +430,11 @@ void ArchiveManager::endSaveBatch(bool zCommit) {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!mInBatch) return;
     if (mConn) {
+        if (zCommit) {
+            flushPendingChunkLocked();
+        } else {
+            mPending.clear();
+        }
         sqlite3_exec(mConn, zCommit ? "COMMIT;" : "ROLLBACK;", nullptr, nullptr, nullptr);
     }
     mInBatch = false;
@@ -370,6 +446,7 @@ void ArchiveManager::checkpoint() {
         checkOpen();
         openConnIfNeeded();
         if (mConn) {
+            if (!mPending.empty()) flushPendingChunkLocked();
             sqlite3_wal_checkpoint_v2(mConn, nullptr, SQLITE_CHECKPOINT_PASSIVE, nullptr, nullptr);
         }
     } catch (...) {
@@ -381,46 +458,150 @@ bool ArchiveManager::_intSaveBlock(TxBlock& zBlock) {
     checkOpen();
     openConnIfNeeded();
 
-    // Serialize block
     std::unique_ptr<MiniData> syncdata = MiniData::getMiniDataVersion(zBlock);
     if (!syncdata) {
         MinimaLogger::log("saveBlock: MiniData serialization returned null");
         return false;
     }
 
-    const char* sql = "INSERT OR IGNORE INTO syncblock (txpowid, block, timemilli, syncdata) VALUES (?, ?, ?, ?);";
-    sqlite3_stmt* stmt = nullptr;
-    int rc = sqlite3_prepare_v2(mConn, sql, -1, &stmt, nullptr);
-    if (rc != SQLITE_OK) {
-        MinimaLogger::log(std::string("saveBlock prepare failed: ") + (mConn ? sqlite3_errmsg(mConn) : "no db"));
+    PendingBlock pb;
+    pb.txpowid = zBlock.getTxPoW().getTxPoWID();
+    pb.block = zBlock.getTxPoW().getBlockNumber().getAsLong();
+    pb.timemilli = nowMillis();
+    pb.data = syncdata->getBytes();
+    mPending.push_back(std::move(pb));
+
+    if (mPending.size() >= 256) {
+        return flushPendingChunkLocked();
+    }
+    return true;
+}
+
+void ArchiveManager::flushPending() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    try {
+        if (!mPending.empty()) {
+            openConnIfNeeded();
+            flushPendingChunkLocked();
+        }
+        // A partial chunk buffered inside an open batch would otherwise be
+        // rolled back when the connection closes. Persist it on shutdown.
+        if (mInBatch && mConn) {
+            sqlite3_exec(mConn, "COMMIT;", nullptr, nullptr, nullptr);
+            mInBatch = false;
+        }
+    } catch (const std::exception& e) {
+        MinimaLogger::log(e);
+    }
+}
+
+bool ArchiveManager::flushPendingChunkLocked() {
+    if (mPending.empty()) return true;
+    if (!mConn) openConnIfNeeded();
+    if (!mStmtInsertRow || !mStmtInsertChunk) ensureSchemaAndStatements();
+    if (!mStmtInsertRow || !mStmtInsertChunk) {
+        MinimaLogger::log("ArchiveManager: chunk statements unavailable");
         return false;
     }
 
-    const std::string txpowid = zBlock.getTxPoW().getTxPoWID();
-    const long long blocknum = zBlock.getTxPoW().getBlockNumber().getAsLong();
-    const long long timemilli = nowMillis();
+    std::vector<std::uint8_t> raw;
+    std::vector<std::size_t> offsets;
+    std::size_t total = 0;
+    for (const auto& pb : mPending) total += pb.data.size();
+    raw.reserve(total);
+    offsets.reserve(mPending.size());
+    for (const auto& pb : mPending) {
+        offsets.push_back(raw.size());
+        raw.insert(raw.end(), pb.data.begin(), pb.data.end());
+    }
 
-    rc = sqlite3_bind_text(stmt, 1, txpowid.c_str(), -1, SQLITE_TRANSIENT);
-    if (rc != SQLITE_OK) { MinimaLogger::log("saveBlock bind txpowid failed"); sqlite3_finalize(stmt); return false; }
+    const std::vector<std::uint8_t> packed = packChunkBlob(raw);
+    if (packed.empty()) {
+        MinimaLogger::log("ArchiveManager: chunk compression failed");
+        return false;
+    }
 
-    rc = sqlite3_bind_int64(stmt, 2, blocknum);
-    if (rc != SQLITE_OK) { MinimaLogger::log("saveBlock bind block failed"); sqlite3_finalize(stmt); return false; }
-
-    rc = sqlite3_bind_int64(stmt, 3, timemilli);
-    if (rc != SQLITE_OK) { MinimaLogger::log("saveBlock bind timemilli failed"); sqlite3_finalize(stmt); return false; }
-
-    const std::vector<std::uint8_t> packed = packBlockBlob(syncdata->getBytes());
-    rc = sqlite3_bind_blob(stmt, 4, packed.data(), static_cast<int>(packed.size()), SQLITE_TRANSIENT);
-    if (rc != SQLITE_OK) { MinimaLogger::log("saveBlock bind blob failed"); sqlite3_finalize(stmt); return false; }
-
-    rc = sqlite3_step(stmt);
+    sqlite3_reset(mStmtInsertChunk);
+    sqlite3_clear_bindings(mStmtInsertChunk);
+    int rc = sqlite3_bind_blob(mStmtInsertChunk, 1, packed.data(),
+                               static_cast<int>(packed.size()), SQLITE_TRANSIENT);
+    if (rc == SQLITE_OK) rc = sqlite3_step(mStmtInsertChunk);
     if (rc != SQLITE_DONE) {
-        MinimaLogger::log(std::string("saveBlock step failed: ") + (mConn ? sqlite3_errmsg(mConn) : "no db"));
-        sqlite3_finalize(stmt);
+        MinimaLogger::log(std::string("ArchiveManager: chunk insert failed: ") +
+                          (mConn ? sqlite3_errmsg(mConn) : "no db"));
         return false;
     }
+    const long long chunkid = sqlite3_last_insert_rowid(mConn);
 
+    static const char kEmpty = 0;
+    bool ok = true;
+    for (std::size_t i = 0; i < mPending.size(); ++i) {
+        const PendingBlock& pb = mPending[i];
+        sqlite3_reset(mStmtInsertRow);
+        sqlite3_clear_bindings(mStmtInsertRow);
+        rc = sqlite3_bind_text(mStmtInsertRow, 1, pb.txpowid.c_str(), -1, SQLITE_TRANSIENT);
+        if (rc == SQLITE_OK) rc = sqlite3_bind_int64(mStmtInsertRow, 2, pb.block);
+        if (rc == SQLITE_OK) rc = sqlite3_bind_int64(mStmtInsertRow, 3, pb.timemilli);
+        if (rc == SQLITE_OK) rc = sqlite3_bind_blob(mStmtInsertRow, 4, &kEmpty, 0, SQLITE_STATIC);
+        if (rc == SQLITE_OK) rc = sqlite3_bind_int64(mStmtInsertRow, 5, chunkid);
+        if (rc == SQLITE_OK) rc = sqlite3_bind_int64(mStmtInsertRow, 6,
+                                                     static_cast<sqlite3_int64>(offsets[i]));
+        if (rc == SQLITE_OK) rc = sqlite3_bind_int64(mStmtInsertRow, 7,
+                                                     static_cast<sqlite3_int64>(pb.data.size()));
+        if (rc != SQLITE_OK) { ok = false; break; }
+        rc = sqlite3_step(mStmtInsertRow);
+        if (rc != SQLITE_DONE) {
+            MinimaLogger::log(std::string("ArchiveManager: block insert failed: ") +
+                              (mConn ? sqlite3_errmsg(mConn) : "no db"));
+            ok = false;
+            break;
+        }
+    }
+    if (ok) mPending.clear();
+    return ok;
+}
+
+std::shared_ptr<const std::vector<std::uint8_t>>
+ArchiveManager::loadChunkLocked(long long zChunkID) {
+    auto it = mChunkCache.find(zChunkID);
+    if (it != mChunkCache.end()) return it->second;
+    if (!mConn) return nullptr;
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(mConn, "SELECT data FROM blockchunks WHERE id = ?;", -1, &stmt, nullptr) != SQLITE_OK) {
+        return nullptr;
+    }
+    sqlite3_bind_int64(stmt, 1, zChunkID);
+    std::vector<std::uint8_t> raw;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const void* blob = sqlite3_column_blob(stmt, 0);
+        const int blen = sqlite3_column_bytes(stmt, 0);
+        if (!unpackChunkBlob(blob, blen, raw)) raw.clear();
+    }
     sqlite3_finalize(stmt);
+    if (raw.empty()) return nullptr;
+
+    auto chunk = std::make_shared<const std::vector<std::uint8_t>>(std::move(raw));
+    if (mChunkCache.size() >= 16) mChunkCache.clear();
+    mChunkCache[zChunkID] = chunk;
+    return chunk;
+}
+
+bool ArchiveManager::extractBlockBytes(const void* blob, int blen, long long zChunkID,
+                                       int zOffset, int zLen, MiniData& out) {
+    std::vector<std::uint8_t> bytes;
+    if (zChunkID >= 0) {
+        const auto chunk = loadChunkLocked(zChunkID);
+        if (!chunk || zOffset < 0 || zLen < 0 ||
+            static_cast<std::size_t>(zOffset) + static_cast<std::size_t>(zLen) > chunk->size()) {
+            return false;
+        }
+        bytes.assign(chunk->begin() + zOffset, chunk->begin() + zOffset + zLen);
+    } else {
+        // Legacy per-row storage: "ZBLK" + uint32 rawsize + deflate, or raw.
+        return unpackBlockBlob(blob, blen, out);
+    }
+    out = MiniData(bytes);
     return true;
 }
 
@@ -430,7 +611,7 @@ std::unique_ptr<TxBlock> ArchiveManager::loadBlock(const std::string& zTxPoWID) 
         checkOpen();
         openConnIfNeeded();
 
-        const char* sql = "SELECT syncdata FROM syncblock WHERE txpowid=?;";
+        const char* sql = "SELECT syncdata, chunkid, offset, len FROM syncblock WHERE txpowid=?;";
         sqlite3_stmt* stmt = nullptr;
         int rc = sqlite3_prepare_v2(mConn, sql, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
@@ -444,9 +625,12 @@ std::unique_ptr<TxBlock> ArchiveManager::loadBlock(const std::string& zTxPoWID) 
         rc = sqlite3_step(stmt);
         if (rc == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
-            int blen = sqlite3_column_bytes(stmt, 0);
+            const int blen = sqlite3_column_bytes(stmt, 0);
+            const long long chunkid = sqlite3_column_int64(stmt, 1);
+            const int offset = sqlite3_column_int(stmt, 2);
+            const int len = sqlite3_column_int(stmt, 3);
             MiniData minisync;
-            if (unpackBlockBlob(blob, blen, minisync)) {
+            if (extractBlockBytes(blob, blen, chunkid, offset, len, minisync)) {
                 result = TxBlock::convertMiniDataVersion(minisync);
             }
         } else if (rc != SQLITE_DONE) {
@@ -489,7 +673,7 @@ std::unique_ptr<TxBlock> ArchiveManager::loadFirstBlock() {
 
         if (block == -1) return nullptr;
 
-        const char* sql2 = "SELECT syncdata FROM syncblock WHERE block=?;";
+        const char* sql2 = "SELECT syncdata, chunkid, offset, len FROM syncblock WHERE block=?;";
         rc = sqlite3_prepare_v2(mConn, sql2, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
             MinimaLogger::log(std::string("loadFirstBlock prepare2 failed: ") + (mConn ? sqlite3_errmsg(mConn) : "no db"));
@@ -502,9 +686,12 @@ std::unique_ptr<TxBlock> ArchiveManager::loadFirstBlock() {
         rc = sqlite3_step(stmt);
         if (rc == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
-            int blen = sqlite3_column_bytes(stmt, 0);
+            const int blen = sqlite3_column_bytes(stmt, 0);
+            const long long chunkid = sqlite3_column_int64(stmt, 1);
+            const int offset = sqlite3_column_int(stmt, 2);
+            const int len = sqlite3_column_int(stmt, 3);
             MiniData minisync;
-            if (unpackBlockBlob(blob, blen, minisync)) {
+            if (extractBlockBytes(blob, blen, chunkid, offset, len, minisync)) {
                 result = TxBlock::convertMiniDataVersion(minisync);
             }
         } else if (rc != SQLITE_DONE) {
@@ -547,7 +734,7 @@ std::unique_ptr<TxBlock> ArchiveManager::loadLastBlock() {
 
         if (block == -1) return nullptr;
 
-        const char* sql2 = "SELECT syncdata FROM syncblock WHERE block=?;";
+        const char* sql2 = "SELECT syncdata, chunkid, offset, len FROM syncblock WHERE block=?;";
         rc = sqlite3_prepare_v2(mConn, sql2, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
             MinimaLogger::log(std::string("loadLastBlock prepare2 failed: ") + (mConn ? sqlite3_errmsg(mConn) : "no db"));
@@ -560,9 +747,12 @@ std::unique_ptr<TxBlock> ArchiveManager::loadLastBlock() {
         rc = sqlite3_step(stmt);
         if (rc == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
-            int blen = sqlite3_column_bytes(stmt, 0);
+            const int blen = sqlite3_column_bytes(stmt, 0);
+            const long long chunkid = sqlite3_column_int64(stmt, 1);
+            const int offset = sqlite3_column_int(stmt, 2);
+            const int len = sqlite3_column_int(stmt, 3);
             MiniData minisync;
-            if (unpackBlockBlob(blob, blen, minisync)) {
+            if (extractBlockBytes(blob, blen, chunkid, offset, len, minisync)) {
                 result = TxBlock::convertMiniDataVersion(minisync);
             }
         } else if (rc != SQLITE_DONE) {
@@ -592,7 +782,7 @@ ArchiveManager::loadSyncBlockRange(const MiniNumber& zStartBlock) {
             endblock = MiniNumber::ONE();
         }
 
-        const char* sql = "SELECT syncdata FROM syncblock WHERE block<? AND block>=?;";
+        const char* sql = "SELECT syncdata, chunkid, offset, len FROM syncblock WHERE block<? AND block>=?;";
         sqlite3_stmt* stmt = nullptr;
         int rc = sqlite3_prepare_v2(mConn, sql, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
@@ -611,9 +801,12 @@ ArchiveManager::loadSyncBlockRange(const MiniNumber& zStartBlock) {
             }
 
             const void* blob = sqlite3_column_blob(stmt, 0);
-            int blen = sqlite3_column_bytes(stmt, 0);
+            const int blen = sqlite3_column_bytes(stmt, 0);
+            const long long chunkid = sqlite3_column_int64(stmt, 1);
+            const int offset = sqlite3_column_int(stmt, 2);
+            const int len = sqlite3_column_int(stmt, 3);
             MiniData md;
-            if (unpackBlockBlob(blob, blen, md)) {
+            if (extractBlockBytes(blob, blen, chunkid, offset, len, md)) {
                 auto sb = TxBlock::convertMiniDataVersion(md);
                 if (sb) {
                     blocks.push_back(std::move(sb));
@@ -687,7 +880,7 @@ ArchiveManager::loadBlockRange(const MiniNumber& zStartBlock, const MiniNumber& 
         checkOpen();
         openConnIfNeeded();
 
-        const char* sql = "SELECT syncdata FROM syncblock WHERE block>? AND block<?;";
+        const char* sql = "SELECT syncdata, chunkid, offset, len FROM syncblock WHERE block>? AND block<?;";
         sqlite3_stmt* stmt = nullptr;
         int rc = sqlite3_prepare_v2(mConn, sql, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
@@ -700,9 +893,12 @@ ArchiveManager::loadBlockRange(const MiniNumber& zStartBlock, const MiniNumber& 
 
         while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
-            int blen = sqlite3_column_bytes(stmt, 0);
+            const int blen = sqlite3_column_bytes(stmt, 0);
+            const long long chunkid = sqlite3_column_int64(stmt, 1);
+            const int offset = sqlite3_column_int(stmt, 2);
+            const int len = sqlite3_column_int(stmt, 3);
             MiniData md;
-            if (unpackBlockBlob(blob, blen, md)) {
+            if (extractBlockBytes(blob, blen, chunkid, offset, len, md)) {
                 auto sb = TxBlock::convertMiniDataVersion(md);
                 if (sb) {
                     blocks.push_back(std::move(sb));
@@ -742,7 +938,7 @@ ArchiveManager::loadBlockFromNumber(const MiniNumber& zBlock) {
         checkOpen();
         openConnIfNeeded();
 
-        const char* sql = "SELECT syncdata FROM syncblock WHERE block=?;";
+        const char* sql = "SELECT syncdata, chunkid, offset, len FROM syncblock WHERE block=?;";
         sqlite3_stmt* stmt = nullptr;
         int rc = sqlite3_prepare_v2(mConn, sql, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
@@ -756,9 +952,12 @@ ArchiveManager::loadBlockFromNumber(const MiniNumber& zBlock) {
         rc = sqlite3_step(stmt);
         if (rc == SQLITE_ROW) {
             const void* blob = sqlite3_column_blob(stmt, 0);
-            int blen = sqlite3_column_bytes(stmt, 0);
+            const int blen = sqlite3_column_bytes(stmt, 0);
+            const long long chunkid = sqlite3_column_int64(stmt, 1);
+            const int offset = sqlite3_column_int(stmt, 2);
+            const int len = sqlite3_column_int(stmt, 3);
             MiniData md;
-            if (unpackBlockBlob(blob, blen, md)) {
+            if (extractBlockBytes(blob, blen, chunkid, offset, len, md)) {
                 result = TxBlock::convertMiniDataVersion(md);
             }
         } else if (rc != SQLITE_DONE) {
@@ -838,7 +1037,20 @@ int ArchiveManager::cleanDB() {
 }
 
 void ArchiveManager::hackShut() {
-    // Close our SQLite handle and base DB
+    std::lock_guard<std::mutex> lock(m_mutex);
+    // Flush buffered blocks, then close our SQLite handle and base DB
+    try {
+        if (mConn && !mPending.empty()) flushPendingChunkLocked();
+        if (mConn && mInBatch) {
+            sqlite3_exec(mConn, "COMMIT;", nullptr, nullptr, nullptr);
+            mInBatch = false;
+        }
+    } catch (...) {
+        // best effort
+    }
+    if (mStmtInsertRow) { sqlite3_finalize(mStmtInsertRow); mStmtInsertRow = nullptr; }
+    if (mStmtInsertChunk) { sqlite3_finalize(mStmtInsertChunk); mStmtInsertChunk = nullptr; }
+    mChunkCache.clear();
     if (mConn) {
         sqlite3_close(mConn);
         mConn = nullptr;
@@ -849,6 +1061,16 @@ void ArchiveManager::hackShut() {
 void ArchiveManager::closeAndReopen() {
     std::lock_guard<std::mutex> lock(m_mutex);
     try {
+        // Flush buffered blocks before closing/saving
+        if (!mPending.empty()) flushPendingChunkLocked();
+        if (mInBatch && mConn) {
+            sqlite3_exec(mConn, "COMMIT;", nullptr, nullptr, nullptr);
+            mInBatch = false;
+        }
+        if (mStmtInsertRow) { sqlite3_finalize(mStmtInsertRow); mStmtInsertRow = nullptr; }
+        if (mStmtInsertChunk) { sqlite3_finalize(mStmtInsertChunk); mStmtInsertChunk = nullptr; }
+        mChunkCache.clear();
+
         // First close the connection and save DB.. no compact
         saveDB(false);
 

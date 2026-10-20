@@ -763,9 +763,29 @@ v0.2.0 published with standard + **fully static** tarballs (x86_64/aarch64).
   ~500 blocks/s (per-block prepare/serialize dominates; prepared-statement reuse
   is the next speed lever).
 
+## Chunked archive storage (follow-up, post-v0.2.0)
+
+- **Chunked codec:** every 256 blocks are serialised, concatenated, and
+  zlib-compressed once into a `blockchunks` row (`ZCHN` + raw size + deflate).
+  Each `syncblock` row stores `(chunkid, offset, len)` with an empty `syncdata`;
+  legacy per-row `ZBLK`/raw rows (`chunkid = -1`) still read.
+- **Prepared statements:** one reused `INSERT INTO blockchunks` and one reused
+  `INSERT OR IGNORE INTO syncblock` per chunk (previously a prepare per block).
+- **AWS 8 GB, 256 MiB leading slice** of the live `archive.raw.dat` (zlib raw
+  stream), fresh DB:
+  - 618,496 blocks / 1,151,359,414 B serialised payload / 2,416 chunks.
+  - Compressed chunk payload 291,243,964 B -> **3.95x**; DB file 480 MB
+    (including indexes); all rows chunked, 0 missing chunks.
+  - `archive action:integrity`: **618,496 blocks, 0 errors**.
+  - Import throughput **610 blocks/s** (1,013 s), peak RSS **629 MB**.
+  - Projection for the full 2,374,319-block archive: ~4.42 GB serialised ->
+    ~1.12 GB compressed chunks / ~1.85 GB DB, which fits the 8 GB disk.
+  - The slice ends mid-stream, so the importer logs an expected read error at
+    EOF; integrity is unaffected.
+- **Shutdown:** a partial chunk inside an open batch is flushed and committed
+  (`saveAllDB` + `flushPending`) instead of being rolled back on close.
+
 ## Planned next
 
-- Searcher: filter over LMDB cursors instead of materialising `getAllCoins()`
-  (transient ~1.2 GB spike on `balance`/`coins`).
-- Archive: block compression + batched inserts.
+- Full-archive import with chunked storage and end-to-end re-measure.
 - Optional DuckDB R3 analytics; v0.2.1 release.
