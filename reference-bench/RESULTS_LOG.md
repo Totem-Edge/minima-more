@@ -815,16 +815,19 @@ v0.2.0 published with standard + **fully static** tarballs (x86_64/aarch64).
 
 - Same host (`c6g.2xlarge`, 8 vCPU / 16 GB / 50 GB gp3), same 1.5 GB raw file,
   same synchronous `archive action:importraw`.
-- **C++:** 78.9 min, 501 blocks/s, peak 994 MB, archive 2.45 GB + 473 MB
-  on-chain, 2,371,584 blocks. **Java** (`minima-core@c2a54a2`, `-Xmx12g`):
-  28.0 min, 1,413 blocks/s, peak 3.16 GB, archive **13 GB**, 2,374,912 blocks.
-- C++ is ~2.8x slower but uses ~3.2x less RAM and ~4.4x less disk (5.3x smaller
+- **C++:** 79.6 min, 501 blocks/s, peak **1.01 GB**, archive 2.45 GB + 473 MB
+  on-chain, **2,376,119 blocks** after the tail fix. **Java**
+  (`minima-core@c2a54a2`, `-Xmx12g`): 28.0 min, 1,413 blocks/s, peak 3.16 GB,
+  archive **13 GB**, 2,374,912 blocks.
+- C++ is ~2.8x slower but uses ~3.1x less RAM and ~4.6x less disk (5.3x smaller
   archive DB).
-- **C++ tail-loss bug:** C++ imports 3,328 fewer blocks than Java (13 IBD
-  batches); header 2,376,119, Java 2,374,912, C++ 2,371,584. The prefix passes
-  integrity/record checks; a peer backfill to 2,375,845 then passed 260/260
-  record checks at 1.92 ms.
-- C++ import shutdown **hangs busy-spin** after `All saved`; Java exits cleanly.
+- **Tail completeness:** `importraw` now posts the empty end-of-stream IBD (final
+  recalc) and then saves the last `MINIMA_CASCADE_START_DEPTH=2048` blocks from
+  the raw stream, which `recalculateTree()` intentionally leaves in the active
+  tree. Verified: 2,374,071 -> **2,376,119**, 0 gaps/missing, 260/260 record
+  checks at 1.79 ms. Java still stops at 2,374,912 (1,207 short).
+- C++ import shutdown still segfaults/hangs after `All saved` (exit 139); Java
+  exits cleanly.
 - **IBD cooldown fix:** the “last 30 mins” set was never expired (only cleared on
   restart), so one IBD per peer per process lifetime. Now a real
   `-ibdlimit <minutes>` (default 30, **0 = unlimited**) with `steady_clock`
@@ -834,5 +837,5 @@ v0.2.0 published with standard + **fully static** tarballs (x86_64/aarch64).
 
 ## Planned next
 
-- Fix the C++ `RawArchiveInput` tail loss (3,328 blocks vs Java).
+- Fix the C++ import shutdown hang/segfault after `All saved`.
 - Latest MegaMMR run on the 16 GB box; v0.2.1 release.

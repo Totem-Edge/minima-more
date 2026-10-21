@@ -947,6 +947,40 @@ std::unique_ptr<JSONObject> archive::runCommand() {
 
         rawin.stop();
 
+        // Force the final recalculation: the processor only flushes the archive
+        // when it sees an empty IBD (or every 2048 blocks). Without this the
+        // last partial batch is processed in RAM but never committed.
+        TxPoWProcessor& proc = Main::getInstance()->getTxPoWProcessor();
+        proc.postProcessArchiveIBD(std::make_shared<IBD>(), "0x00");
+        while (proc.getSize() > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        // Archive completeness: the active tree retains the last
+        // MINIMA_CASCADE_START_DEPTH blocks (2048), which are not yet in the
+        // cascade and therefore not saved by recalculateTree(). Save the missing
+        // tail directly from the raw stream.
+        {
+            MiniNumber lastarch = MiniNumber::ZERO();
+            if (auto last = arch.loadLastBlock()) {
+                lastarch = last->getTxPoW().getBlockNumber();
+            }
+            RawArchiveInput tailraw(restorefile);
+            tailraw.connect();
+            while (true) {
+                std::unique_ptr<IBD> ibd = tailraw.getNextIBD();
+                auto& blocks = ibd->getTxBlocks();
+                if (blocks.empty()) break;
+                for (auto& block : blocks) {
+                    if (block->getTxPoW().getBlockNumber().isMore(lastarch)) {
+                        arch.saveBlock(*block);
+                    }
+                }
+            }
+            tailraw.stop();
+            arch.flushPending();
+        }
+
         MinimaLogger::log("All blocks processed..");
 
         JSONObject resp;
