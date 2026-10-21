@@ -8,12 +8,16 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "org/minima/objects/coin.hpp"
 #include "org/minima/objects/coin_proof.hpp"
+#include "org/minima/objects/mmr/mega_m_m_r.hpp"
+#include "org/minima/objects/mmr/m_m_r.hpp"
+#include "org/minima/objects/mmr/m_m_r_data.hpp"
 #include "org/minima/objects/tx_block.hpp"
 #include "org/minima/objects/tx_po_w.hpp"
 #include "org/minima/objects/transaction.hpp"
@@ -126,6 +130,97 @@ long long createdHeight(const org::minima::objects::Coin& coin, long long fallba
 }
 
 } // namespace
+
+bool enrichMmr(duckdb::Connection& con, const IndexOptions& options, std::string& error) {
+    namespace mmr = org::minima::objects::mmr;
+    namespace obj = org::minima::objects;
+    if (options.mmrPath.empty() || !std::filesystem::exists(options.mmrPath)) {
+        return true;
+    }
+    try {
+        mmr::MegaMMR mega;
+        bool storeOpened = false;
+        if (!options.mmrStorePath.empty() && std::filesystem::exists(options.mmrStorePath)) {
+            storeOpened = mega.openCoinStore(options.mmrStorePath);
+        }
+        mega.loadMMR(options.mmrPath);
+
+        const auto rootData = mega.getMMR().getRoot();
+        const std::string root = rootData ? rootData->getData().to0xString() : "";
+        const long long count = static_cast<long long>(mega.coinCount());
+        long long nativeCount = 0;
+        long long totalRaw = 0;
+
+        if (!exec(con, "DELETE FROM analytics.mmr_coins;", error)) return false;
+        duckdb::Appender coins(con, "analytics", "mmr_coins");
+        mega.forEachCoin([&](const obj::Coin& coin) {
+            const std::string cid = coin.getCoinID().to0xString();
+            const std::string addr = coin.getAddress().to0xString();
+            const std::string token = coin.getTokenID().to0xString();
+            const long long amount = coin.getAmount().getAsLong();
+            if (token == "0x00") {
+                ++nativeCount;
+                totalRaw += amount;
+            }
+            coins.AppendRow(cid.c_str(), addr.c_str(), token.c_str(),
+                            static_cast<std::int64_t>(amount),
+                            static_cast<std::int64_t>(coin.getBlockCreated().getAsLong()));
+        });
+        coins.Close();
+
+        const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::system_clock::now().time_since_epoch()).count();
+        std::ostringstream snap;
+        snap << "DELETE FROM analytics.mmr_snapshots;"
+             << "INSERT INTO analytics.mmr_snapshots "
+                "(root,as_of_height,coin_count,native_count,total_raw,store_engine,loaded_at_ms) VALUES ("
+             << "'" << root << "',NULL," << count << "," << nativeCount << ","
+             << totalRaw << ",'" << (storeOpened ? "lmdb" : "memory") << "',"
+             << now << ");";
+        if (!exec(con, snap.str(), error)) return false;
+
+        // Per-token archive vs MMR comparison at the archive tip.
+        auto tip = con.Query(
+            "SELECT MAX(height), (SELECT hash FROM analytics.chain_blocks "
+            "WHERE height=(SELECT MAX(height) FROM analytics.chain_blocks)) "
+            "FROM analytics.chain_blocks;");
+        if (tip && !tip->HasError() && tip->RowCount() > 0 && !tip->GetValue(0,0).IsNull()) {
+            const long long height = tip->GetValue(0,0).GetValue<std::int64_t>();
+            const std::string hash = tip->GetValue(1,0).IsNull() ? "" : tip->GetValue(1,0).ToString();
+            auto cmp = con.Query(
+                "WITH au AS (SELECT o.coin_id, o.token_id FROM analytics.tx_outputs o "
+                "WHERE NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
+                "SELECT "
+                "(SELECT COUNT(*) FROM au a WHERE NOT EXISTS "
+                " (SELECT 1 FROM analytics.mmr_coins m WHERE m.coin_id=a.coin_id)),"
+                "(SELECT COUNT(*) FROM analytics.mmr_coins m WHERE NOT EXISTS "
+                " (SELECT 1 FROM au a WHERE a.coin_id=m.coin_id)),"
+                "(SELECT COUNT(*) FROM au),"
+                "(SELECT COUNT(*) FROM analytics.mmr_coins);");
+            if (cmp && !cmp->HasError() && cmp->RowCount() > 0) {
+                const long long archiveOnly = cmp->GetValue(0,0).GetValue<std::int64_t>();
+                const long long mmrOnly = cmp->GetValue(1,0).GetValue<std::int64_t>();
+                const long long archiveCount = cmp->GetValue(2,0).GetValue<std::int64_t>();
+                const long long mmrCount = cmp->GetValue(3,0).GetValue<std::int64_t>();
+                const bool matched = archiveOnly == 0 && mmrOnly == 0 && archiveCount == mmrCount;
+                std::ostringstream chk;
+                chk << "DELETE FROM analytics.consistency_checks WHERE height=" << height << ";"
+                    << "INSERT INTO analytics.consistency_checks "
+                       "(height,block_hash,archive_root,mmr_root,coin_count_archive,"
+                       "coin_count_mmr,matched,checked_at_ms,details) VALUES ("
+                    << height << ",'" << hash << "',NULL,'" << root << "',"
+                    << archiveCount << "," << mmrCount << ","
+                    << (matched ? "TRUE" : "FALSE") << "," << now << ",'"
+                    << "archive_only=" << archiveOnly << ";mmr_only=" << mmrOnly << "');";
+                if (!exec(con, chk.str(), error)) return false;
+            }
+        }
+        return true;
+    } catch (const std::exception& ex) {
+        error = std::string("MegaMMR enrichment failed: ") + ex.what();
+        return false;
+    }
+}
 
 IndexResult buildIndex(const IndexOptions& options) {
     IndexResult result;
@@ -402,6 +497,116 @@ IndexResult buildIndex(const IndexOptions& options) {
                 result.error = error;
                 return result;
             }
+        }
+    }
+
+    {
+        const std::vector<std::string> assetSql = {
+            "DELETE FROM analytics.asset_snapshots WHERE snapshot_day_ms = "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks);",
+            "DELETE FROM analytics.asset_address_balances WHERE snapshot_day_ms = "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks);",
+            "DELETE FROM analytics.asset_age_bands WHERE snapshot_day_ms = "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks);",
+            "DELETE FROM analytics.asset_value_bands WHERE snapshot_day_ms = "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks);",
+            "DELETE FROM analytics.asset_holder_cohorts WHERE snapshot_day_ms = "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks);",
+            "INSERT INTO analytics.asset_address_balances "
+            "(snapshot_day_ms,token_id,address,balance_raw,coin_count) "
+            "WITH tip AS (SELECT MAX(height) h, MAX(timestamp_ms) t, "
+            "CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 d FROM analytics.chain_blocks), "
+            "u AS (SELECT o.token_id,o.address,o.amount_raw FROM analytics.tx_outputs o "
+            "WHERE NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
+            "SELECT tip.d,u.token_id,u.address,SUM(u.amount_raw),COUNT(*) FROM u,tip "
+            "WHERE u.address IS NOT NULL AND u.address <> '' GROUP BY tip.d,u.token_id,u.address;",
+            "INSERT INTO analytics.asset_snapshots "
+            "(snapshot_day_ms,snapshot_height,token_id,coin_count,total_raw,holder_count) "
+            "WITH tip AS (SELECT MAX(height) h,MAX(timestamp_ms) t,"
+            "CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 d FROM analytics.chain_blocks), "
+            "u AS (SELECT o.token_id,o.address,o.amount_raw FROM analytics.tx_outputs o "
+            "WHERE NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
+            "SELECT tip.d,tip.h,u.token_id,COUNT(*),SUM(u.amount_raw),COUNT(DISTINCT u.address) "
+            "FROM u,tip GROUP BY tip.d,tip.h,u.token_id;",
+            "INSERT INTO analytics.asset_age_bands "
+            "(snapshot_day_ms,token_id,band,coin_count,amount_raw) "
+            "WITH tip AS (SELECT MAX(height) h,MAX(timestamp_ms) t,"
+            "CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 d FROM analytics.chain_blocks), "
+            "u AS (SELECT o.token_id,o.amount_raw,COALESCE(cb.timestamp_ms,tip.t) created_ms "
+            "FROM analytics.tx_outputs o JOIN tip ON TRUE "
+            "LEFT JOIN analytics.chain_blocks cb ON cb.height=o.created_height "
+            "WHERE NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
+            "SELECT tip.d,u.token_id,CASE "
+            "WHEN tip.t-u.created_ms < 86400000 THEN '0-1d' "
+            "WHEN tip.t-u.created_ms < 604800000 THEN '1d-1w' "
+            "WHEN tip.t-u.created_ms < 2592000000 THEN '1w-1m' "
+            "WHEN tip.t-u.created_ms < 7776000000 THEN '1m-3m' "
+            "WHEN tip.t-u.created_ms < 15552000000 THEN '3m-6m' "
+            "WHEN tip.t-u.created_ms < 31536000000 THEN '6m-1y' "
+            "WHEN tip.t-u.created_ms < 63072000000 THEN '1y-2y' "
+            "WHEN tip.t-u.created_ms < 157680000000 THEN '2y-5y' ELSE '5y+' END, "
+            "COUNT(*),SUM(u.amount_raw) FROM u,tip GROUP BY tip.d,u.token_id,3;",
+            "INSERT INTO analytics.asset_value_bands "
+            "(snapshot_day_ms,token_id,band,coin_count,amount_raw) "
+            "WITH tip AS (SELECT MAX(height) h,MAX(timestamp_ms) t,"
+            "CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 d FROM analytics.chain_blocks), "
+            "u AS (SELECT o.token_id,o.amount_raw FROM analytics.tx_outputs o "
+            "WHERE NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
+            "SELECT tip.d,u.token_id,CASE "
+            "WHEN u.amount_raw < 10000 THEN '0-1' "
+            "WHEN u.amount_raw < 100000 THEN '1-10' "
+            "WHEN u.amount_raw < 1000000 THEN '10-100' "
+            "WHEN u.amount_raw < 10000000 THEN '100-1k' "
+            "WHEN u.amount_raw < 100000000 THEN '1k-10k' "
+            "WHEN u.amount_raw < 1000000000 THEN '10k-100k' "
+            "WHEN u.amount_raw < 10000000000 THEN '100k-1m' ELSE '1m+' END, "
+            "COUNT(*),SUM(u.amount_raw) FROM u,tip GROUP BY tip.d,u.token_id,3;",
+            "INSERT INTO analytics.asset_holder_cohorts "
+            "(snapshot_day_ms,token_id,cohort,address_count,balance_raw) "
+            "WITH tip AS (SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 d "
+            "FROM analytics.chain_blocks) "
+            "SELECT ab.snapshot_day_ms,ab.token_id,CASE "
+            "WHEN ab.balance_raw < 10000 THEN '0-1' "
+            "WHEN ab.balance_raw < 100000 THEN '1-10' "
+            "WHEN ab.balance_raw < 1000000 THEN '10-100' "
+            "WHEN ab.balance_raw < 10000000 THEN '100-1k' "
+            "WHEN ab.balance_raw < 100000000 THEN '1k-10k' "
+            "WHEN ab.balance_raw < 1000000000 THEN '10k-100k' "
+            "WHEN ab.balance_raw < 10000000000 THEN '100k-1m' ELSE '1m+' END, "
+            "COUNT(*),SUM(ab.balance_raw) FROM analytics.asset_address_balances ab,tip "
+            "WHERE ab.snapshot_day_ms=tip.d GROUP BY ab.snapshot_day_ms,ab.token_id,3;",
+            "INSERT INTO analytics.token_registry (token_id,total_supply_raw) "
+            "SELECT token_id,total_raw FROM analytics.asset_snapshots WHERE snapshot_day_ms="
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks) "
+            "ON CONFLICT (token_id) DO UPDATE SET total_supply_raw=excluded.total_supply_raw;",
+            "DELETE FROM analytics.asset_snapshots WHERE snapshot_day_ms < "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks) "
+            "- (SELECT CAST(value AS BIGINT)*86400000 FROM analytics.config WHERE key='snapshot_retention_days');",
+            "DELETE FROM analytics.asset_address_balances WHERE snapshot_day_ms < "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks) "
+            "- (SELECT CAST(value AS BIGINT)*86400000 FROM analytics.config WHERE key='snapshot_retention_days');",
+            "DELETE FROM analytics.asset_age_bands WHERE snapshot_day_ms < "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks) "
+            "- (SELECT CAST(value AS BIGINT)*86400000 FROM analytics.config WHERE key='snapshot_retention_days');",
+            "DELETE FROM analytics.asset_value_bands WHERE snapshot_day_ms < "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks) "
+            "- (SELECT CAST(value AS BIGINT)*86400000 FROM analytics.config WHERE key='snapshot_retention_days');",
+            "DELETE FROM analytics.asset_holder_cohorts WHERE snapshot_day_ms < "
+            "(SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 FROM analytics.chain_blocks) "
+            "- (SELECT CAST(value AS BIGINT)*86400000 FROM analytics.config WHERE key='snapshot_retention_days');",
+        };
+        for (const auto& sql : assetSql) {
+            if (!exec(con, sql, error)) {
+                result.error = error;
+                return result;
+            }
+        }
+    }
+
+    if (options.enrichMmr) {
+        std::string mmrError;
+        if (!enrichMmr(con, options, mmrError)) {
+            std::cerr << "MMR enrichment skipped: " << mmrError << "\n";
         }
     }
 

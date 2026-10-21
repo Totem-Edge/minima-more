@@ -39,6 +39,8 @@ void printHelp() {
         << "  -indexonly       Build the index and exit\n"
         << "  -indexdb FILE    DuckDB index path (default <data>/analytics.duckdb)\n"
         << "  -rebuild         Rebuild the index from scratch\n"
+        << "  -mmr-enrich      Load MegaMMR and write root/consistency snapshots\n"
+        << "  -mmrstore DIR    Coin LMDB store (default <data>/1.0/databases/coins.lmdb)\n"
         << "  -help            Show this help\n";
 }
 
@@ -51,6 +53,9 @@ int main(int argc, char** argv) {
     bool doIndex = false;
     bool indexOnly = false;
     bool rebuild = false;
+    bool enrichMmr = false;
+    bool mmrStoreSpecified = false;
+    std::string mmrStorePath;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -100,6 +105,15 @@ int main(int argc, char** argv) {
             indexOnly = true;
         } else if (arg == "-rebuild") {
             rebuild = true;
+        } else if (arg == "-mmr-enrich") {
+            enrichMmr = true;
+        } else if (arg == "-mmrstore") {
+            mmrStoreSpecified = true;
+            if (!next(mmrStorePath)) {
+                std::cerr << "-mmrstore requires a value\n";
+                return 2;
+            }
+            if (mmrStorePath == "none") mmrStorePath.clear();
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
             printHelp();
@@ -120,6 +134,13 @@ int main(int argc, char** argv) {
             "/megammr.mmr"
         });
     }
+    if (!mmrStoreSpecified) {
+        const std::string a = opt.dataDir + "/1.0/databases/coins.lmdb";
+        const std::string b = opt.dataDir + "/databases/coins.lmdb";
+        std::error_code ec;
+        mmrStorePath = std::filesystem::exists(a, ec) ? a :
+                       (std::filesystem::exists(b, ec) ? b : "");
+    }
     if (opt.port <= 0 || opt.port > 65535) {
         std::cerr << "Invalid port\n";
         return 2;
@@ -130,6 +151,9 @@ int main(int argc, char** argv) {
         iopt.archivePath = opt.archivePath;
         iopt.indexPath = opt.indexPath;
         iopt.schemaPath = MINIMA_ANALYTICS_SCHEMA;
+        iopt.mmrPath = opt.mmrPath;
+        iopt.mmrStorePath = mmrStorePath;
+        iopt.enrichMmr = enrichMmr;
         iopt.rebuild = rebuild;
         auto ir = minima::analytics::buildIndex(iopt);
         if (!ir.ok) {

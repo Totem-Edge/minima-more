@@ -8,6 +8,9 @@ struct IndexOptions {
     std::string archivePath;
     std::string indexPath;
     std::string schemaPath;
+    std::string mmrPath;
+    std::string mmrStorePath;
+    bool enrichMmr = false;
     bool rebuild = false;
 };
 

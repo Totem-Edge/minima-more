@@ -80,6 +80,11 @@ struct IndexState {
     long long lastHeight = -1;
     long long lagBlocks = -1;
     std::string lastHash;
+    bool mmrAvailable = false;
+    long long mmrCoins = -1;
+    long long mmrNative = -1;
+    std::string mmrRoot;
+    std::string mmrEngine;
 };
 
 IndexState readIndexState(const std::string& path) {
@@ -99,6 +104,16 @@ IndexState readIndexState(const std::string& path) {
             if (!res->GetValue(2, 0).IsNull()) out.lagBlocks = res->GetValue(2, 0).GetValue<std::int64_t>();
             if (!res->GetValue(3, 0).IsNull()) out.lastHash = res->GetValue(3, 0).ToString();
             out.ready = (out.status == "ready");
+        }
+        auto mmr = con.Query(
+            "SELECT root, coin_count, native_count, store_engine FROM analytics.mmr_snapshots "
+            "ORDER BY loaded_at_ms DESC LIMIT 1;");
+        if (mmr && !mmr->HasError() && mmr->RowCount() > 0) {
+            out.mmrAvailable = true;
+            if (!mmr->GetValue(0, 0).IsNull()) out.mmrRoot = mmr->GetValue(0, 0).ToString();
+            out.mmrCoins = mmr->GetValue(1, 0).GetValue<std::int64_t>();
+            out.mmrNative = mmr->GetValue(2, 0).GetValue<std::int64_t>();
+            if (!mmr->GetValue(3, 0).IsNull()) out.mmrEngine = mmr->GetValue(3, 0).ToString();
         }
     } catch (...) {
         out.status = "degraded";
@@ -242,10 +257,32 @@ std::string txJson(const std::string& indexPath, const std::string& txid, bool& 
     return full.str();
 }
 
-std::string addressJson(const std::string& indexPath, const std::string& address, bool& found) {
+std::string addressJson(const std::string& indexPath, const std::string& address,
+                        const std::string& token, const std::string& day, bool& found) {
     found = false;
     duckdb::DuckDB db(indexPath);
     duckdb::Connection con(db);
+    if (!token.empty()) {
+        std::string dayClause;
+        if (!day.empty()) {
+            try { dayClause = " AND snapshot_day_ms=" + std::to_string(std::stoll(day)); }
+            catch (...) { return {}; }
+        }
+        auto res = con.Query(
+            "SELECT snapshot_day_ms,token_id,address,balance_raw,coin_count "
+            "FROM analytics.asset_address_balances WHERE token_id=" + sqlLit(token) +
+            " AND address=" + sqlLit(address) + dayClause +
+            " ORDER BY snapshot_day_ms DESC LIMIT 1;");
+        if (!res || res->HasError() || res->RowCount() == 0) return {};
+        found = true;
+        std::ostringstream out;
+        out << "{\"address\":" << quote(res->GetValue(2,0).ToString())
+            << ",\"token_id\":" << quote(res->GetValue(1,0).ToString())
+            << ",\"balance_raw\":" << res->GetValue(3,0).ToString()
+            << ",\"coin_count\":" << res->GetValue(4,0).ToString()
+            << ",\"snapshot_day_ms\":" << res->GetValue(0,0).ToString() << "}";
+        return out.str();
+    }
     auto res = con.Query(
         "SELECT snapshot_height,address,balance_raw,coin_count FROM analytics.address_balances "
         "WHERE address=" + sqlLit(address) + " ORDER BY snapshot_height DESC LIMIT 1;");
@@ -254,8 +291,37 @@ std::string addressJson(const std::string& indexPath, const std::string& address
     std::ostringstream out;
     out << "{\"address\":" << quote(res->GetValue(1,0).ToString())
         << ",\"balance_raw\":" << res->GetValue(2,0).ToString()
-        << ",\"coin_count\":" << res->GetValue(3,0).GetValue<std::int64_t>()
-        << ",\"snapshot_height\":" << res->GetValue(0,0).GetValue<std::int64_t>() << "}";
+        << ",\"coin_count\":" << res->GetValue(3,0).ToString()
+        << ",\"snapshot_height\":" << res->GetValue(0,0).ToString() << "}";
+    return out.str();
+}
+
+std::string assetCohortsJson(const std::string& indexPath, const std::string& token,
+                             const std::string& day, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    std::string dayClause;
+    if (!day.empty()) {
+        try { dayClause = " AND snapshot_day_ms=" + std::to_string(std::stoll(day)); }
+        catch (...) { return {}; }
+    }
+    auto res = con.Query(
+        "SELECT snapshot_day_ms,token_id,cohort,address_count,balance_raw "
+        "FROM analytics.asset_holder_cohorts WHERE token_id=" + sqlLit(token) + dayClause +
+        " ORDER BY snapshot_day_ms DESC, cohort;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"token_id\":" << quote(token)
+        << ",\"as_of_day_ms\":" << res->GetValue(0,0).ToString() << ",\"cohorts\":[";
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"cohort\":" << quote(res->GetValue(2,i).ToString())
+            << ",\"address_count\":" << res->GetValue(3,i).ToString()
+            << ",\"balance_raw\":" << res->GetValue(4,i).ToString() << "}";
+    }
+    out << "]}";
     return out.str();
 }
 
@@ -312,6 +378,137 @@ std::string cohortsJson(const std::string& indexPath, bool& found) {
         out << "{\"cohort\":" << quote(res->GetValue(1,i).ToString())
             << ",\"address_count\":" << res->GetValue(2,i).ToString()
             << ",\"balance_raw\":" << res->GetValue(3,i).ToString() << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
+std::string consistencyJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT height,block_hash,archive_root,mmr_root,coin_count_archive,"
+        "coin_count_mmr,matched,checked_at_ms,details FROM analytics.consistency_checks "
+        "ORDER BY height DESC LIMIT 1;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"height\":" << res->GetValue(0,0).GetValue<std::int64_t>()
+        << ",\"block_hash\":" << (res->GetValue(1,0).IsNull() ? "null" : quote(res->GetValue(1,0).ToString()))
+        << ",\"mmr_root\":" << (res->GetValue(3,0).IsNull() ? "null" : quote(res->GetValue(3,0).ToString()))
+        << ",\"archive_count\":" << res->GetValue(4,0).ToString()
+        << ",\"mmr_count\":" << res->GetValue(5,0).ToString()
+        << ",\"matched\":" << (res->GetValue(6,0).GetValue<bool>() ? "true" : "false")
+        << ",\"checked_at_ms\":" << res->GetValue(7,0).GetValue<std::int64_t>()
+        << ",\"details\":" << (res->GetValue(8,0).IsNull() ? "null" : quote(res->GetValue(8,0).ToString()))
+        << ",\"comparable\":" << (res->GetValue(6,0).GetValue<bool>() ? "true" : "false") << "}";
+    return out.str();
+}
+
+std::string queryParam(const std::string& query, const std::string& key) {
+    std::size_t pos = 0;
+    while (pos < query.size()) {
+        const std::size_t end = query.find('&', pos);
+        const std::string pair = query.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+        const std::size_t eq = pair.find('=');
+        const std::string k = eq == std::string::npos ? pair : pair.substr(0, eq);
+        if (k == key) return eq == std::string::npos ? "" : pair.substr(eq + 1);
+        if (end == std::string::npos) break;
+        pos = end + 1;
+    }
+    return "";
+}
+
+std::string tokensJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT snapshot_day_ms,snapshot_height,token_id,coin_count,total_raw,holder_count "
+        "FROM analytics.asset_snapshots WHERE snapshot_day_ms="
+        "(SELECT MAX(snapshot_day_ms) FROM analytics.asset_snapshots) ORDER BY total_raw DESC;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"as_of_day_ms\":" << res->GetValue(0,0).GetValue<std::int64_t>()
+        << ",\"as_of_height\":" << res->GetValue(1,0).GetValue<std::int64_t>() << ",\"tokens\":[";
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"token_id\":" << quote(res->GetValue(2,i).ToString())
+            << ",\"coin_count\":" << res->GetValue(3,i).ToString()
+            << ",\"total_raw\":" << res->GetValue(4,i).ToString()
+            << ",\"holder_count\":" << res->GetValue(5,i).ToString() << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
+std::string assetUtxoJson(const std::string& indexPath, const std::string& token,
+                          const std::string& dayParam, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    std::string dayClause;
+    if (!dayParam.empty()) {
+        try { dayClause = " AND snapshot_day_ms=" + std::to_string(std::stoll(dayParam)); }
+        catch (...) { return {}; }
+    }
+    auto snap = con.Query(
+        "SELECT snapshot_day_ms,snapshot_height,coin_count,total_raw,holder_count "
+        "FROM analytics.asset_snapshots WHERE token_id=" + sqlLit(token) + dayClause +
+        " ORDER BY snapshot_day_ms DESC LIMIT 1;");
+    if (!snap || snap->HasError() || snap->RowCount() == 0) return {};
+    found = true;
+    const std::string day = std::to_string(snap->GetValue(0,0).GetValue<std::int64_t>());
+    auto age = con.Query("SELECT band,coin_count,amount_raw FROM analytics.asset_age_bands "
+                         "WHERE token_id=" + sqlLit(token) + " AND snapshot_day_ms=" + day +
+                         " ORDER BY band;");
+    auto val = con.Query("SELECT band,coin_count,amount_raw FROM analytics.asset_value_bands "
+                         "WHERE token_id=" + sqlLit(token) + " AND snapshot_day_ms=" + day +
+                         " ORDER BY band;");
+    std::ostringstream out;
+    out << "{\"token_id\":" << quote(token)
+        << ",\"as_of_day_ms\":" << snap->GetValue(0,0).ToString()
+        << ",\"as_of_height\":" << snap->GetValue(1,0).ToString()
+        << ",\"coin_count\":" << snap->GetValue(2,0).ToString()
+        << ",\"total_raw\":" << snap->GetValue(3,0).ToString()
+        << ",\"holder_count\":" << snap->GetValue(4,0).ToString()
+        << ",\"age_bands\":[";
+    for (std::size_t i = 0; age && !age->HasError() && i < age->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"band\":" << quote(age->GetValue(0,i).ToString())
+            << ",\"coin_count\":" << age->GetValue(1,i).ToString()
+            << ",\"amount_raw\":" << age->GetValue(2,i).ToString() << "}";
+    }
+    out << "],\"value_bands\":[";
+    for (std::size_t i = 0; val && !val->HasError() && i < val->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"band\":" << quote(val->GetValue(0,i).ToString())
+            << ",\"coin_count\":" << val->GetValue(1,i).ToString()
+            << ",\"amount_raw\":" << val->GetValue(2,i).ToString() << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
+std::string snapshotsJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT snapshot_day_ms,MAX(snapshot_height),COUNT(DISTINCT token_id),SUM(coin_count) "
+        "FROM analytics.asset_snapshots GROUP BY snapshot_day_ms ORDER BY snapshot_day_ms DESC;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"snapshots\":[";
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"day_ms\":" << res->GetValue(0,i).ToString()
+            << ",\"height\":" << res->GetValue(1,i).ToString()
+            << ",\"tokens\":" << res->GetValue(2,i).ToString()
+            << ",\"coins\":" << res->GetValue(3,i).ToString() << "}";
     }
     out << "]}";
     return out.str();
@@ -387,8 +584,19 @@ std::string capabilitiesJson(const ApiOptions& opt) {
     }
 
     out << ",\"megammr\":";
-    if (hasMmr) {
-        out << "{\"as_of\":null,\"coins\":null,\"size_bytes\":" << num(mmrSize)
+    const IndexState mmrState = readIndexState(opt.indexPath);
+    if (mmrState.mmrAvailable || hasMmr) {
+        out << "{\"as_of\":null,\"coins\":";
+        if (mmrState.mmrAvailable) out << mmrState.mmrCoins; else out << "null";
+        out << ",\"native_coins\":";
+        if (mmrState.mmrAvailable) out << mmrState.mmrNative; else out << "null";
+        out << ",\"root\":";
+        if (mmrState.mmrAvailable && !mmrState.mmrRoot.empty()) out << quote(mmrState.mmrRoot);
+        else out << "null";
+        out << ",\"store_engine\":";
+        if (mmrState.mmrAvailable && !mmrState.mmrEngine.empty()) out << quote(mmrState.mmrEngine);
+        else out << "null";
+        out << ",\"size_bytes\":" << num(mmrSize)
             << ",\"file\":" << quote(opt.mmrPath) << "}";
     } else {
         out << "null";
@@ -475,6 +683,7 @@ void handleClient(int fd, const ApiOptions& opt) {
     request >> method >> target >> version;
     const std::size_t q = target.find('?');
     const std::string path = target.substr(0, q);
+    const std::string query = q == std::string::npos ? "" : target.substr(q + 1);
 
     if (method != "GET") {
         sendResponse(fd, 405, "Method Not Allowed",
@@ -545,6 +754,29 @@ void handleClient(int fd, const ApiOptions& opt) {
         return false;
     };
 
+    if (path == "/v1/tokens" && requireIndex()) {
+        bool found = false;
+        const std::string body = tokensJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No token snapshot", "[]", "[]", ""));
+        return;
+    }
+    if (path.rfind("/v1/tokens/", 0) == 0 && requireIndex()) {
+        const std::string token = path.substr(11);
+        bool found = false;
+        const std::string body = assetUtxoJson(opt.indexPath, token, queryParam(query, "day"), found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "Unknown token", "[]", "[]", ""));
+        return;
+    }
+    if (path == "/v1/snapshots" && requireIndex()) {
+        bool found = false;
+        const std::string body = snapshotsJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No snapshots", "[]", "[]", ""));
+        return;
+    }
+
     if (path.rfind("/v1/blocks/", 0) == 0 && requireIndex()) {
         const std::string suffix = path.substr(11);
         try {
@@ -572,23 +804,38 @@ void handleClient(int fd, const ApiOptions& opt) {
     if (path.rfind("/v1/addresses/", 0) == 0 && requireIndex()) {
         const std::string address = path.substr(14);
         bool found = false;
-        const std::string body = addressJson(opt.indexPath, address, found);
+        const std::string body = addressJson(opt.indexPath, address,
+                                             queryParam(query, "token"),
+                                             queryParam(query, "day"), found);
         sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
                      found ? body : errorJson("not_found", "Unknown address", "[]", "[]", ""));
         return;
     }
     if (path == "/v1/utxo/distribution" && requireIndex()) {
+        const std::string token = queryParam(query, "token");
         bool found = false;
-        const std::string body = utxoJson(opt.indexPath, found);
+        const std::string body = token.empty()
+            ? utxoJson(opt.indexPath, found)
+            : assetUtxoJson(opt.indexPath, token, queryParam(query, "day"), found);
         sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
                      found ? body : errorJson("not_found", "No UTXO snapshot", "[]", "[]", ""));
         return;
     }
     if (path == "/v1/cohorts/holder" && requireIndex()) {
+        const std::string token = queryParam(query, "token");
         bool found = false;
-        const std::string body = cohortsJson(opt.indexPath, found);
+        const std::string body = token.empty()
+            ? cohortsJson(opt.indexPath, found)
+            : assetCohortsJson(opt.indexPath, token, queryParam(query, "day"), found);
         sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
                      found ? body : errorJson("not_found", "No cohort snapshot", "[]", "[]", ""));
+        return;
+    }
+    if (path == "/v1/consistency/check" && requireIndex()) {
+        bool found = false;
+        const std::string body = consistencyJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No consistency check", "[]", "[]", ""));
         return;
     }
 

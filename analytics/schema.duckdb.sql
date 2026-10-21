@@ -21,7 +21,8 @@ INSERT INTO config VALUES
     ('finality_depth',      '2048'),
     ('stale_after_blocks',  '12'),
     ('age_bands',           '["0-1d","1d-1w","1w-1m","1m-3m","3m-6m","6m-1y","1y-2y","2y-5y","5y+"]'),
-    ('value_bands',         '["0-1","1-10","10-100","100-1k","1k-10k","10k-100k","100k-1m","1m+"]')
+    ('value_bands',         '["0-1","1-10","10-100","100-1k","1k-10k","10k-100k","100k-1m","1m+"]'),
+    ('snapshot_retention_days', '365')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS metric_catalog (
@@ -200,6 +201,52 @@ CREATE TABLE IF NOT EXISTS holder_cohorts (
 -- ---------------------------------------------------------------------------
 -- Derived time series and index health
 -- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS asset_snapshots (
+    snapshot_day_ms BIGINT NOT NULL,
+    snapshot_height BIGINT NOT NULL,
+    token_id         VARCHAR NOT NULL,
+    coin_count       BIGINT NOT NULL,
+    total_raw        HUGEINT NOT NULL,
+    holder_count     BIGINT NOT NULL,
+    PRIMARY KEY (snapshot_day_ms, token_id)
+);
+
+CREATE TABLE IF NOT EXISTS asset_address_balances (
+    snapshot_day_ms BIGINT NOT NULL,
+    token_id         VARCHAR NOT NULL,
+    address          VARCHAR NOT NULL,
+    balance_raw      HUGEINT NOT NULL,
+    coin_count       INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_day_ms, token_id, address)
+);
+
+CREATE TABLE IF NOT EXISTS asset_age_bands (
+    snapshot_day_ms BIGINT NOT NULL,
+    token_id         VARCHAR NOT NULL,
+    band             VARCHAR NOT NULL,
+    coin_count       BIGINT NOT NULL,
+    amount_raw       HUGEINT NOT NULL,
+    PRIMARY KEY (snapshot_day_ms, token_id, band)
+);
+
+CREATE TABLE IF NOT EXISTS asset_value_bands (
+    snapshot_day_ms BIGINT NOT NULL,
+    token_id         VARCHAR NOT NULL,
+    band             VARCHAR NOT NULL,
+    coin_count       BIGINT NOT NULL,
+    amount_raw       HUGEINT NOT NULL,
+    PRIMARY KEY (snapshot_day_ms, token_id, band)
+);
+
+CREATE TABLE IF NOT EXISTS asset_holder_cohorts (
+    snapshot_day_ms BIGINT NOT NULL,
+    token_id         VARCHAR NOT NULL,
+    cohort           VARCHAR NOT NULL,
+    address_count    BIGINT NOT NULL,
+    balance_raw      HUGEINT NOT NULL,
+    PRIMARY KEY (snapshot_day_ms, token_id, cohort)
+);
+
 CREATE TABLE IF NOT EXISTS metric_series (
     metric          VARCHAR NOT NULL,
     granularity     VARCHAR NOT NULL,
@@ -210,6 +257,24 @@ CREATE TABLE IF NOT EXISTS metric_series (
     source          VARCHAR NOT NULL,
     complete        BOOLEAN NOT NULL DEFAULT TRUE,
     PRIMARY KEY (metric, granularity, bucket_start_ms)
+);
+
+CREATE TABLE IF NOT EXISTS mmr_snapshots (
+    root          VARCHAR PRIMARY KEY,
+    as_of_height  BIGINT,
+    coin_count    BIGINT NOT NULL,
+    native_count  BIGINT NOT NULL,
+    total_raw     HUGEINT NOT NULL,
+    store_engine  VARCHAR,
+    loaded_at_ms  BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mmr_coins (
+    coin_id        VARCHAR PRIMARY KEY,
+    address        VARCHAR,
+    token_id       VARCHAR,
+    amount_raw     HUGEINT NOT NULL,
+    created_height BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS consistency_checks (

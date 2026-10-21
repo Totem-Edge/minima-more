@@ -35,10 +35,30 @@ curl -s http://127.0.0.1:8080/v1/txs/0x... | jq
 curl -s http://127.0.0.1:8080/v1/addresses/0x... | jq
 curl -s http://127.0.0.1:8080/v1/utxo/distribution | jq
 curl -s http://127.0.0.1:8080/v1/cohorts/holder | jq
+curl -s http://127.0.0.1:8080/v1/tokens | jq
+curl -s 'http://127.0.0.1:8080/v1/utxo/distribution?token=0x...' | jq
+curl -s http://127.0.0.1:8080/v1/snapshots | jq
+curl -s http://127.0.0.1:8080/v1/consistency/check | jq
 ```
 
-Snapshot tables (`utxo_snapshots`, `address_balances`, age/value bands, holder
-cohorts) are **native-token only** in v1; token-specific breakdowns come later.
+Snapshots exist in two forms: the native-token tables used by the default
+endpoints, and `asset_*` tables keyed by `(snapshot_day_ms, token_id)` for
+per-token history. `asset_*` snapshots are retained for
+`snapshot_retention_days` (default 365) and pruned on each index pass.
+
+MegaMMR enrichment (optional):
+
+```bash
+./build-analytics/analytics/minima-analytics -data ~/.minima -indexonly \
+  -indexdb ~/.minima/analytics.duckdb -mmr-enrich \
+  -mmrpath ~/.minima/1.0/databases/megammr.mmr
+```
+
+Use `-mmrstore none` to load coins into memory; otherwise point at
+`coins.lmdb`. This writes `mmr_snapshots`, `mmr_coins`, and a
+`consistency_checks` row at the archive tip. If the MMR snapshot is older than
+the archive tip, `matched=false` means “not comparable at this height,” not
+corruption.
 
 Overrides: `-archivepath`, `-mmrpath`, `-archive`, `-megammr`, `-rebuild`,
 `-indexonly`.
