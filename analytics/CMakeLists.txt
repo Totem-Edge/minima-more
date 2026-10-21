@@ -11,6 +11,7 @@ add_executable(minima-analytics
     api_server.cpp
     archive_reader.cpp
     indexer.cpp
+    backup.cpp
     $<TARGET_OBJECTS:minima_core>
 )
 

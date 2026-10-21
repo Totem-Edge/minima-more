@@ -1,5 +1,6 @@
 #include "api_server.hpp"
 #include "indexer.hpp"
+#include "backup.hpp"
 #include "org/minima/objects/address.hpp"
 #include "org/minima/objects/base/mini_data.hpp"
 #include "org/minima/kissvm/contract.hpp"
@@ -47,6 +48,8 @@ void printHelp() {
         << "  -mmr-enrich      Load MegaMMR and write root/consistency snapshots\n"
         << "  -mmrstore DIR    Coin LMDB store (default <data>/1.0/databases/coins.lmdb)\n"
         << "  -knownscripts F  CSV of known script labels (default analytics/known_scripts.csv)\n"
+        << "  -backup DIR      Export a portable Parquet backup and exit\n"
+        << "  -restore DIR     Import a backup into a new -indexdb, then continue\n"
         << "  -rawdata FILE    Read blocks from a raw archive if the archive DB is empty\n"
         << "  -hashscript FILE Compute address/hash for a KISSVM script\n"
         << "  -hashscript-clean FILE  Clean the script first (newscript behaviour)\n"
@@ -60,6 +63,8 @@ int main(int argc, char** argv) {
     opt.dataDir = homeDir() + "/.minima";
     opt.indexPath = opt.dataDir + "/analytics.duckdb";
     std::string hashScript;
+    std::string backupDir;
+    std::string restoreDir;
     bool hashClean = false;
     std::string knownScriptsPath = MINIMA_ANALYTICS_KNOWN_SCRIPTS;
     std::string rawPath;
@@ -124,6 +129,16 @@ int main(int argc, char** argv) {
         } else if (arg == "-knownscripts") {
             if (!next(knownScriptsPath)) {
                 std::cerr << "-knownscripts requires a file\n";
+                return 2;
+            }
+        } else if (arg == "-backup") {
+            if (!next(backupDir)) {
+                std::cerr << "-backup requires a directory\n";
+                return 2;
+            }
+        } else if (arg == "-restore") {
+            if (!next(restoreDir)) {
+                std::cerr << "-restore requires a directory\n";
                 return 2;
             }
         } else if (arg == "-hashscript" || arg == "-hashscript-clean") {
@@ -192,6 +207,18 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    if (!restoreDir.empty()) {
+        minima::analytics::BackupOptions bopt;
+        bopt.indexPath = opt.indexPath;
+        bopt.backupDir = restoreDir;
+        auto br = minima::analytics::importBackup(bopt);
+        if (!br.ok) {
+            std::cerr << "restore failed: " << br.error << "\n";
+            return 1;
+        }
+        std::cerr << "restored index at height " << br.height << "\n";
+    }
+
     if (doIndex) {
         minima::analytics::IndexOptions iopt;
         iopt.archivePath = opt.archivePath;
@@ -210,6 +237,20 @@ int main(int argc, char** argv) {
         }
         std::cerr << "indexed " << ir.blocks << " blocks into " << opt.indexPath << "\n";
         if (indexOnly) return 0;
+    }
+
+    if (!backupDir.empty()) {
+        minima::analytics::BackupOptions bopt;
+        bopt.indexPath = opt.indexPath;
+        bopt.backupDir = backupDir;
+        auto br = minima::analytics::exportBackup(bopt);
+        if (!br.ok) {
+            std::cerr << "backup failed: " << br.error << "\n";
+            return 1;
+        }
+        std::cerr << "backup written to " << backupDir
+                  << " at height " << br.height << "\n";
+        return 0;
     }
 
     minima::analytics::ApiServer server(opt);

@@ -54,6 +54,24 @@ endpoints, and `asset_*` tables keyed by `(snapshot_day_ms, token_id)` for
 per-token history. `asset_*` snapshots are retained for
 `snapshot_retention_days` (default 365) and pruned on each index pass.
 
+Backup / fast bootstrap:
+
+```bash
+# portable Parquet snapshot + manifest, exits after writing
+./build-analytics/analytics/minima-analytics -data ~/.minima \
+  -indexdb ~/.minima/analytics.duckdb -backup /backups/2026-10-21
+
+# restore into a NEW index, then resume from the snapshot height
+./build-analytics/analytics/minima-analytics -data ~/.minima \
+  -indexdb ~/.minima/analytics.duckdb.new -restore /backups/2026-10-21 -index
+
+mv ~/.minima/analytics.duckdb.new ~/.minima/analytics.duckdb
+```
+
+Backups use DuckDB `EXPORT DATABASE` (Parquet) and include
+`analytics_manifest.json` with schema/tip/MMR metadata. `-restore` refuses to
+overwrite an existing non-empty index.
+
 MegaMMR enrichment (optional):
 
 ```bash
