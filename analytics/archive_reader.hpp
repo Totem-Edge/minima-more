@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace minima::analytics {
 
@@ -20,5 +22,10 @@ struct ArchiveStats {
 };
 
 ArchiveStats readArchiveStats(const std::string& path);
+
+using BlockSink = std::function<bool(std::int64_t height, const std::vector<std::uint8_t>& bytes)>;
+
+bool forEachArchiveBlock(const std::string& path, std::int64_t fromHeight,
+                         const BlockSink& sink, std::string& error);
 
 } // namespace minima::analytics

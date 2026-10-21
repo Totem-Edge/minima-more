@@ -8,6 +8,7 @@ struct ApiOptions {
     std::string dataDir;
     std::string archivePath;
     std::string mmrPath;
+    std::string indexPath;
     bool forceArchive = false;
     bool forceMmr = false;
     int port = 8080;

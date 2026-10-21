@@ -3,6 +3,8 @@
 #include "archive_reader.hpp"
 #include "metric_catalog.hpp"
 
+#include <duckdb.hpp>
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/select.h>
@@ -68,6 +70,86 @@ std::string errorJson(const std::string& code, const std::string& message,
         << ",\"requires\":" << requires
         << ",\"available_modes\":" << available
         << ",\"remediation\":" << quote(remediation) << "}}";
+    return out.str();
+}
+
+struct IndexState {
+    bool exists = false;
+    bool ready = false;
+    std::string status = "not_built";
+    long long lastHeight = -1;
+    long long lagBlocks = -1;
+    std::string lastHash;
+};
+
+IndexState readIndexState(const std::string& path) {
+    IndexState out;
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) return out;
+    out.exists = true;
+    try {
+        duckdb::DuckDB db(path);
+        duckdb::Connection con(db);
+        auto res = con.Query(
+            "SELECT status, last_height, lag_blocks, last_hash "
+            "FROM analytics.index_state WHERE id = 1;");
+        if (res && !res->HasError() && res->RowCount() > 0) {
+            out.status = res->GetValue(0, 0).ToString();
+            if (!res->GetValue(1, 0).IsNull()) out.lastHeight = res->GetValue(1, 0).GetValue<std::int64_t>();
+            if (!res->GetValue(2, 0).IsNull()) out.lagBlocks = res->GetValue(2, 0).GetValue<std::int64_t>();
+            if (!res->GetValue(3, 0).IsNull()) out.lastHash = res->GetValue(3, 0).ToString();
+            out.ready = (out.status == "ready");
+        }
+    } catch (...) {
+        out.status = "degraded";
+    }
+    return out;
+}
+
+bool knownMetric(const std::string& name) {
+    for (std::size_t i = 0; i < kMetricCatalogSize; ++i) {
+        if (name == kMetricCatalog[i].name) return true;
+    }
+    return false;
+}
+
+bool validMetricName(const std::string& name) {
+    if (name.empty()) return false;
+    for (char c : name) {
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+    }
+    return true;
+}
+
+std::string metricsJson(const std::string& indexPath, const std::string& metric) {
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT granularity, bucket_start_ms, height, value, value_raw, complete "
+        "FROM analytics.metric_series WHERE metric = '" + metric +
+        "' ORDER BY bucket_start_ms;");
+    if (!res || res->HasError()) return {};
+    const std::string granularity = (res->RowCount() > 0 && !res->GetValue(0, 0).IsNull())
+        ? res->GetValue(0, 0).ToString() : "1d";
+    std::ostringstream out;
+    out << "{\"metric\":" << quote(metric) << ",\"granularity\":" << quote(granularity)
+        << ",\"points\":[";
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"t\":" << res->GetValue(1, i).GetValue<std::int64_t>();
+        out << ",\"height\":";
+        if (res->GetValue(2, i).IsNull()) out << "null";
+        else out << res->GetValue(2, i).GetValue<std::int64_t>();
+        out << ",\"value\":";
+        if (res->GetValue(3, i).IsNull()) out << "null";
+        else out << res->GetValue(3, i).GetValue<double>();
+        out << ",\"value_raw\":";
+        if (res->GetValue(4, i).IsNull()) out << "null";
+        else out << res->GetValue(4, i).ToString();
+        out << ",\"complete\":" << (res->GetValue(5, i).GetValue<bool>() ? "true" : "false");
+        out << "}";
+    }
+    out << "]}";
     return out.str();
 }
 
@@ -149,7 +231,13 @@ std::string capabilitiesJson(const ApiOptions& opt) {
     }
 
     out << ",\"live\":null},";
-    out << "\"index\":{\"status\":\"not_built\",\"schema\":1,\"lag_blocks\":null},";
+    const IndexState idx = readIndexState(opt.indexPath);
+    out << "\"index\":{\"status\":" << quote(idx.status)
+        << ",\"schema\":1,\"lag_blocks\":";
+    if (idx.lagBlocks < 0) out << "null"; else out << idx.lagBlocks;
+    out << ",\"last_height\":";
+    if (idx.lastHeight < 0) out << "null"; else out << idx.lastHeight;
+    out << "},";
     out << "\"warnings\":[";
     for (std::size_t i = 0; i < warnings.size(); ++i) {
         if (i) out << ",";
@@ -245,6 +333,41 @@ void handleClient(int fd, const ApiOptions& opt) {
     }
     if (path == "/v1/coverage") {
         sendResponse(fd, 200, "OK", coverageJson(opt));
+        return;
+    }
+
+    const std::string metricsPrefix = "/v1/metrics/";
+    if (path.rfind(metricsPrefix, 0) == 0) {
+        const std::string metric = path.substr(metricsPrefix.size());
+        if (!validMetricName(metric)) {
+            sendResponse(fd, 400, "Bad Request",
+                         errorJson("invalid_metric", "Invalid metric name", "[]", "[]",
+                                   "See /v1/catalog"));
+            return;
+        }
+        if (!knownMetric(metric)) {
+            sendResponse(fd, 404, "Not Found",
+                         errorJson("metric_not_found", "Unknown metric", "[]", "[]",
+                                   "See /v1/catalog"));
+            return;
+        }
+        const IndexState idx = readIndexState(opt.indexPath);
+        if (!idx.ready) {
+            sendResponse(fd, 409, "Conflict",
+                         errorJson("index_not_ready",
+                                   "The analytics index has not been built",
+                                   "[\"analytics\"]", availableModesJson(opt),
+                                   "Run minima-analytics -index; retry when /v1/capabilities reports ready"));
+            return;
+        }
+        const std::string body = metricsJson(opt.indexPath, metric);
+        if (body.empty()) {
+            sendResponse(fd, 404, "Not Found",
+                         errorJson("metric_not_found", "Unknown metric", "[]", "[]",
+                                   "See /v1/catalog"));
+            return;
+        }
+        sendResponse(fd, 200, "OK", body);
         return;
     }
 

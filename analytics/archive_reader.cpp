@@ -2,7 +2,10 @@
 
 #include <sqlite3.h>
 
+#include <cstring>
 #include <filesystem>
+
+#include <zlib.h>
 #include <iostream>
 
 namespace minima::analytics {
@@ -69,6 +72,125 @@ ArchiveStats readArchiveStats(const std::string& path) {
 
     sqlite3_close(db);
     return out;
+}
+
+} // namespace minima::analytics
+
+namespace minima::analytics {
+
+namespace {
+
+bool unpackChunk(const void* blob, int len, std::vector<std::uint8_t>& out) {
+    const auto* p = static_cast<const std::uint8_t*>(blob);
+    if (!p || len < 8 || std::memcmp(p, "ZCHN", 4) != 0) return false;
+    std::uint32_t rawSize = 0;
+    std::memcpy(&rawSize, p + 4, sizeof(rawSize));
+    out.resize(rawSize);
+    uLongf destLen = rawSize;
+    if (uncompress(out.data(), &destLen, p + 8, static_cast<uLong>(len - 8)) != Z_OK ||
+        destLen != rawSize) {
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
+bool unpackLegacy(const void* blob, int len, std::vector<std::uint8_t>& out) {
+    const auto* p = static_cast<const std::uint8_t*>(blob);
+    if (!p || len <= 0) return false;
+    if (len >= 8 && std::memcmp(p, "ZBLK", 4) == 0) {
+        std::uint32_t rawSize = 0;
+        std::memcpy(&rawSize, p + 4, sizeof(rawSize));
+        out.resize(rawSize);
+        uLongf destLen = rawSize;
+        if (uncompress(out.data(), &destLen, p + 8, static_cast<uLong>(len - 8)) != Z_OK ||
+            destLen != rawSize) {
+            out.clear();
+            return false;
+        }
+        return true;
+    }
+    out.assign(p, p + len);
+    return true;
+}
+
+} // namespace
+
+bool forEachArchiveBlock(const std::string& path, std::int64_t fromHeight,
+                         const BlockSink& sink, std::string& error) {
+    sqlite3* db = nullptr;
+    if (sqlite3_open_v2(path.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        error = db ? sqlite3_errmsg(db) : "open failed";
+        if (db) sqlite3_close(db);
+        return false;
+    }
+    sqlite3_busy_timeout(db, 2000);
+
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "SELECT block, syncdata, chunkid, offset, len FROM syncblock "
+                      "WHERE block > ? ORDER BY block;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        error = sqlite3_errmsg(db);
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        return false;
+    }
+    sqlite3_bind_int64(stmt, 1, fromHeight);
+
+    std::int64_t cachedChunkId = -1;
+    std::vector<std::uint8_t> cachedChunk;
+    std::vector<std::uint8_t> bytes;
+    bool ok = true;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const std::int64_t height = sqlite3_column_int64(stmt, 0);
+        const std::int64_t chunkId = sqlite3_column_int64(stmt, 2);
+
+        if (chunkId >= 0) {
+            if (chunkId != cachedChunkId) {
+                sqlite3_stmt* cstmt = nullptr;
+                if (sqlite3_prepare_v2(db, "SELECT data FROM blockchunks WHERE id = ?;",
+                                       -1, &cstmt, nullptr) != SQLITE_OK) {
+                    error = sqlite3_errmsg(db);
+                    ok = false;
+                    break;
+                }
+                sqlite3_bind_int64(cstmt, 1, chunkId);
+                if (sqlite3_step(cstmt) != SQLITE_ROW ||
+                    !unpackChunk(sqlite3_column_blob(cstmt, 0),
+                                 sqlite3_column_bytes(cstmt, 0), cachedChunk)) {
+                    error = "missing or invalid archive chunk";
+                    sqlite3_finalize(cstmt);
+                    ok = false;
+                    break;
+                }
+                sqlite3_finalize(cstmt);
+                cachedChunkId = chunkId;
+            }
+            const int offset = sqlite3_column_int(stmt, 3);
+            const int len = sqlite3_column_int(stmt, 4);
+            if (offset < 0 || len < 0 ||
+                static_cast<std::size_t>(offset + len) > cachedChunk.size()) {
+                error = "invalid archive chunk offset";
+                ok = false;
+                break;
+            }
+            bytes.assign(cachedChunk.begin() + offset, cachedChunk.begin() + offset + len);
+        } else {
+            if (!unpackLegacy(sqlite3_column_blob(stmt, 1),
+                              sqlite3_column_bytes(stmt, 1), bytes)) {
+                error = "invalid legacy archive row";
+                ok = false;
+                break;
+            }
+        }
+
+        if (!sink(height, bytes)) break;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return ok;
 }
 
 } // namespace minima::analytics

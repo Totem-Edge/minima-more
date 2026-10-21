@@ -1,4 +1,5 @@
 #include "api_server.hpp"
+#include "indexer.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -34,6 +35,10 @@ void printHelp() {
         << "  -mmrpath F       Override megammr.mmr path\n"
         << "  -archive         Force archive mode (even if DB not found yet)\n"
         << "  -megammr         Force MegaMMR mode\n"
+        << "  -index           Build/update the DuckDB analytics index\n"
+        << "  -indexonly       Build the index and exit\n"
+        << "  -indexdb FILE    DuckDB index path (default <data>/analytics.duckdb)\n"
+        << "  -rebuild         Rebuild the index from scratch\n"
         << "  -help            Show this help\n";
 }
 
@@ -42,6 +47,10 @@ void printHelp() {
 int main(int argc, char** argv) {
     minima::analytics::ApiOptions opt;
     opt.dataDir = homeDir() + "/.minima";
+    opt.indexPath = opt.dataDir + "/analytics.duckdb";
+    bool doIndex = false;
+    bool indexOnly = false;
+    bool rebuild = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -79,6 +88,18 @@ int main(int argc, char** argv) {
             opt.forceArchive = true;
         } else if (arg == "-megammr") {
             opt.forceMmr = true;
+        } else if (arg == "-indexdb") {
+            if (!next(opt.indexPath)) {
+                std::cerr << "-indexdb requires a value\n";
+                return 2;
+            }
+        } else if (arg == "-index") {
+            doIndex = true;
+        } else if (arg == "-indexonly") {
+            doIndex = true;
+            indexOnly = true;
+        } else if (arg == "-rebuild") {
+            rebuild = true;
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
             printHelp();
@@ -102,6 +123,21 @@ int main(int argc, char** argv) {
     if (opt.port <= 0 || opt.port > 65535) {
         std::cerr << "Invalid port\n";
         return 2;
+    }
+
+    if (doIndex) {
+        minima::analytics::IndexOptions iopt;
+        iopt.archivePath = opt.archivePath;
+        iopt.indexPath = opt.indexPath;
+        iopt.schemaPath = MINIMA_ANALYTICS_SCHEMA;
+        iopt.rebuild = rebuild;
+        auto ir = minima::analytics::buildIndex(iopt);
+        if (!ir.ok) {
+            std::cerr << "index failed: " << ir.error << "\n";
+            return 1;
+        }
+        std::cerr << "indexed " << ir.blocks << " blocks into " << opt.indexPath << "\n";
+        if (indexOnly) return 0;
     }
 
     minima::analytics::ApiServer server(opt);
