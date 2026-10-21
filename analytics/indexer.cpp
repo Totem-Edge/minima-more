@@ -244,6 +244,23 @@ IndexResult buildIndex(const IndexOptions& options) {
         return result;
     }
 
+    if (!options.knownScriptsPath.empty() && std::filesystem::exists(options.knownScriptsPath)) {
+        std::string path = options.knownScriptsPath;
+        for (char& c : path) if (c == '\'') c = ' ';
+        // Single quotes are not valid in our paths; replace handled above.
+        const std::string sql =
+            "DELETE FROM analytics.known_scripts;"
+            "INSERT INTO analytics.known_scripts "
+            "(script_hash,name,category,source,confidence,added_ms) "
+            "SELECT script_hash,name,category,source,confidence,epoch_ms(now()) "
+            "FROM read_csv_auto('" + path + "', header=true) "
+            "QUALIFY row_number() OVER (PARTITION BY script_hash ORDER BY confidence DESC)=1;";
+        if (!exec(con, sql, error)) {
+            result.error = error;
+            return result;
+        }
+    }
+
     long long lastHeight = 0;
     {
         auto res = con.Query("SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks;");
@@ -692,6 +709,38 @@ IndexResult buildIndex(const IndexOptions& options) {
             "- (SELECT CAST(value AS BIGINT)*86400000 FROM analytics.config WHERE key='snapshot_retention_days');",
         };
         for (const auto& sql : assetSql) {
+            if (!exec(con, sql, error)) {
+                result.error = error;
+                return result;
+            }
+        }
+    }
+
+    {
+        const std::vector<std::string> scriptSql = {
+            "DELETE FROM analytics.scripts;",
+            "INSERT INTO analytics.scripts "
+            "(script_hash,first_seen_height,last_seen_height,output_count,spent_count,"
+            "unspent_value_raw,state_size) "
+            "WITH spent AS (SELECT i.coin_id, MIN(t.height) height FROM analytics.tx_inputs i "
+            "JOIN analytics.txs t ON t.txpowid=i.txpowid GROUP BY i.coin_id) "
+            "SELECT o.address,MIN(o.created_height),"
+            "MAX(COALESCE(s.height,o.created_height)),COUNT(*),COUNT(s.height),"
+            "SUM(CASE WHEN s.height IS NULL THEN o.amount_raw ELSE 0 END),0 "
+            "FROM analytics.tx_outputs o LEFT JOIN spent s ON s.coin_id=o.coin_id "
+            "WHERE o.address IS NOT NULL AND o.address <> '' GROUP BY o.address;",
+            "INSERT INTO analytics.metric_series "
+            "(metric,granularity,bucket_start_ms,height,value,value_raw,source,complete) "
+            "SELECT 'script_count','snapshot',MAX(b.timestamp_ms),MAX(b.height),COUNT(*),NULL,"
+            "'archive',true FROM analytics.scripts s, analytics.chain_blocks b "
+            "WHERE b.height=(SELECT MAX(height) FROM analytics.chain_blocks);",
+            "INSERT INTO analytics.metric_series "
+            "(metric,granularity,bucket_start_ms,height,value,value_raw,source,complete) "
+            "SELECT 'script_unspent_value_raw','snapshot',MAX(b.timestamp_ms),MAX(b.height),NULL,"
+            "SUM(s.unspent_value_raw),'archive',true FROM analytics.scripts s, analytics.chain_blocks b "
+            "WHERE b.height=(SELECT MAX(height) FROM analytics.chain_blocks);",
+        };
+        for (const auto& sql : scriptSql) {
             if (!exec(con, sql, error)) {
                 result.error = error;
                 return result;

@@ -420,6 +420,79 @@ std::string queryParam(const std::string& query, const std::string& key) {
     return "";
 }
 
+std::string scriptsJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT s.script_hash,k.name,k.category,s.output_count,s.spent_count,"
+        "s.unspent_value_raw FROM analytics.scripts s "
+        "LEFT JOIN analytics.known_scripts k ON k.script_hash=s.script_hash "
+        "ORDER BY s.unspent_value_raw DESC LIMIT 1000;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"scripts\":[";
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"script_hash\":" << quote(res->GetValue(0,i).ToString())
+            << ",\"name\":" << (res->GetValue(1,i).IsNull() ? "null" : quote(res->GetValue(1,i).ToString()))
+            << ",\"category\":" << (res->GetValue(2,i).IsNull() ? "null" : quote(res->GetValue(2,i).ToString()))
+            << ",\"output_count\":" << res->GetValue(3,i).ToString()
+            << ",\"spent_count\":" << res->GetValue(4,i).ToString()
+            << ",\"unspent_value_raw\":" << res->GetValue(5,i).ToString() << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
+std::string knownScriptsJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT script_hash,name,category,source,confidence FROM analytics.known_scripts "
+        "ORDER BY category,name LIMIT 5000;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"known_scripts\":[";
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"script_hash\":" << quote(res->GetValue(0,i).ToString())
+            << ",\"name\":" << quote(res->GetValue(1,i).ToString())
+            << ",\"category\":" << (res->GetValue(2,i).IsNull() ? "null" : quote(res->GetValue(2,i).ToString()))
+            << ",\"source\":" << (res->GetValue(3,i).IsNull() ? "null" : quote(res->GetValue(3,i).ToString()))
+            << ",\"confidence\":" << (res->GetValue(4,i).IsNull() ? "null" : res->GetValue(4,i).ToString())
+            << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
+std::string scriptJson(const std::string& indexPath, const std::string& hash, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT s.script_hash,k.name,k.category,s.first_seen_height,s.last_seen_height,"
+        "s.output_count,s.spent_count,s.unspent_value_raw FROM analytics.scripts s "
+        "LEFT JOIN analytics.known_scripts k ON k.script_hash=s.script_hash "
+        "WHERE s.script_hash=" + sqlLit(hash) + ";");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"script_hash\":" << quote(res->GetValue(0,0).ToString())
+        << ",\"name\":" << (res->GetValue(1,0).IsNull() ? "null" : quote(res->GetValue(1,0).ToString()))
+        << ",\"category\":" << (res->GetValue(2,0).IsNull() ? "null" : quote(res->GetValue(2,0).ToString()))
+        << ",\"first_seen_height\":" << res->GetValue(3,0).ToString()
+        << ",\"last_seen_height\":" << res->GetValue(4,0).ToString()
+        << ",\"output_count\":" << res->GetValue(5,0).ToString()
+        << ",\"spent_count\":" << res->GetValue(6,0).ToString()
+        << ",\"unspent_value_raw\":" << res->GetValue(7,0).ToString() << "}";
+    return out.str();
+}
+
 std::string tokensJson(const std::string& indexPath, bool& found) {
     found = false;
     duckdb::DuckDB db(indexPath);
@@ -753,6 +826,29 @@ void handleClient(int fd, const ApiOptions& opt) {
                                "Run minima-analytics -index; retry when /v1/capabilities reports ready"));
         return false;
     };
+
+    if (path == "/v1/scripts/known" && requireIndex()) {
+        bool found = false;
+        const std::string body = knownScriptsJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No known scripts", "[]", "[]", ""));
+        return;
+    }
+    if (path == "/v1/scripts" && requireIndex()) {
+        bool found = false;
+        const std::string body = scriptsJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No scripts", "[]", "[]", ""));
+        return;
+    }
+    if (path.rfind("/v1/scripts/", 0) == 0 && requireIndex()) {
+        const std::string hash = path.substr(13);
+        bool found = false;
+        const std::string body = scriptJson(opt.indexPath, hash, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "Unknown script", "[]", "[]", ""));
+        return;
+    }
 
     if (path == "/v1/tokens" && requireIndex()) {
         bool found = false;

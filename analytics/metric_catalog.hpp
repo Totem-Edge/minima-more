@@ -48,6 +48,8 @@ inline constexpr MetricDef kMetricCatalog[] = {
     {"utxo_value_p50_raw", "raw", "snapshot", "archive", "archive", "Median UTXO value"},
     {"utxo_value_p90_raw", "raw", "snapshot", "archive", "archive", "90th percentile UTXO value"},
     {"utxo_value_p99_raw", "raw", "snapshot", "archive", "archive", "99th percentile UTXO value"},
+    {"script_count", "count", "snapshot", "archive", "archive", "Distinct script/address hashes"},
+    {"script_unspent_value_raw", "raw", "snapshot", "archive", "archive", "Unspent value by script"},
     {"reorg_depth", "count", "event", "live", "full", "Deepest recent reorg depth"},
 };
 

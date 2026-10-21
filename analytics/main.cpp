@@ -1,8 +1,12 @@
 #include "api_server.hpp"
 #include "indexer.hpp"
+#include "org/minima/objects/address.hpp"
+#include "org/minima/objects/base/mini_data.hpp"
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <iostream>
 #include <string>
 
@@ -41,6 +45,8 @@ void printHelp() {
         << "  -rebuild         Rebuild the index from scratch\n"
         << "  -mmr-enrich      Load MegaMMR and write root/consistency snapshots\n"
         << "  -mmrstore DIR    Coin LMDB store (default <data>/1.0/databases/coins.lmdb)\n"
+        << "  -knownscripts F  CSV of known script labels (default analytics/known_scripts.csv)\n"
+        << "  -hashscript FILE Compute address/hash for a KISSVM script\n"
         << "  -help            Show this help\n";
 }
 
@@ -50,6 +56,8 @@ int main(int argc, char** argv) {
     minima::analytics::ApiOptions opt;
     opt.dataDir = homeDir() + "/.minima";
     opt.indexPath = opt.dataDir + "/analytics.duckdb";
+    std::string hashScript;
+    std::string knownScriptsPath = MINIMA_ANALYTICS_KNOWN_SCRIPTS;
     bool doIndex = false;
     bool indexOnly = false;
     bool rebuild = false;
@@ -103,6 +111,16 @@ int main(int argc, char** argv) {
         } else if (arg == "-indexonly") {
             doIndex = true;
             indexOnly = true;
+        } else if (arg == "-knownscripts") {
+            if (!next(knownScriptsPath)) {
+                std::cerr << "-knownscripts requires a file\n";
+                return 2;
+            }
+        } else if (arg == "-hashscript") {
+            if (!next(hashScript)) {
+                std::cerr << "-hashscript requires a file\n";
+                return 2;
+            }
         } else if (arg == "-rebuild") {
             rebuild = true;
         } else if (arg == "-mmr-enrich") {
@@ -141,6 +159,19 @@ int main(int argc, char** argv) {
         mmrStorePath = std::filesystem::exists(a, ec) ? a :
                        (std::filesystem::exists(b, ec) ? b : "");
     }
+    if (!hashScript.empty()) {
+        std::ifstream in(hashScript, std::ios::binary);
+        if (!in) {
+            std::cerr << "cannot open " << hashScript << "\n";
+            return 2;
+        }
+        std::ostringstream src;
+        src << in.rdbuf();
+        org::minima::objects::Address addr(src.str());
+        std::cout << addr.getAddressData().to0xString() << "\n" << addr.getMinimaAddress() << "\n";
+        return 0;
+    }
+
     if (opt.port <= 0 || opt.port > 65535) {
         std::cerr << "Invalid port\n";
         return 2;
@@ -153,6 +184,7 @@ int main(int argc, char** argv) {
         iopt.schemaPath = MINIMA_ANALYTICS_SCHEMA;
         iopt.mmrPath = opt.mmrPath;
         iopt.mmrStorePath = mmrStorePath;
+        iopt.knownScriptsPath = knownScriptsPath;
         iopt.enrichMmr = enrichMmr;
         iopt.rebuild = rebuild;
         auto ir = minima::analytics::buildIndex(iopt);

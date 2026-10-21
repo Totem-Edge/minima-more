@@ -39,7 +39,15 @@ curl -s http://127.0.0.1:8080/v1/tokens | jq
 curl -s 'http://127.0.0.1:8080/v1/utxo/distribution?token=0x...' | jq
 curl -s http://127.0.0.1:8080/v1/snapshots | jq
 curl -s http://127.0.0.1:8080/v1/consistency/check | jq
+curl -s http://127.0.0.1:8080/v1/scripts | jq
+curl -s http://127.0.0.1:8080/v1/scripts/known | jq
 ```
+
+Script/address hashes are indexed in `scripts`; `known_scripts.csv` is loaded from
+the build tree (or `-knownscripts FILE`). Compute an address for a KISSVM source
+with `-hashscript FILE`. The current MiniDAPP labels are template hashes from
+`minima-global/MiniDAPP@e79c8c1`; parameterized/older templates may not match any
+live coin.
 
 Snapshots exist in two forms: the native-token tables used by the default
 endpoints, and `asset_*` tables keyed by `(snapshot_day_ms, token_id)` for

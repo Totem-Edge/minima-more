@@ -68,6 +68,8 @@ INSERT INTO metric_catalog VALUES
  ('utxo_value_p50_raw','raw','snapshot','archive','archive','Median UTXO value'),
  ('utxo_value_p90_raw','raw','snapshot','archive','archive','90th percentile UTXO value'),
  ('utxo_value_p99_raw','raw','snapshot','archive','archive','99th percentile UTXO value'),
+ ('script_count','count','snapshot','archive','archive','Distinct script/address hashes'),
+ ('script_unspent_value_raw','raw','snapshot','archive','archive','Unspent value by script'),
  ('reorg_depth','count','event','live','full','Deepest recent reorg depth')
 ON CONFLICT (metric) DO NOTHING;
 
@@ -210,6 +212,25 @@ CREATE TABLE IF NOT EXISTS holder_cohorts (
 -- ---------------------------------------------------------------------------
 -- Derived time series and index health
 -- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS scripts (
+    script_hash       VARCHAR PRIMARY KEY,
+    first_seen_height BIGINT,
+    last_seen_height  BIGINT,
+    output_count      BIGINT NOT NULL,
+    spent_count       BIGINT NOT NULL,
+    unspent_value_raw HUGEINT NOT NULL,
+    state_size        BIGINT
+);
+
+CREATE TABLE IF NOT EXISTS known_scripts (
+    script_hash VARCHAR PRIMARY KEY,
+    name        VARCHAR NOT NULL,
+    category    VARCHAR,
+    source      VARCHAR,
+    confidence  DOUBLE,
+    added_ms    BIGINT
+);
+
 CREATE TABLE IF NOT EXISTS asset_snapshots (
     snapshot_day_ms BIGINT NOT NULL,
     snapshot_height BIGINT NOT NULL,

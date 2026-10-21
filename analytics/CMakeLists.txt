@@ -22,7 +22,8 @@ if(APPLE)
     target_include_directories(minima-analytics PRIVATE /opt/homebrew/include)
 endif()
 target_compile_definitions(minima-analytics PRIVATE
-    MINIMA_ANALYTICS_SCHEMA="${CMAKE_CURRENT_SOURCE_DIR}/schema.duckdb.sql")
+    MINIMA_ANALYTICS_SCHEMA="${CMAKE_CURRENT_SOURCE_DIR}/schema.duckdb.sql"
+    MINIMA_ANALYTICS_KNOWN_SCRIPTS="${CMAKE_CURRENT_SOURCE_DIR}/known_scripts.csv")
 
 target_link_libraries(minima-analytics PRIVATE
     ${DUCKDB_LIBRARY}
