@@ -304,7 +304,7 @@ IndexResult buildIndex(const IndexOptions& options) {
         "SELECT 'utxo_count','snapshot',MAX(b.timestamp_ms),MAX(b.height),COUNT(*),NULL,"
         "'archive',true FROM analytics.tx_outputs o "
         "JOIN analytics.chain_blocks b ON b.height=(SELECT MAX(height) FROM analytics.chain_blocks) "
-        "WHERE NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id);",
+        "WHERE o.token_id='0x00' AND NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id);",
         "INSERT INTO analytics.metric_series "
         "(metric,granularity,bucket_start_ms,height,value,value_raw,source,complete) "
         "SELECT 'supply_raw','snapshot',MAX(b.timestamp_ms),MAX(b.height),NULL,"
@@ -317,6 +317,91 @@ IndexResult buildIndex(const IndexOptions& options) {
         if (!exec(con, sql, error)) {
             result.error = error;
             return result;
+        }
+    }
+
+    {
+        const std::vector<std::string> snapshotSql = {
+            "UPDATE analytics.coins AS c SET is_spent = TRUE, "
+            "spent_height = s.height, spent_txid = s.txpowid FROM ("
+            "SELECT i.coin_id, MIN(t.height) AS height, MIN(i.txpowid) AS txpowid "
+            "FROM analytics.tx_inputs i JOIN analytics.txs t ON t.txpowid=i.txpowid "
+            "GROUP BY i.coin_id) s WHERE c.coin_id = s.coin_id;",
+            "DELETE FROM analytics.utxo_snapshots WHERE height = "
+            "(SELECT MAX(height) FROM analytics.chain_blocks);",
+            "INSERT INTO analytics.utxo_snapshots "
+            "(height,block_hash,mmr_root,coin_count,total_raw,created_at_ms) "
+            "WITH tip AS (SELECT MAX(height) h, MAX(timestamp_ms) t FROM analytics.chain_blocks) "
+            "SELECT tip.h, (SELECT hash FROM analytics.chain_blocks WHERE height=tip.h), NULL, "
+            "COUNT(*), SUM(o.amount_raw), tip.t FROM analytics.tx_outputs o, tip "
+            "WHERE o.token_id='0x00' AND NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id) "
+            "GROUP BY tip.h, tip.t;",
+            "DELETE FROM analytics.address_balances WHERE snapshot_height = "
+            "(SELECT MAX(height) FROM analytics.chain_blocks);",
+            "INSERT INTO analytics.address_balances "
+            "(snapshot_height,address,balance_raw,coin_count) "
+            "WITH tip AS (SELECT MAX(height) h FROM analytics.chain_blocks) "
+            "SELECT tip.h, o.address, SUM(o.amount_raw), COUNT(*) "
+            "FROM analytics.tx_outputs o, tip "
+            "WHERE o.token_id='0x00' AND o.address IS NOT NULL AND o.address <> '' "
+            "AND NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id) "
+            "GROUP BY tip.h, o.address;",
+            "DELETE FROM analytics.utxo_age_bands WHERE snapshot_height = "
+            "(SELECT MAX(height) FROM analytics.chain_blocks);",
+            "INSERT INTO analytics.utxo_age_bands "
+            "(snapshot_height,band,coin_count,amount_raw) "
+            "WITH tip AS (SELECT MAX(height) h, MAX(timestamp_ms) t FROM analytics.chain_blocks), "
+            "u AS (SELECT o.amount_raw, COALESCE(cb.timestamp_ms, tip.t) created_ms "
+            "FROM analytics.tx_outputs o JOIN tip ON TRUE "
+            "LEFT JOIN analytics.chain_blocks cb ON cb.height=o.created_height "
+            "WHERE o.token_id='0x00' AND NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
+            "SELECT tip.h, CASE "
+            "WHEN tip.t-u.created_ms < 86400000 THEN '0-1d' "
+            "WHEN tip.t-u.created_ms < 604800000 THEN '1d-1w' "
+            "WHEN tip.t-u.created_ms < 2592000000 THEN '1w-1m' "
+            "WHEN tip.t-u.created_ms < 7776000000 THEN '1m-3m' "
+            "WHEN tip.t-u.created_ms < 15552000000 THEN '3m-6m' "
+            "WHEN tip.t-u.created_ms < 31536000000 THEN '6m-1y' "
+            "WHEN tip.t-u.created_ms < 63072000000 THEN '1y-2y' "
+            "WHEN tip.t-u.created_ms < 157680000000 THEN '2y-5y' ELSE '5y+' END, "
+            "COUNT(*), SUM(u.amount_raw) FROM u, tip GROUP BY tip.h, 2;",
+            "DELETE FROM analytics.utxo_value_bands WHERE snapshot_height = "
+            "(SELECT MAX(height) FROM analytics.chain_blocks);",
+            "INSERT INTO analytics.utxo_value_bands "
+            "(snapshot_height,band,coin_count,amount_raw) "
+            "WITH tip AS (SELECT MAX(height) h FROM analytics.chain_blocks), "
+            "u AS (SELECT o.amount_raw FROM analytics.tx_outputs o "
+            "WHERE o.token_id='0x00' AND NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
+            "SELECT tip.h, CASE "
+            "WHEN u.amount_raw < 10000 THEN '0-1' "
+            "WHEN u.amount_raw < 100000 THEN '1-10' "
+            "WHEN u.amount_raw < 1000000 THEN '10-100' "
+            "WHEN u.amount_raw < 10000000 THEN '100-1k' "
+            "WHEN u.amount_raw < 100000000 THEN '1k-10k' "
+            "WHEN u.amount_raw < 1000000000 THEN '10k-100k' "
+            "WHEN u.amount_raw < 10000000000 THEN '100k-1m' ELSE '1m+' END, "
+            "COUNT(*), SUM(u.amount_raw) FROM u, tip GROUP BY tip.h, 2;",
+            "DELETE FROM analytics.holder_cohorts WHERE snapshot_height = "
+            "(SELECT MAX(height) FROM analytics.chain_blocks);",
+            "INSERT INTO analytics.holder_cohorts "
+            "(snapshot_height,cohort,address_count,balance_raw) "
+            "WITH tip AS (SELECT MAX(height) h FROM analytics.chain_blocks) "
+            "SELECT ab.snapshot_height, CASE "
+            "WHEN ab.balance_raw < 10000 THEN '0-1' "
+            "WHEN ab.balance_raw < 100000 THEN '1-10' "
+            "WHEN ab.balance_raw < 1000000 THEN '10-100' "
+            "WHEN ab.balance_raw < 10000000 THEN '100-1k' "
+            "WHEN ab.balance_raw < 100000000 THEN '1k-10k' "
+            "WHEN ab.balance_raw < 1000000000 THEN '10k-100k' "
+            "WHEN ab.balance_raw < 10000000000 THEN '100k-1m' ELSE '1m+' END, "
+            "COUNT(*), SUM(ab.balance_raw) FROM analytics.address_balances ab, tip "
+            "WHERE ab.snapshot_height=tip.h GROUP BY ab.snapshot_height, 2;",
+        };
+        for (const auto& sql : snapshotSql) {
+            if (!exec(con, sql, error)) {
+                result.error = error;
+                return result;
+            }
         }
     }
 

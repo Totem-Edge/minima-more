@@ -153,6 +153,170 @@ std::string metricsJson(const std::string& indexPath, const std::string& metric)
     return out.str();
 }
 
+std::string sqlLit(const std::string& value) {
+    std::string out = "'";
+    for (char c : value) {
+        if (c == '\'') out += "''";
+        else out += c;
+    }
+    out += "'";
+    return out;
+}
+
+std::string blockJson(const std::string& indexPath, long long height, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT height,hash,prev_hash,timestamp_ms,tx_count,size_bytes,"
+        "minter_address,reward_raw,fees_raw,finalized FROM analytics.chain_blocks "
+        "WHERE height=" + std::to_string(height) + ";");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"height\":" << res->GetValue(0,0).GetValue<std::int64_t>()
+        << ",\"hash\":" << quote(res->GetValue(1,0).ToString())
+        << ",\"prev_hash\":" << (res->GetValue(2,0).IsNull() ? "null" : quote(res->GetValue(2,0).ToString()))
+        << ",\"timestamp_ms\":" << res->GetValue(3,0).GetValue<std::int64_t>()
+        << ",\"tx_count\":" << res->GetValue(4,0).GetValue<std::int64_t>()
+        << ",\"size_bytes\":";
+    if (res->GetValue(5,0).IsNull()) out << "null"; else out << res->GetValue(5,0).GetValue<std::int64_t>();
+    out << ",\"minter_address\":";
+    if (res->GetValue(6,0).IsNull()) out << "null"; else out << quote(res->GetValue(6,0).ToString());
+    out << ",\"finalized\":" << (res->GetValue(9,0).GetValue<bool>() ? "true" : "false") << "}";
+    return out.str();
+}
+
+std::string txJson(const std::string& indexPath, const std::string& txid, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT txpowid,height,tx_index,timestamp_ms,is_coinbase,fee_raw,"
+        "input_count,output_count,size_bytes,burn_raw FROM analytics.txs WHERE txpowid=" +
+        sqlLit(txid) + ";");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"txpowid\":" << quote(res->GetValue(0,0).ToString())
+        << ",\"height\":" << res->GetValue(1,0).GetValue<std::int64_t>()
+        << ",\"timestamp_ms\":" << res->GetValue(3,0).GetValue<std::int64_t>()
+        << ",\"is_coinbase\":" << (res->GetValue(4,0).GetValue<bool>() ? "true" : "false")
+        << ",\"input_count\":" << res->GetValue(6,0).GetValue<std::int64_t>()
+        << ",\"output_count\":" << res->GetValue(7,0).GetValue<std::int64_t>()
+        << ",\"inputs\":[],\"outputs\":[]}";
+    auto in = con.Query("SELECT input_index,coin_id,address,token_id,amount_raw,created_height "
+                        "FROM analytics.tx_inputs WHERE txpowid=" + sqlLit(txid) +
+                        " ORDER BY input_index LIMIT 1024;");
+    auto on = con.Query("SELECT output_index,coin_id,address,token_id,amount_raw,created_height "
+                        "FROM analytics.tx_outputs WHERE txpowid=" + sqlLit(txid) +
+                        " ORDER BY output_index LIMIT 1024;");
+    // Rebuild with populated arrays.
+    std::ostringstream full;
+    full << "{\"txpowid\":" << quote(res->GetValue(0,0).ToString())
+         << ",\"height\":" << res->GetValue(1,0).GetValue<std::int64_t>()
+         << ",\"timestamp_ms\":" << res->GetValue(3,0).GetValue<std::int64_t>()
+         << ",\"input_count\":" << res->GetValue(6,0).GetValue<std::int64_t>()
+         << ",\"output_count\":" << res->GetValue(7,0).GetValue<std::int64_t>()
+         << ",\"inputs\":[";
+    if (in && !in->HasError()) {
+        for (std::size_t i = 0; i < in->RowCount(); ++i) {
+            if (i) full << ",";
+            full << "{\"index\":" << in->GetValue(0,i).GetValue<std::int64_t>()
+                 << ",\"coin_id\":" << quote(in->GetValue(1,i).ToString())
+                 << ",\"address\":" << (in->GetValue(2,i).IsNull() ? "null" : quote(in->GetValue(2,i).ToString()))
+                 << ",\"amount_raw\":" << in->GetValue(4,i).ToString() << "}";
+        }
+    }
+    full << "],\"outputs\":[";
+    if (on && !on->HasError()) {
+        for (std::size_t i = 0; i < on->RowCount(); ++i) {
+            if (i) full << ",";
+            full << "{\"index\":" << on->GetValue(0,i).GetValue<std::int64_t>()
+                 << ",\"coin_id\":" << quote(on->GetValue(1,i).ToString())
+                 << ",\"address\":" << (on->GetValue(2,i).IsNull() ? "null" : quote(on->GetValue(2,i).ToString()))
+                 << ",\"amount_raw\":" << on->GetValue(4,i).ToString() << "}";
+        }
+    }
+    full << "]}";
+    return full.str();
+}
+
+std::string addressJson(const std::string& indexPath, const std::string& address, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT snapshot_height,address,balance_raw,coin_count FROM analytics.address_balances "
+        "WHERE address=" + sqlLit(address) + " ORDER BY snapshot_height DESC LIMIT 1;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"address\":" << quote(res->GetValue(1,0).ToString())
+        << ",\"balance_raw\":" << res->GetValue(2,0).ToString()
+        << ",\"coin_count\":" << res->GetValue(3,0).GetValue<std::int64_t>()
+        << ",\"snapshot_height\":" << res->GetValue(0,0).GetValue<std::int64_t>() << "}";
+    return out.str();
+}
+
+std::string utxoJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto tip = con.Query("SELECT MAX(height) FROM analytics.utxo_snapshots;");
+    if (!tip || tip->HasError() || tip->RowCount() == 0 || tip->GetValue(0,0).IsNull()) return {};
+    const long long h = tip->GetValue(0,0).GetValue<std::int64_t>();
+    found = true;
+    auto snap = con.Query("SELECT coin_count,total_raw FROM analytics.utxo_snapshots WHERE height=" +
+                          std::to_string(h) + ";");
+    auto age = con.Query("SELECT band,coin_count,amount_raw FROM analytics.utxo_age_bands "
+                         "WHERE snapshot_height=" + std::to_string(h) + " ORDER BY band;");
+    auto val = con.Query("SELECT band,coin_count,amount_raw FROM analytics.utxo_value_bands "
+                         "WHERE snapshot_height=" + std::to_string(h) + " ORDER BY band;");
+    std::ostringstream out;
+    out << "{\"as_of_height\":" << h << ",\"coin_count\":"
+        << (snap && snap->RowCount() ? snap->GetValue(0,0).ToString() : "null")
+        << ",\"total_raw\":" << (snap && snap->RowCount() ? snap->GetValue(1,0).ToString() : "null")
+        << ",\"age_bands\":[";
+    for (std::size_t i = 0; age && !age->HasError() && i < age->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"band\":" << quote(age->GetValue(0,i).ToString())
+            << ",\"coin_count\":" << age->GetValue(1,i).ToString()
+            << ",\"amount_raw\":" << age->GetValue(2,i).ToString() << "}";
+    }
+    out << "],\"value_bands\":[";
+    for (std::size_t i = 0; val && !val->HasError() && i < val->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"band\":" << quote(val->GetValue(0,i).ToString())
+            << ",\"coin_count\":" << val->GetValue(1,i).ToString()
+            << ",\"amount_raw\":" << val->GetValue(2,i).ToString() << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
+std::string cohortsJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query("SELECT snapshot_height,cohort,address_count,balance_raw "
+                         "FROM analytics.holder_cohorts WHERE snapshot_height="
+                         "(SELECT MAX(snapshot_height) FROM analytics.holder_cohorts) ORDER BY cohort;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"as_of_height\":" << res->GetValue(0,0).GetValue<std::int64_t>()
+        << ",\"cohorts\":[";
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"cohort\":" << quote(res->GetValue(1,i).ToString())
+            << ",\"address_count\":" << res->GetValue(2,i).ToString()
+            << ",\"balance_raw\":" << res->GetValue(3,i).ToString() << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
 std::string availableModesJson(const ApiOptions& opt) {
     std::error_code ec;
     const bool hasArchive = std::filesystem::exists(opt.archivePath, ec) || opt.forceArchive;
@@ -368,6 +532,63 @@ void handleClient(int fd, const ApiOptions& opt) {
             return;
         }
         sendResponse(fd, 200, "OK", body);
+        return;
+    }
+
+    const IndexState live = readIndexState(opt.indexPath);
+    auto requireIndex = [&]() -> bool {
+        if (live.ready) return true;
+        sendResponse(fd, 409, "Conflict",
+                     errorJson("index_not_ready", "The analytics index has not been built",
+                               "[\"analytics\"]", availableModesJson(opt),
+                               "Run minima-analytics -index; retry when /v1/capabilities reports ready"));
+        return false;
+    };
+
+    if (path.rfind("/v1/blocks/", 0) == 0 && requireIndex()) {
+        const std::string suffix = path.substr(11);
+        try {
+            long long h = std::stoll(suffix);
+            bool found = false;
+            const std::string body = blockJson(opt.indexPath, h, found);
+            if (!found) {
+                sendResponse(fd, 404, "Not Found", errorJson("not_found", "Unknown block", "[]", "[]", ""));
+            } else {
+                sendResponse(fd, 200, "OK", body);
+            }
+        } catch (...) {
+            sendResponse(fd, 400, "Bad Request", errorJson("invalid_height", "Invalid height", "[]", "[]", ""));
+        }
+        return;
+    }
+    if (path.rfind("/v1/txs/", 0) == 0 && requireIndex()) {
+        const std::string txid = path.substr(8);
+        bool found = false;
+        const std::string body = txJson(opt.indexPath, txid, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "Unknown transaction", "[]", "[]", ""));
+        return;
+    }
+    if (path.rfind("/v1/addresses/", 0) == 0 && requireIndex()) {
+        const std::string address = path.substr(14);
+        bool found = false;
+        const std::string body = addressJson(opt.indexPath, address, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "Unknown address", "[]", "[]", ""));
+        return;
+    }
+    if (path == "/v1/utxo/distribution" && requireIndex()) {
+        bool found = false;
+        const std::string body = utxoJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No UTXO snapshot", "[]", "[]", ""));
+        return;
+    }
+    if (path == "/v1/cohorts/holder" && requireIndex()) {
+        bool found = false;
+        const std::string body = cohortsJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No cohort snapshot", "[]", "[]", ""));
         return;
     }
 

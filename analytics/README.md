@@ -30,7 +30,15 @@ Serve the API:
 curl -s http://127.0.0.1:8080/v1/capabilities | jq
 curl -s http://127.0.0.1:8080/v1/catalog | jq '.metrics | length'
 curl -s http://127.0.0.1:8080/v1/metrics/block_count | jq '.points[-1]'
+curl -s http://127.0.0.1:8080/v1/blocks/2376119 | jq
+curl -s http://127.0.0.1:8080/v1/txs/0x... | jq
+curl -s http://127.0.0.1:8080/v1/addresses/0x... | jq
+curl -s http://127.0.0.1:8080/v1/utxo/distribution | jq
+curl -s http://127.0.0.1:8080/v1/cohorts/holder | jq
 ```
+
+Snapshot tables (`utxo_snapshots`, `address_balances`, age/value bands, holder
+cohorts) are **native-token only** in v1; token-specific breakdowns come later.
 
 Overrides: `-archivepath`, `-mmrpath`, `-archive`, `-megammr`, `-rebuild`,
 `-indexonly`.
