@@ -7,6 +7,7 @@ include(CTest)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(MINIMA_STATIC "Fully static link (requires static deps)" OFF)
+option(MINIMA_BUILD_ANALYTICS "Build the optional minima-analytics sidecar" OFF)
 
 set(MINIMA_SOURCES
     org/minima/database/minima_d_b.cpp
@@ -1000,3 +1001,7 @@ add_test(NAME mcp_server COMMAND test_mcp_server)
 add_test(NAME docs_manifest COMMAND test_docs_manifest ${CMAKE_CURRENT_SOURCE_DIR}/COMMAND_REFERENCE.md)
 add_test(NAME megammr_import COMMAND test_megammr_import)
 add_test(NAME h2_import COMMAND test_h2_import)
+
+if(MINIMA_BUILD_ANALYTICS AND UNIX)
+    add_subdirectory(analytics)
+endif()
