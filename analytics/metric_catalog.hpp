@@ -39,6 +39,15 @@ inline constexpr MetricDef kMetricCatalog[] = {
     {"blocks_mined", "count", "1d", "archive", "archive", "Blocks by minter"},
     {"index_lag_blocks", "count", "1m", "index", "analytics", "Live tip minus last indexed height"},
     {"archive_mmr_divergence", "count", "snapshot", "index", "analytics", "UTXO mismatches at check height"},
+    {"spent_output_age_avg_days", "days", "1d", "archive", "archive", "Value-weighted average spent-output age"},
+    {"spent_output_age_median_days", "days", "1d", "archive", "archive", "Median spent-output age"},
+    {"cdd", "coin-days", "1d", "archive", "archive", "Coin days destroyed"},
+    {"cdd_90", "coin-days", "1d", "archive", "archive", "90-day rolling CDD"},
+    {"cyd", "coin-days", "1d", "archive", "archive", "365-day rolling CDD"},
+    {"dormancy_days", "days", "1d", "archive", "archive", "Average dormancy of spent coins"},
+    {"utxo_value_p50_raw", "raw", "snapshot", "archive", "archive", "Median UTXO value"},
+    {"utxo_value_p90_raw", "raw", "snapshot", "archive", "archive", "90th percentile UTXO value"},
+    {"utxo_value_p99_raw", "raw", "snapshot", "archive", "archive", "99th percentile UTXO value"},
     {"reorg_depth", "count", "event", "live", "full", "Deepest recent reorg depth"},
 };
 
