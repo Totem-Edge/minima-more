@@ -76,28 +76,50 @@ ScriptTokenizer::ScriptTokenizer(const std::string& zScript, bool zCaseInsensiti
 
 // Static regex-based utilities
 bool ScriptTokenizer::isNumeric(const std::string& zWord) {
-    static const std::regex re_numeric("^[0-9]+(\\.[0-9]+)?", std::regex::ECMAScript);
-    return std::regex_match(zWord, re_numeric);
+    if (zWord.empty()) return false;
+    bool dot = false;
+    for (std::size_t i = 0; i < zWord.size(); ++i) {
+        const char c = zWord[i];
+        if (c == '.') {
+            if (dot || i == 0 || i + 1 == zWord.size()) return false;
+            dot = true;
+        } else if (!std::isdigit(static_cast<unsigned char>(c))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool ScriptTokenizer::isHex(const std::string& zWord) {
-    static const std::regex re_hex("^0x[0-9a-fA-F]+$", std::regex::ECMAScript);
-    return std::regex_match(zWord, re_hex);
+    if (zWord.size() < 3 || zWord[0] != '0' || (zWord[1] != 'x' && zWord[1] != 'X')) return false;
+    for (std::size_t i = 2; i < zWord.size(); ++i) {
+        if (!std::isxdigit(static_cast<unsigned char>(zWord[i]))) return false;
+    }
+    return true;
 }
 
 bool ScriptTokenizer::isVariable(const std::string& zWord) {
-    static const std::regex re_var("^[a-z]+$", std::regex::ECMAScript);
-    return std::regex_match(zWord, re_var);
+    if (zWord.empty()) return false;
+    for (unsigned char c : zWord) {
+        if (!(c >= 'a' && c <= 'z')) return false;
+    }
+    return true;
 }
 
 bool ScriptTokenizer::isGlobal(const std::string& zWord) {
-    static const std::regex re_global("^@[A-Z]+$", std::regex::ECMAScript);
-    return std::regex_match(zWord, re_global);
+    if (zWord.size() < 2 || zWord[0] != '@') return false;
+    for (std::size_t i = 1; i < zWord.size(); ++i) {
+        if (!(zWord[i] >= 'A' && zWord[i] <= 'Z')) return false;
+    }
+    return true;
 }
 
 bool ScriptTokenizer::isWhiteSpace(const std::string& zWord) {
-    static const std::regex re_ws("^\\s+$", std::regex::ECMAScript);
-    return std::regex_match(zWord, re_ws);
+    if (zWord.empty()) return false;
+    for (unsigned char c : zWord) {
+        if (!std::isspace(c)) return false;
+    }
+    return true;
 }
 
 // getNextWord: accumulate characters until next EOW or whitespace, without consuming the EOW/WS

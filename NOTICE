@@ -1,0 +1,16 @@
+Minima More
+Copyright 2026 Totem-Edge and contributors
+
+This product includes software developed by Minima Global and the Minima
+community, including the Java reference implementation:
+  https://minima.global
+  https://github.com/minima-global/Minima
+  https://github.com/spartacusrex-minima/minima-core
+
+Those upstream works are licensed under the Apache License, Version 2.0.
+
+Minima More is an independent C++ reimplementation. Its original code,
+modifications, and additional components (including the optional analytics
+sidecar) are licensed under the Apache License, Version 2.0.
+
+See LICENSE for the full license text and CHANGELOG.md for changes.

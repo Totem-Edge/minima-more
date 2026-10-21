@@ -84,6 +84,11 @@ HexValue::HexValue(const MiniNumber& zNumber) {
     boost::multiprecision::cpp_int bi = zNumber.getAsBigInteger();
     std::vector<std::uint8_t> bytes = cpp_int_to_java_positive_twos_bytes(bi);
 
+    // Java's MiniData(BigInteger) removes the leading 0x00 sign byte.
+    if (bytes.size() > 1 && bytes.front() == 0x00) {
+        bytes.erase(bytes.begin());
+    }
+
     mData = std::make_unique<MiniData>(bytes);
     ensure_max_size_or_throw(mData->getLength());
 }

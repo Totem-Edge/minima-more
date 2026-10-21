@@ -646,80 +646,110 @@ bool Contract::checkSignature(const org::minima::kissvm::values::HexValue& zPubl
     return false;
 }
 
-// Script cleaning helpers
-static bool needs_space_between(const std::string& prev, const std::string& curr) {
-    if (prev.empty()) return false;
-    char pc = prev.back();
-    char fc = curr.empty() ? ' ' : curr.front();
-
-    // No space before closing brackets or after opening brackets
-    if (fc == ')' || fc == ']' || fc == ',') return false;
-    if (pc == '(' || pc == '[') return false;
-
-    // Default: need space
-    return true;
-}
-
 std::string Contract::cleanScript(const std::string& zScript) {
     return cleanScript(zScript, false);
 }
 
 std::string Contract::cleanScript(const std::string& zScript, bool zLog) {
-    // Final result
+    // Collapse all whitespace first (Java: replaceAll("\\s+"," ").trim()).
+    std::string script;
+    bool inSpace = false;
+    for (unsigned char c : zScript) {
+        if (std::isspace(c)) {
+            if (!script.empty() && !inSpace) script.push_back(' ');
+            inSpace = true;
+        } else {
+            script.push_back(static_cast<char>(c));
+            inSpace = false;
+        }
+    }
+    while (!script.empty() && script.back() == ' ') script.pop_back();
+    while (!script.empty() && script.front() == ' ') script.erase(script.begin());
+
     std::string ret;
-
     try {
-        auto tokens = org::minima::kissvm::tokens::ScriptToken::tokenize(zScript);
+        using org::minima::kissvm::tokens::ScriptToken;
+        using org::minima::kissvm::tokens::ScriptTokenizer;
 
-        std::string prevtok;
+        ScriptTokenizer tokz(script, true);
+        auto tokens = tokz.tokenize();
+
+        const std::vector<std::string> bools = {
+            "LT","LTE","GT","GTE","EQ","NEQ","XOR","AND","OR","NXOR","NAND","NOR","NOT","NEG"};
+        const std::vector<std::string> eows = {
+            "+","-","/","*","%","&","|","^","~","=","(",")","[","]","<",">","<<",">>"};
+        const std::vector<std::string> afters = {
+            "+","-","/","*","%","&","|","^","=","<",">","<<",">>",")"};
+
+        auto ends = [](const std::string& value, char c) {
+            return !value.empty() && value.back() == c;
+        };
+        auto contains = [](const std::vector<std::string>& list, const std::string& value) {
+            return std::find(list.begin(), list.end(), value) != list.end();
+        };
+
+        bool whites = true;
+        std::string prev;
         for (const auto& tok : tokens) {
             if (zLog) {
                 org::minima::utils::MinimaLogger::log(tok.toString());
             }
+            const std::string t = tok.getToken();
+            const int type = tok.getTokenType();
 
-            std::string t = tok.getToken();
-
-            // Uppercase HEX data body (0x...)
-            if (t.size() >= 2 && (t[0] == '0') && (t[1] == 'x' || t[1] == 'X')) {
-                std::string body = t.substr(2);
-                std::transform(body.begin(), body.end(), body.begin(),
-                               [](unsigned char c) { return static_cast<char>(::toupper(c)); });
-                t = "0x" + body;
+            if (type == ScriptToken::TOKEN_COMMAND) {
+                if (!ret.empty() && ret.back() == ' ') ret += t + " ";
+                else ret += " " + t + " ";
+                whites = true;
+            } else if (contains(bools, t)) {
+                ret += " " + t + " ";
+                whites = true;
+            } else if (t.rfind("0x", 0) == 0 || t.rfind("0X", 0) == 0) {
+                std::string hex = "0x" + t.substr(2);
+                std::transform(hex.begin() + 2, hex.end(), hex.begin() + 2,
+                               [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                if (ends(prev, ')')) {
+                    ret += " " + hex;
+                } else if (whites) {
+                    ret += hex;
+                } else {
+                    ret += " " + hex;
+                }
+                whites = false;
+            } else if (!t.empty() && (t[0] == '(' || t[0] == '[')) {
+                if (whites) {
+                    const bool space = ends(prev, ')') || ends(prev, ']');
+                    if (space) ret += " " + t;
+                    else ret += t;
+                } else {
+                    const bool space = contains(eows, prev);
+                    if (space) ret += " " + t;
+                    else ret += t;
+                }
+                whites = true;
+            } else {
+                const bool afterClose = ends(prev, ')') || ends(prev, ']');
+                if (afterClose && !contains(afters, t)) {
+                    ret += " " + t;
+                    whites = false;
+                } else if (ScriptTokenizer::isWhiteSpace(t) || contains(eows, t)) {
+                    ret += t;
+                    whites = true;
+                } else {
+                    if (whites) ret += t;
+                    else ret += " " + t;
+                    whites = false;
+                }
             }
-
-            // Space management around commands and booleans and general tokens
-            if (!ret.empty() && needs_space_between(prevtok, t)) {
-                ret.push_back(' ');
-            }
-
-            ret += t;
-            prevtok = t;
-
-            // Ensure space after COMMAND tokens and TRUE/FALSE tokens
-            int ttype = tok.getTokenType();
-            if (ttype == org::minima::kissvm::tokens::ScriptToken::TOKEN_COMMAND ||
-                ttype == org::minima::kissvm::tokens::ScriptToken::TOKEN_TRUE ||
-                ttype == org::minima::kissvm::tokens::ScriptToken::TOKEN_FALSE) {
-                ret.push_back(' ');
-                prevtok.clear(); // treat as if a boundary
-            }
+            prev = t;
         }
-
     } catch (const std::exception& e) {
         org::minima::utils::MinimaLogger::log(std::string("Clean Script Error @ ") + zScript + " " + e.what());
         return zScript;
     }
 
-    // Trim
-    auto ltrim = [](std::string& s) {
-        s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
-    };
-    auto rtrim = [](std::string& s) {
-        s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
-    };
-
-    ltrim(ret);
-    rtrim(ret);
+    while (!ret.empty() && ret.back() == ' ') ret.pop_back();
+    while (!ret.empty() && ret.front() == ' ') ret.erase(ret.begin());
     return ret;
 }
 

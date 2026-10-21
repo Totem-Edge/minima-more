@@ -624,7 +624,12 @@ PORTABILITY.md         why the macOS→Linux/GCC port matters
 
 ## License / provenance
 
-A C++ reimplementation of the Minima node, ported from the Java reference
-(`spartacusrex-minima/minima-core`). Consensus output is byte-identical to the
-Minima protocol; performance benchmarks against the Java node are for comparison
-only.
+Minima More is licensed under the **Apache License, Version 2.0**. See
+[LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+It is an independent C++ reimplementation of the Minima node, ported from the
+Apache-2.0 Java reference (`spartacusrex-minima/minima-core`, Minima Global).
+Consensus output targets byte-identical behaviour with the Minima protocol;
+performance benchmarks against the Java node are for comparison only.
+
+Security reports: see [SECURITY.md](SECURITY.md).
