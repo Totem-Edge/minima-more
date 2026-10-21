@@ -63,6 +63,7 @@ bool GeneralParams::SCRIPTLOGS = false;
 bool GeneralParams::MINING_LOGS = false;
 bool GeneralParams::NETWORKING_LOGS = false;
 bool GeneralParams::IBDSYNC_LOGS = false;
+int GeneralParams::IBD_LIMIT_MINS = 30;
 bool GeneralParams::BLOCK_LOGS = false;
 
 bool GeneralParams::ARCHIVESYNC_LIMIT_BANDWIDTH = false;
@@ -152,6 +153,7 @@ void GeneralParams::resetDefaults() {
     MINING_LOGS = false;
     NETWORKING_LOGS = false;
     IBDSYNC_LOGS = false;
+    IBD_LIMIT_MINS = 30;
     BLOCK_LOGS = false;
     ARCHIVESYNC_LIMIT_BANDWIDTH = false;
     RPC_CRLF = false;

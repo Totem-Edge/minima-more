@@ -811,7 +811,28 @@ v0.2.0 published with standard + **fully static** tarballs (x86_64/aarch64).
   and the IBD log now prints ISO-8601 dates instead of “54 Years…” since 1970.
 - Artifact: `reference-bench/results/aws8-archive-full/SUMMARY.md`.
 
+## Java vs C++ archive + IBD cooldown (16 GB box)
+
+- Same host (`c6g.2xlarge`, 8 vCPU / 16 GB / 50 GB gp3), same 1.5 GB raw file,
+  same synchronous `archive action:importraw`.
+- **C++:** 78.9 min, 501 blocks/s, peak 994 MB, archive 2.45 GB + 473 MB
+  on-chain, 2,371,584 blocks. **Java** (`minima-core@c2a54a2`, `-Xmx12g`):
+  28.0 min, 1,413 blocks/s, peak 3.16 GB, archive **13 GB**, 2,374,912 blocks.
+- C++ is ~2.8x slower but uses ~3.2x less RAM and ~4.4x less disk (5.3x smaller
+  archive DB).
+- **C++ tail-loss bug:** C++ imports 3,328 fewer blocks than Java (13 IBD
+  batches); header 2,376,119, Java 2,374,912, C++ 2,371,584. The prefix passes
+  integrity/record checks; a peer backfill to 2,375,845 then passed 260/260
+  record checks at 1.92 ms.
+- C++ import shutdown **hangs busy-spin** after `All saved`; Java exits cleanly.
+- **IBD cooldown fix:** the “last 30 mins” set was never expired (only cleared on
+  restart), so one IBD per peer per process lifetime. Now a real
+  `-ibdlimit <minutes>` (default 30, **0 = unlimited**) with `steady_clock`
+  expiry. Verified with `-ibdlimit 0`: repeated greetings from the same peer no
+  longer log “Already sent”, and peer backfill added 4,261 blocks.
+- Artifact: `reference-bench/results/aws16-java-vs-cpp/SUMMARY.md`.
+
 ## Planned next
 
-- Optional DuckDB R3 analytics; v0.2.1 release.
-- Retry the last ~2k blocks once the peer IBD cooldown expires.
+- Fix the C++ `RawArchiveInput` tail loss (3,328 blocks vs Java).
+- Latest MegaMMR run on the 16 GB box; v0.2.1 release.

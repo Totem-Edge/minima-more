@@ -52,6 +52,7 @@ public:
         nodefaultminidapps,
         nosyncibd,
         syncibdlogs,
+        ibdlimit,
         megammr,
         megammrurl,
         notifyalltxpow,

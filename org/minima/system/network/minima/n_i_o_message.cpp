@@ -136,7 +136,7 @@ const MiniByte& NIOMessage::MSG_MEGAMMRSYNC_RESP() { static const MiniByte insta
 // Static containers
 std::unordered_map<std::string, MiniNumber> NIOMessage::mlastSyncReq;
 std::unordered_map<std::string, long long>  NIOMessage::mLastChainSync;
-std::unordered_set<std::string>             NIOMessage::mHaveSentIBDRecently;
+std::unordered_map<std::string, std::chrono::steady_clock::time_point> NIOMessage::mHaveSentIBDRecently;
 
 // Mutexes
 std::mutex NIOMessage::s_lastSyncReqMutex;
@@ -472,10 +472,19 @@ void NIOMessage::run() {
             std::string miniaddress = nioclient->getFullMinimaAddress();
             {
                 std::lock_guard<std::mutex> lock(s_haveSentIBDMutex);
-                if (mHaveSentIBDRecently.find(miniaddress) != mHaveSentIBDRecently.end()) {
-                    MinimaLogger::log("Already sent an IBD to " + miniaddress + " in last 30 mins..");
+                const int limitMins = GeneralParams::IBD_LIMIT_MINS;
+                const auto now = std::chrono::steady_clock::now();
+                auto it = mHaveSentIBDRecently.find(miniaddress);
+                bool recent = false;
+                if (limitMins > 0 && it != mHaveSentIBDRecently.end()) {
+                    const auto age = std::chrono::duration_cast<std::chrono::minutes>(now - it->second).count();
+                    recent = age < limitMins;
+                }
+                if (recent) {
+                    MinimaLogger::log("Already sent an IBD to " + miniaddress + " in last "
+                                      + std::to_string(limitMins) + " mins..");
                 } else {
-                    mHaveSentIBDRecently.insert(miniaddress);
+                    mHaveSentIBDRecently[miniaddress] = now;
 
                     IBD ibd;
                     bool isvalid = ibd.createIBD(greet);

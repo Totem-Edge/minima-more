@@ -248,7 +248,9 @@ peak RSS **918 MB**, integrity **2,375,034 blocks / 0 errors**. A 260-height
 record battery (genesis 2023-01-13 to 2026-10-19) passes block/ID lookup, parent
 linkage, round-trip and chunk-boundary range checks at **2.2 ms** average. **Do
 not prune a complete archive**; pruning is only for a deliberately recent
-archive. Orphaned chunks are garbage-collected when pruning. A full node remains the
+archive. Orphaned chunks are garbage-collected when pruning. IBD serving is rate-limited
+per peer for a real 30 minutes (`-ibdlimit N`, `0` = unlimited; the old code
+never expired the entry). A full node remains the
 phone-class option (59 MB).
 
 **Is the node's SQLite tuning included?** Yes — "SQLite" here is the node's own

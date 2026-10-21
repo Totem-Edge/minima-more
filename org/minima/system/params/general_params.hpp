@@ -73,6 +73,7 @@ public:
     static bool MINING_LOGS;
     static bool NETWORKING_LOGS;
     static bool IBDSYNC_LOGS;
+    static int IBD_LIMIT_MINS;
     static bool BLOCK_LOGS;
 
     static bool ARCHIVESYNC_LIMIT_BANDWIDTH;

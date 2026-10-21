@@ -261,6 +261,15 @@ const std::vector<ParamKeyEntry>& getParamKeyEntries() {
                   org::minima::system::params::GeneralParams::IBDSYNC_LOGS = true;
               }
           } },
+        { ParamConfigurer::ParamKeys::ibdlimit, "ibdlimit", "Minutes between IBDs to the same peer (0 = unlimited)",
+          [](const std::string& args, ParamConfigurer&) {
+              try {
+                  int v = std::stoi(args);
+                  org::minima::system::params::GeneralParams::IBD_LIMIT_MINS = v < 0 ? 0 : v;
+              } catch (...) {
+                  // keep default
+              }
+          } },
         { ParamConfigurer::ParamKeys::megammr, "megammr", "Are we running in MEGA MMR mode",
           [](const std::string& args, ParamConfigurer&) {
               if (args == "true") {

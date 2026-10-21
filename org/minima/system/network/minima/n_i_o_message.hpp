@@ -7,6 +7,7 @@
 #include <mutex>
 #include <vector>
 #include <cstdint>
+#include <chrono>
 
 // Forward declarations (namespaced per Pitfall 10)
 namespace org { namespace minima { namespace objects { namespace base { class MiniByte; class MiniData; class MiniNumber; class MiniString; } } } }
@@ -67,7 +68,7 @@ public:
     // Static maps/sets for throttling and tracking
     static std::unordered_map<std::string, org::minima::objects::base::MiniNumber> mlastSyncReq;
     static std::unordered_map<std::string, long long> mLastChainSync;
-    static std::unordered_set<std::string> mHaveSentIBDRecently;
+    static std::unordered_map<std::string, std::chrono::steady_clock::time_point> mHaveSentIBDRecently;
 
     // Static mutexes for thread safety of the above
     static std::mutex s_lastSyncReqMutex;
