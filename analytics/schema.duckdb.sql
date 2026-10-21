@@ -38,8 +38,10 @@ INSERT INTO metric_catalog VALUES
  ('block_count','count','1m/1h/1d','archive','archive','Blocks in bucket'),
  ('tx_count','count','1m/1h/1d','archive','archive','Transactions in bucket'),
  ('tx_rate','tx/s','1m/1h','archive','archive','Transactions per second'),
- ('fees_total_raw','raw','1h/1d','archive','archive','Sum of transaction fees'),
  ('coinbase_reward_raw','raw','1d','archive','archive','Sum of coinbase outputs'),
+ ('burn_raw','raw','1d','archive','archive','Coins burned in bucket'),
+ ('burn_count','count','1d','archive','archive','Burn transactions in bucket'),
+ ('burned_total_raw','raw','snapshot','archive','archive','Total coins burned to tip'),
  ('output_volume_raw','raw','1h/1d','archive','archive','Sum of non-coinbase outputs'),
  ('input_volume_raw','raw','1h/1d','archive','archive','Sum of spent inputs'),
  ('active_addresses','count','1h/1d','archive','archive','Unique input or output addresses'),
@@ -212,6 +214,47 @@ CREATE TABLE IF NOT EXISTS holder_cohorts (
 -- ---------------------------------------------------------------------------
 -- Derived time series and index health
 -- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS token_metadata (
+    token_id          VARCHAR PRIMARY KEY,
+    name              VARCHAR,
+    decimals          INTEGER,
+    total_supply_raw  HUGEINT,
+    is_nft            BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata_json     VARCHAR,
+    image_url         VARCHAR,
+    token_script      VARCHAR,
+    created_height    BIGINT,
+    updated_ms        BIGINT
+);
+
+CREATE TABLE IF NOT EXISTS token_media (
+    token_id      VARCHAR PRIMARY KEY,
+    url           VARCHAR,
+    content_type  VARCHAR,
+    size_bytes    BIGINT,
+    sha256        VARCHAR,
+    data          BLOB,
+    status        VARCHAR,
+    fetched_ms    BIGINT
+);
+
+CREATE TABLE IF NOT EXISTS magic_snapshots (
+    height          BIGINT PRIMARY KEY,
+    block_hash      VARCHAR,
+    max_txpow_size  BIGINT,
+    max_kissvm_ops  BIGINT,
+    max_txns        BIGINT,
+    min_work        VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS magic_changes (
+    height      BIGINT NOT NULL,
+    field       VARCHAR NOT NULL,
+    old_value   VARCHAR,
+    new_value   VARCHAR,
+    PRIMARY KEY (height, field)
+);
+
 CREATE TABLE IF NOT EXISTS scripts (
     script_hash       VARCHAR PRIMARY KEY,
     first_seen_height BIGINT,

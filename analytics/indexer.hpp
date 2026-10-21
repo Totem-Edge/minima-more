@@ -11,6 +11,7 @@ struct IndexOptions {
     std::string mmrPath;
     std::string mmrStorePath;
     std::string knownScriptsPath;
+    std::string rawPath;
     bool enrichMmr = false;
     bool rebuild = false;
 };

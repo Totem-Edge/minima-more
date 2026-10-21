@@ -1,6 +1,7 @@
 #include "indexer.hpp"
 
 #include "archive_reader.hpp"
+#include "org/minima/database/archive/raw_archive_input.hpp"
 
 #include <duckdb.hpp>
 
@@ -9,7 +10,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <sstream>
+#include <unordered_set>
 #include <string>
 #include <vector>
 
@@ -17,8 +20,12 @@
 #include "org/minima/objects/coin_proof.hpp"
 #include "org/minima/objects/mmr/mega_m_m_r.hpp"
 #include "org/minima/objects/mmr/m_m_r.hpp"
+#include "org/minima/objects/magic.hpp"
+#include "org/minima/objects/token.hpp"
+#include "org/minima/objects/base/mini_string.hpp"
 #include "org/minima/objects/mmr/m_m_r_data.hpp"
 #include "org/minima/objects/tx_block.hpp"
+#include "org/minima/objects/i_b_d.hpp"
 #include "org/minima/objects/tx_po_w.hpp"
 #include "org/minima/objects/transaction.hpp"
 #include "org/minima/objects/base/mini_data.hpp"
@@ -222,6 +229,264 @@ bool enrichMmr(duckdb::Connection& con, const IndexOptions& options, std::string
     }
 }
 
+bool forEachBlock(const IndexOptions& options,
+                   const std::function<bool(long long, org::minima::objects::TxBlock&)>& fn,
+                   std::string& error) {
+    const ArchiveStats stats = readArchiveStats(options.archivePath);
+    if (stats.exists && stats.count > 0) {
+        return forEachArchiveBlock(
+            options.archivePath, 0,
+            [&](std::int64_t height, const std::vector<std::uint8_t>& raw) {
+                org::minima::objects::base::MiniData md(raw);
+                auto block = org::minima::objects::TxBlock::convertMiniDataVersion(md);
+                if (!block) return false;
+                return fn(height, *block);
+            },
+            error);
+    }
+    if (!options.rawPath.empty() && std::filesystem::exists(options.rawPath)) {
+        try {
+            org::minima::database::archive::RawArchiveInput rawin(
+                std::filesystem::path(options.rawPath));
+            rawin.connect();
+            while (true) {
+                std::unique_ptr<org::minima::objects::IBD> ibd = rawin.getNextIBD();
+                auto& blocks = ibd->getTxBlocks();
+                if (blocks.empty()) break;
+                for (auto& block : blocks) {
+                    const long long h = block->getTxPoW().getBlockNumber().getAsLong();
+                    if (!fn(h, *block)) {
+                        rawin.stop();
+                        return true;
+                    }
+                }
+            }
+            rawin.stop();
+            return true;
+        } catch (const std::exception& ex) {
+            error = ex.what();
+            return false;
+        }
+    }
+    error = "no archive source (archive DB empty and -rawdata not set)";
+    return false;
+}
+
+struct MagicState {
+    long long txpowSize = -1;
+    long long kissvmOps = -1;
+    long long txns = -1;
+    std::string minWork;
+};
+
+void appendMagic(duckdb::Appender& snapshots, duckdb::Appender& changes,
+                 const org::minima::objects::TxPoW& pow, long long height,
+                 const std::string& hash, MagicState& state) {
+    const auto& magic = pow.getMagic();
+    const long long size = magic.getMaxTxPoWSize().getAsLong();
+    const long long ops = magic.getMaxKISSOps().getAsLong();
+    const long long txns = magic.getMaxNumTxns().getAsLong();
+    const std::string work = magic.getMinTxPowWork().to0xString();
+
+    snapshots.AppendRow(static_cast<std::int64_t>(height), hash.c_str(),
+                        static_cast<std::int64_t>(size), static_cast<std::int64_t>(ops),
+                        static_cast<std::int64_t>(txns), work.c_str());
+
+    auto changed = [&](const char* field, long long now, long long& old) {
+        if (old >= 0 && now != old) {
+            changes.AppendRow(static_cast<std::int64_t>(height), field,
+                              std::to_string(old).c_str(), std::to_string(now).c_str());
+        }
+        old = now;
+    };
+    changed("max_txpow_size", size, state.txpowSize);
+    changed("max_kissvm_ops", ops, state.kissvmOps);
+    changed("max_txns", txns, state.txns);
+    if (!state.minWork.empty() && work != state.minWork) {
+        changes.AppendRow(static_cast<std::int64_t>(height), "min_work",
+                          state.minWork.c_str(), work.c_str());
+    }
+    state.minWork = work;
+}
+
+bool backfillMagic(duckdb::Connection& con, const IndexOptions& options, std::string& error) {
+    duckdb::Appender snapshots(con, "analytics", "magic_snapshots");
+    duckdb::Appender changes(con, "analytics", "magic_changes");
+    MagicState state;
+    const bool ok = forEachBlock(
+        options,
+        [&](long long height, org::minima::objects::TxBlock& block) {
+            appendMagic(snapshots, changes, block.getTxPoW(), height,
+                        block.getTxPoW().getTxPoWID(), state);
+            return true;
+        },
+        error);
+    snapshots.Close();
+    changes.Close();
+    return ok;
+}
+
+std::string jsonUnescape(const std::string& value) {
+    std::string out;
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '\\' && i + 1 < value.size()) {
+            const char n = value[++i];
+            if (n == '/') out += '/';
+            else if (n == 'n') out += '\n';
+            else if (n == 't') out += '\t';
+            else out += n;
+        } else {
+            out += value[i];
+        }
+    }
+    return out;
+}
+
+bool base64Decode(const std::string& input, std::vector<std::uint8_t>& out) {
+    static const std::string alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string data;
+    data.reserve(input.size());
+    for (char c : input) {
+        if (c == '-' ) data += '+';
+        else if (c == '_') data += '/';
+        else if (c != '\r' && c != '\n' && c != ' ' && c != '\t') data += c;
+    }
+    while (!data.empty() && data.back() == '=') data.pop_back();
+    out.clear();
+    int val = 0, bits = -8;
+    for (unsigned char c : data) {
+        const std::size_t p = alphabet.find(static_cast<char>(c));
+        if (p == std::string::npos) return false;
+        val = (val << 6) + static_cast<int>(p);
+        bits += 6;
+        if (bits >= 0) {
+            out.push_back(static_cast<std::uint8_t>((val >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+    return !out.empty();
+}
+
+std::string sniffImage(const std::vector<std::uint8_t>& data) {
+    if (data.size() > 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) return "image/jpeg";
+    if (data.size() > 8 && data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G') return "image/png";
+    if (data.size() > 3 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F') return "image/gif";
+    if (data.size() > 12 && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P') return "image/webp";
+    return "application/octet-stream";
+}
+
+struct TokenMedia {
+    std::string url;
+    std::string contentType;
+    std::vector<std::uint8_t> data;
+    std::string status;
+};
+
+TokenMedia extractTokenMedia(const std::string& metadata) {
+    TokenMedia media;
+    const std::vector<std::string> keys = {"icon", "image", "image_url", "logo", "url"};
+    std::string value;
+    for (const auto& key : keys) {
+        const std::string needle = "\"" + key + "\"";
+        std::size_t pos = 0;
+        while ((pos = metadata.find(needle, pos)) != std::string::npos) {
+            const std::size_t colon = metadata.find(':', pos + needle.size());
+            if (colon == std::string::npos) break;
+            std::size_t quote = colon + 1;
+            while (quote < metadata.size() && std::isspace(static_cast<unsigned char>(metadata[quote]))) ++quote;
+            if (quote >= metadata.size() || metadata[quote] != '"') {
+                pos = colon + 1;
+                continue;
+            }
+            std::string captured;
+            bool escape = false;
+            for (std::size_t i = quote + 1; i < metadata.size(); ++i) {
+                const char c = metadata[i];
+                if (escape) { captured += '\\'; captured += c; escape = false; }
+                else if (c == '\\') escape = true;
+                else if (c == '"') break;
+                else captured += c;
+            }
+            value = jsonUnescape(captured);
+            if (!value.empty()) break;
+            pos = colon + 1;
+        }
+        if (!value.empty()) break;
+    }
+    if (value.rfind("<artimage>", 0) == 0) {
+        if (base64Decode(value.substr(10), media.data)) {
+            media.contentType = sniffImage(media.data);
+            media.status = "embedded";
+        }
+    } else if (value.rfind("data:image/", 0) == 0) {
+        const auto comma = value.find(',');
+        const auto semi = value.find(';');
+        if (comma != std::string::npos && semi != std::string::npos && semi < comma) {
+            media.contentType = value.substr(5, semi - 5);
+            if (base64Decode(value.substr(comma + 1), media.data)) media.status = "embedded";
+        }
+    } else if (value.rfind("http://", 0) == 0 || value.rfind("https://", 0) == 0) {
+        media.url = value;
+        media.status = "pending";
+    }
+    if (!media.data.empty()) {
+        if (media.contentType.empty()) media.contentType = sniffImage(media.data);
+        if (media.status.empty()) media.status = "embedded";
+    }
+    return media;
+}
+
+bool backfillTokens(duckdb::Connection& con, const IndexOptions& options, std::string& error) {
+    duckdb::Appender tokens(con, "analytics", "token_metadata");
+    duckdb::Appender mediaOut(con, "analytics", "token_media");
+    std::unordered_set<std::string> seen;
+    const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+    const bool ok = forEachBlock(
+        options,
+        [&](long long height, org::minima::objects::TxBlock& block) {
+            for (const auto& coin : block.getOutputCoins()) {
+                const auto* tok = coin.getToken();
+                if (!tok) continue;
+                std::string tokenId;
+                if (tok->getTokenID()) tokenId = tok->getTokenID()->to0xString();
+                if (tokenId.empty()) tokenId = coin.getTokenID().to0xString();
+                if (tokenId.empty() || seen.count(tokenId)) continue;
+                seen.insert(tokenId);
+                const std::string name = tok->getName().toString();
+                auto dec = tok->getDecimalPlaces();
+                const int decimals = dec ? dec->getAsInt() : 8;
+                auto total = tok->getTotalTokens();
+                const long long supply = total ? total->getAsLong() : 0;
+                const std::string meta = name;
+                const TokenMedia media = extractTokenMedia(name);
+                tokens.AppendRow(tokenId.c_str(), name.c_str(), decimals,
+                                 static_cast<std::int64_t>(supply), decimals == 0,
+                                 meta.c_str(), media.url.empty() ? duckdb::Value() : duckdb::Value(media.url),
+                                 tok->getTokenScript().toString().c_str(),
+                                 static_cast<std::int64_t>(tok->getCreated().getAsLong()),
+                                 static_cast<std::int64_t>(now));
+                if (!media.status.empty() || !media.data.empty() || !media.url.empty()) {
+                    mediaOut.AppendRow(tokenId.c_str(),
+                                       media.url.empty() ? duckdb::Value() : duckdb::Value(media.url),
+                                       media.contentType.empty() ? duckdb::Value() : duckdb::Value(media.contentType),
+                                       static_cast<std::int64_t>(media.data.size()),
+                                       duckdb::Value(),
+                                       media.data.empty() ? duckdb::Value() : duckdb::Value::BLOB(media.data.data(), media.data.size()),
+                                       media.status.c_str(),
+                                       static_cast<std::int64_t>(now));
+                }
+            }
+            return true;
+        },
+        error);
+    tokens.Close();
+    mediaOut.Close();
+    return ok;
+}
+
 IndexResult buildIndex(const IndexOptions& options) {
     IndexResult result;
     if (options.rebuild) {
@@ -261,6 +526,30 @@ IndexResult buildIndex(const IndexOptions& options) {
         }
     }
 
+    {
+        auto count = con.Query("SELECT COUNT(*) FROM analytics.magic_snapshots;");
+        if (!count || count->HasError()) {
+            result.error = count ? count->GetError() : "magic count failed";
+            return result;
+        }
+        if (count->GetValue(0, 0).GetValue<std::int64_t>() == 0) {
+            std::string magicError;
+            if (!backfillMagic(con, options, magicError)) {
+                std::cerr << "Magic backfill skipped: " << magicError << "\n";
+            }
+        }
+    }
+
+    {
+        auto count = con.Query("SELECT COUNT(*) FROM analytics.token_metadata;");
+        if (count && !count->HasError() && count->GetValue(0, 0).GetValue<std::int64_t>() == 0) {
+            std::string tokenError;
+            if (!backfillTokens(con, options, tokenError)) {
+                std::cerr << "Token metadata backfill skipped: " << tokenError << "\n";
+            }
+        }
+    }
+
     long long lastHeight = 0;
     {
         auto res = con.Query("SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks;");
@@ -276,6 +565,9 @@ IndexResult buildIndex(const IndexOptions& options) {
     duckdb::Appender inputs(con, "analytics", "tx_inputs");
     duckdb::Appender outputs(con, "analytics", "tx_outputs");
     duckdb::Appender coins(con, "analytics", "coins");
+    duckdb::Appender magicSnapshots(con, "analytics", "magic_snapshots");
+    duckdb::Appender magicChanges(con, "analytics", "magic_changes");
+    MagicState magicState;
 
     long long processed = 0;
     std::string lastHash;
@@ -293,6 +585,7 @@ IndexResult buildIndex(const IndexOptions& options) {
             const std::string hash = pow.getTxPoWID();
             const std::string prev = pow.getParentID().to0xString();
             const long long timeMs = pow.getTimeMilli().getAsLong();
+            appendMagic(magicSnapshots, magicChanges, pow, height, hash, magicState);
 
             int txCount = 0;
             std::string txid = hash;
@@ -358,6 +651,8 @@ IndexResult buildIndex(const IndexOptions& options) {
     inputs.Close();
     outputs.Close();
     coins.Close();
+    magicSnapshots.Close();
+    magicChanges.Close();
 
     if (!ok) {
         result.error = error;
@@ -520,6 +815,42 @@ IndexResult buildIndex(const IndexOptions& options) {
         "u AS (SELECT o.amount_raw FROM analytics.tx_outputs o WHERE o.token_id='0x00' "
         "AND NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
         "SELECT 'utxo_value_p99_raw','snapshot',MAX(tip.t),MAX(tip.h),NULL,CAST(QUANTILE_CONT(u.amount_raw,0.99) AS HUGEINT),'archive',true FROM u,tip;",
+        "INSERT INTO analytics.metric_series "
+        "(metric,granularity,bucket_start_ms,height,value,value_raw,source,complete) "
+        "WITH inp AS (SELECT txpowid,SUM(amount_raw) s FROM analytics.tx_inputs "
+        "WHERE token_id='0x00' GROUP BY txpowid), "
+        "outp AS (SELECT txpowid,SUM(amount_raw) s FROM analytics.tx_outputs "
+        "WHERE token_id='0x00' GROUP BY txpowid), "
+        "b AS (SELECT CAST(cb.timestamp_ms/86400000 AS BIGINT)*86400000 d,cb.height h,"
+        "GREATEST(COALESCE(i.s,0)-COALESCE(o.s,0),0) burn FROM analytics.txs t "
+        "JOIN analytics.chain_blocks cb ON cb.height=t.height "
+        "LEFT JOIN inp i ON i.txpowid=t.txpowid LEFT JOIN outp o ON o.txpowid=t.txpowid) "
+        "SELECT 'burn_raw','1d',d,MAX(h),NULL,CAST(SUM(burn) AS HUGEINT),'archive',true "
+        "FROM b GROUP BY d;",
+        "INSERT INTO analytics.metric_series "
+        "(metric,granularity,bucket_start_ms,height,value,value_raw,source,complete) "
+        "WITH inp AS (SELECT txpowid,SUM(amount_raw) s FROM analytics.tx_inputs "
+        "WHERE token_id='0x00' GROUP BY txpowid), "
+        "outp AS (SELECT txpowid,SUM(amount_raw) s FROM analytics.tx_outputs "
+        "WHERE token_id='0x00' GROUP BY txpowid), "
+        "b AS (SELECT CAST(cb.timestamp_ms/86400000 AS BIGINT)*86400000 d,cb.height h,"
+        "GREATEST(COALESCE(i.s,0)-COALESCE(o.s,0),0) burn FROM analytics.txs t "
+        "JOIN analytics.chain_blocks cb ON cb.height=t.height "
+        "LEFT JOIN inp i ON i.txpowid=t.txpowid LEFT JOIN outp o ON o.txpowid=t.txpowid) "
+        "SELECT 'burn_count','1d',d,MAX(h),COUNT(*) FILTER (WHERE burn>0),NULL,'archive',true "
+        "FROM b GROUP BY d;",
+        "INSERT INTO analytics.metric_series "
+        "(metric,granularity,bucket_start_ms,height,value,value_raw,source,complete) "
+        "WITH inp AS (SELECT txpowid,SUM(amount_raw) s FROM analytics.tx_inputs "
+        "WHERE token_id='0x00' GROUP BY txpowid), "
+        "outp AS (SELECT txpowid,SUM(amount_raw) s FROM analytics.tx_outputs "
+        "WHERE token_id='0x00' GROUP BY txpowid), "
+        "b AS (SELECT cb.height h,cb.timestamp_ms t,"
+        "GREATEST(COALESCE(i.s,0)-COALESCE(o.s,0),0) burn FROM analytics.txs t2 "
+        "JOIN analytics.chain_blocks cb ON cb.height=t2.height "
+        "LEFT JOIN inp i ON i.txpowid=t2.txpowid LEFT JOIN outp o ON o.txpowid=t2.txpowid) "
+        "SELECT 'burned_total_raw','snapshot',MAX(t),MAX(h),NULL,CAST(SUM(burn) AS HUGEINT),"
+        "'archive',true FROM b;",
     };
     for (const auto& sql : metricSql) {
         if (!exec(con, sql, error)) {
@@ -571,7 +902,10 @@ IndexResult buildIndex(const IndexOptions& options) {
             "WHEN tip.t-u.created_ms < 15552000000 THEN '3m-6m' "
             "WHEN tip.t-u.created_ms < 31536000000 THEN '6m-1y' "
             "WHEN tip.t-u.created_ms < 63072000000 THEN '1y-2y' "
-            "WHEN tip.t-u.created_ms < 157680000000 THEN '2y-5y' ELSE '5y+' END, "
+            "WHEN tip.t-u.created_ms < 94608000000 THEN '2y-3y' "
+            "WHEN tip.t-u.created_ms < 157680000000 THEN '3y-5y' "
+            "WHEN tip.t-u.created_ms < 220752000000 THEN '5y-7y' "
+            "WHEN tip.t-u.created_ms < 315360000000 THEN '7y-10y' ELSE '10y+' END, "
             "COUNT(*), SUM(u.amount_raw) FROM u, tip GROUP BY tip.h, 2;",
             "DELETE FROM analytics.utxo_value_bands WHERE snapshot_height = "
             "(SELECT MAX(height) FROM analytics.chain_blocks);",
@@ -657,7 +991,10 @@ IndexResult buildIndex(const IndexOptions& options) {
             "WHEN tip.t-u.created_ms < 15552000000 THEN '3m-6m' "
             "WHEN tip.t-u.created_ms < 31536000000 THEN '6m-1y' "
             "WHEN tip.t-u.created_ms < 63072000000 THEN '1y-2y' "
-            "WHEN tip.t-u.created_ms < 157680000000 THEN '2y-5y' ELSE '5y+' END, "
+            "WHEN tip.t-u.created_ms < 94608000000 THEN '2y-3y' "
+            "WHEN tip.t-u.created_ms < 157680000000 THEN '3y-5y' "
+            "WHEN tip.t-u.created_ms < 220752000000 THEN '5y-7y' "
+            "WHEN tip.t-u.created_ms < 315360000000 THEN '7y-10y' ELSE '10y+' END, "
             "COUNT(*),SUM(u.amount_raw) FROM u,tip GROUP BY tip.d,u.token_id,3;",
             "INSERT INTO analytics.asset_value_bands "
             "(snapshot_day_ms,token_id,band,coin_count,amount_raw) "

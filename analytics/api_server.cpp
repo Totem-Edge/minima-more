@@ -325,6 +325,47 @@ std::string assetCohortsJson(const std::string& indexPath, const std::string& to
     return out.str();
 }
 
+std::string hodlWavesJson(const std::string& indexPath, const std::string& token,
+                          const std::string& day, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    std::string dayClause;
+    if (!day.empty()) {
+        try { dayClause = " AND snapshot_day_ms=" + std::to_string(std::stoll(day)); }
+        catch (...) { return {}; }
+    }
+    auto res = con.Query(
+        "SELECT snapshot_day_ms,band,coin_count,amount_raw FROM analytics.asset_age_bands "
+        "WHERE token_id=" + sqlLit(token) + dayClause +
+        " AND snapshot_day_ms=(SELECT MAX(snapshot_day_ms) FROM analytics.asset_age_bands "
+        "WHERE token_id=" + sqlLit(token) + dayClause + ") ORDER BY band;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    long long total = 0;
+    std::size_t count = res->RowCount();
+    for (std::size_t i = 0; i < count; ++i) total += res->GetValue(3,i).GetValue<std::int64_t>();
+    long long lth = 0;
+    std::ostringstream out;
+    out << "{\"token_id\":" << quote(token)
+        << ",\"as_of_day_ms\":" << res->GetValue(0,0).ToString()
+        << ",\"total_raw\":" << total << ",\"bands\":[";
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::string band = res->GetValue(1,i).ToString();
+        const long long amount = res->GetValue(3,i).GetValue<std::int64_t>();
+        const bool isLth = band == "6m-1y" || band == "1y-2y" || band == "2y-3y" ||
+                           band == "3y-5y" || band == "5y-7y" || band == "7y-10y" || band == "10y+";
+        if (isLth) lth += amount;
+        if (i) out << ",";
+        out << "{\"band\":" << quote(band)
+            << ",\"coin_count\":" << res->GetValue(2,i).ToString()
+            << ",\"amount_raw\":" << amount
+            << ",\"share\":" << (total > 0 ? static_cast<double>(amount) / total : 0.0) << "}";
+    }
+    out << "],\"lth_raw\":" << lth << ",\"sth_raw\":" << (total - lth) << "}";
+    return out.str();
+}
+
 std::string utxoJson(const std::string& indexPath, bool& found) {
     found = false;
     duckdb::DuckDB db(indexPath);
@@ -420,6 +461,47 @@ std::string queryParam(const std::string& query, const std::string& key) {
     return "";
 }
 
+std::string magicJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT height,block_hash,max_txpow_size,max_kissvm_ops,max_txns,min_work "
+        "FROM analytics.magic_snapshots ORDER BY height DESC LIMIT 1;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"height\":" << res->GetValue(0,0).ToString()
+        << ",\"block_hash\":" << (res->GetValue(1,0).IsNull() ? "null" : quote(res->GetValue(1,0).ToString()))
+        << ",\"max_txpow_size\":" << res->GetValue(2,0).ToString()
+        << ",\"max_kissvm_ops\":" << res->GetValue(3,0).ToString()
+        << ",\"max_txns\":" << res->GetValue(4,0).ToString()
+        << ",\"min_work\":" << (res->GetValue(5,0).IsNull() ? "null" : quote(res->GetValue(5,0).ToString())) << "}";
+    return out.str();
+}
+
+std::string magicChangesJson(const std::string& indexPath, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT height,field,old_value,new_value FROM analytics.magic_changes "
+        "ORDER BY height DESC LIMIT 1000;");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"changes\":[";
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"height\":" << res->GetValue(0,i).ToString()
+            << ",\"field\":" << quote(res->GetValue(1,i).ToString())
+            << ",\"old\":" << (res->GetValue(2,i).IsNull() ? "null" : quote(res->GetValue(2,i).ToString()))
+            << ",\"new\":" << (res->GetValue(3,i).IsNull() ? "null" : quote(res->GetValue(3,i).ToString())) << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
 std::string scriptsJson(const std::string& indexPath, bool& found) {
     found = false;
     duckdb::DuckDB db(indexPath);
@@ -493,14 +575,51 @@ std::string scriptJson(const std::string& indexPath, const std::string& hash, bo
     return out.str();
 }
 
+std::string tokenMediaBlob(const std::string& indexPath, const std::string& token,
+                           std::string& contentType, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query("SELECT data,content_type FROM analytics.token_media WHERE token_id=" +
+                         sqlLit(token) + ";");
+    if (!res || res->HasError() || res->RowCount() == 0 || res->GetValue(0,0).IsNull()) return {};
+    found = true;
+    contentType = res->GetValue(1,0).IsNull() ? "application/octet-stream" : res->GetValue(1,0).ToString();
+    return res->GetValue(0,0).GetValueUnsafe<std::string>();
+}
+
+std::string tokenMediaJson(const std::string& indexPath, const std::string& token, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    auto res = con.Query(
+        "SELECT url,content_type,size_bytes,sha256,status,"
+        "CASE WHEN data IS NULL THEN 0 ELSE 1 END "
+        "FROM analytics.token_media WHERE token_id=" + sqlLit(token) + ";");
+    if (!res || res->HasError() || res->RowCount() == 0) return {};
+    found = true;
+    std::ostringstream out;
+    out << "{\"token_id\":" << quote(token)
+        << ",\"url\":" << (res->GetValue(0,0).IsNull() ? "null" : quote(res->GetValue(0,0).ToString()))
+        << ",\"content_type\":" << (res->GetValue(1,0).IsNull() ? "null" : quote(res->GetValue(1,0).ToString()))
+        << ",\"size_bytes\":" << res->GetValue(2,0).ToString()
+        << ",\"status\":" << (res->GetValue(4,0).IsNull() ? "null" : quote(res->GetValue(4,0).ToString()))
+        << ",\"has_data\":" << (res->GetValue(5,0).GetValue<std::int64_t>() != 0 ? "true" : "false") << "}";
+    return out.str();
+}
+
 std::string tokensJson(const std::string& indexPath, bool& found) {
     found = false;
     duckdb::DuckDB db(indexPath);
     duckdb::Connection con(db);
     auto res = con.Query(
-        "SELECT snapshot_day_ms,snapshot_height,token_id,coin_count,total_raw,holder_count "
-        "FROM analytics.asset_snapshots WHERE snapshot_day_ms="
-        "(SELECT MAX(snapshot_day_ms) FROM analytics.asset_snapshots) ORDER BY total_raw DESC;");
+        "SELECT a.snapshot_day_ms,a.snapshot_height,a.token_id,a.coin_count,a.total_raw,"
+        "a.holder_count,COALESCE(m.name,m2.name),m.decimals,m.is_nft,m.image_url "
+        "FROM analytics.asset_snapshots a "
+        "LEFT JOIN analytics.token_metadata m ON m.token_id=a.token_id "
+        "LEFT JOIN analytics.token_registry m2 ON m2.token_id=a.token_id "
+        "WHERE a.snapshot_day_ms=(SELECT MAX(snapshot_day_ms) FROM analytics.asset_snapshots) "
+        "ORDER BY a.total_raw DESC;");
     if (!res || res->HasError() || res->RowCount() == 0) return {};
     found = true;
     std::ostringstream out;
@@ -511,7 +630,11 @@ std::string tokensJson(const std::string& indexPath, bool& found) {
         out << "{\"token_id\":" << quote(res->GetValue(2,i).ToString())
             << ",\"coin_count\":" << res->GetValue(3,i).ToString()
             << ",\"total_raw\":" << res->GetValue(4,i).ToString()
-            << ",\"holder_count\":" << res->GetValue(5,i).ToString() << "}";
+            << ",\"holder_count\":" << res->GetValue(5,i).ToString()
+            << ",\"name\":" << (res->GetValue(6,i).IsNull() ? "null" : quote(res->GetValue(6,i).ToString()))
+            << ",\"decimals\":" << (res->GetValue(7,i).IsNull() ? "null" : res->GetValue(7,i).ToString())
+            << ",\"is_nft\":" << (res->GetValue(8,i).IsNull() ? "null" : (res->GetValue(8,i).GetValue<bool>() ? "true" : "false"))
+            << ",\"image_url\":" << (res->GetValue(9,i).IsNull() ? "null" : quote(res->GetValue(9,i).ToString())) << "}";
     }
     out << "]}";
     return out.str();
@@ -729,6 +852,23 @@ std::string coverageJson(const ApiOptions& opt) {
     return caps.substr(body, end - body + 1);
 }
 
+void sendRaw(int fd, int status, const char* reason, const std::string& contentType,
+             const std::string& body) {
+    std::ostringstream head;
+    head << "HTTP/1.1 " << status << " " << reason << "\r\n"
+         << "Content-Type: " << contentType << "\r\n"
+         << "Content-Length: " << body.size() << "\r\n"
+         << "Connection: close\r\n"
+         << "Access-Control-Allow-Origin: *\r\n\r\n";
+    const std::string out = head.str() + body;
+    std::size_t sent = 0;
+    while (sent < out.size()) {
+        const ssize_t n = ::send(fd, out.data() + sent, out.size() - sent, 0);
+        if (n <= 0) break;
+        sent += static_cast<std::size_t>(n);
+    }
+}
+
 void sendResponse(int fd, int status, const char* reason, const std::string& body) {
     std::ostringstream head;
     head << "HTTP/1.1 " << status << " " << reason << "\r\n"
@@ -827,6 +967,21 @@ void handleClient(int fd, const ApiOptions& opt) {
         return false;
     };
 
+    if (path == "/v1/magic" && requireIndex()) {
+        bool found = false;
+        const std::string body = magicJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No magic snapshot", "[]", "[]", ""));
+        return;
+    }
+    if (path == "/v1/magic/changes" && requireIndex()) {
+        bool found = false;
+        const std::string body = magicChangesJson(opt.indexPath, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No magic changes", "[]", "[]", ""));
+        return;
+    }
+
     if (path == "/v1/scripts/known" && requireIndex()) {
         bool found = false;
         const std::string body = knownScriptsJson(opt.indexPath, found);
@@ -855,6 +1010,29 @@ void handleClient(int fd, const ApiOptions& opt) {
         const std::string body = tokensJson(opt.indexPath, found);
         sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
                      found ? body : errorJson("not_found", "No token snapshot", "[]", "[]", ""));
+        return;
+    }
+    if (path.rfind("/v1/tokens/", 0) == 0 && path.size() > 10 &&
+        path.substr(path.size() - 10) == "/media.bin" && requireIndex()) {
+        const std::string token = path.substr(11, path.size() - 21);
+        bool found = false;
+        std::string contentType;
+        const std::string bytes = tokenMediaBlob(opt.indexPath, token, contentType, found);
+        if (!found) {
+            sendResponse(fd, 404, "Not Found", errorJson("not_found", "No media for token", "[]", "[]", ""));
+        } else {
+            sendRaw(fd, 200, "OK", contentType, bytes);
+        }
+        return;
+    }
+
+    if (path.rfind("/v1/tokens/", 0) == 0 && path.size() > 7 &&
+        path.substr(path.size() - 6) == "/media" && requireIndex()) {
+        const std::string token = path.substr(11, path.size() - 17);
+        bool found = false;
+        const std::string body = tokenMediaJson(opt.indexPath, token, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No media for token", "[]", "[]", ""));
         return;
     }
     if (path.rfind("/v1/tokens/", 0) == 0 && requireIndex()) {
@@ -907,6 +1085,17 @@ void handleClient(int fd, const ApiOptions& opt) {
                      found ? body : errorJson("not_found", "Unknown address", "[]", "[]", ""));
         return;
     }
+    if (path == "/v1/hodl-waves" && requireIndex()) {
+        const std::string token = queryParam(query, "token").empty()
+            ? "0x00" : queryParam(query, "token");
+        bool found = false;
+        const std::string body = hodlWavesJson(opt.indexPath, token,
+                                                queryParam(query, "day"), found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "No HODL wave snapshot", "[]", "[]", ""));
+        return;
+    }
+
     if (path == "/v1/utxo/distribution" && requireIndex()) {
         const std::string token = queryParam(query, "token");
         bool found = false;

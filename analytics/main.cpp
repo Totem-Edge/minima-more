@@ -2,6 +2,7 @@
 #include "indexer.hpp"
 #include "org/minima/objects/address.hpp"
 #include "org/minima/objects/base/mini_data.hpp"
+#include "org/minima/kissvm/contract.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -46,7 +47,9 @@ void printHelp() {
         << "  -mmr-enrich      Load MegaMMR and write root/consistency snapshots\n"
         << "  -mmrstore DIR    Coin LMDB store (default <data>/1.0/databases/coins.lmdb)\n"
         << "  -knownscripts F  CSV of known script labels (default analytics/known_scripts.csv)\n"
+        << "  -rawdata FILE    Read blocks from a raw archive if the archive DB is empty\n"
         << "  -hashscript FILE Compute address/hash for a KISSVM script\n"
+        << "  -hashscript-clean FILE  Clean the script first (newscript behaviour)\n"
         << "  -help            Show this help\n";
 }
 
@@ -57,7 +60,9 @@ int main(int argc, char** argv) {
     opt.dataDir = homeDir() + "/.minima";
     opt.indexPath = opt.dataDir + "/analytics.duckdb";
     std::string hashScript;
+    bool hashClean = false;
     std::string knownScriptsPath = MINIMA_ANALYTICS_KNOWN_SCRIPTS;
+    std::string rawPath;
     bool doIndex = false;
     bool indexOnly = false;
     bool rebuild = false;
@@ -111,12 +116,18 @@ int main(int argc, char** argv) {
         } else if (arg == "-indexonly") {
             doIndex = true;
             indexOnly = true;
+        } else if (arg == "-rawdata") {
+            if (!next(rawPath)) {
+                std::cerr << "-rawdata requires a file\n";
+                return 2;
+            }
         } else if (arg == "-knownscripts") {
             if (!next(knownScriptsPath)) {
                 std::cerr << "-knownscripts requires a file\n";
                 return 2;
             }
-        } else if (arg == "-hashscript") {
+        } else if (arg == "-hashscript" || arg == "-hashscript-clean") {
+            hashClean = (arg == "-hashscript-clean");
             if (!next(hashScript)) {
                 std::cerr << "-hashscript requires a file\n";
                 return 2;
@@ -167,7 +178,11 @@ int main(int argc, char** argv) {
         }
         std::ostringstream src;
         src << in.rdbuf();
-        org::minima::objects::Address addr(src.str());
+        std::string source = src.str();
+        if (hashClean) {
+            source = org::minima::kissvm::Contract::cleanScript(source);
+        }
+        org::minima::objects::Address addr(source);
         std::cout << addr.getAddressData().to0xString() << "\n" << addr.getMinimaAddress() << "\n";
         return 0;
     }
@@ -185,6 +200,7 @@ int main(int argc, char** argv) {
         iopt.mmrPath = opt.mmrPath;
         iopt.mmrStorePath = mmrStorePath;
         iopt.knownScriptsPath = knownScriptsPath;
+        iopt.rawPath = rawPath;
         iopt.enrichMmr = enrichMmr;
         iopt.rebuild = rebuild;
         auto ir = minima::analytics::buildIndex(iopt);
