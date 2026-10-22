@@ -8,6 +8,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(MINIMA_STATIC "Fully static link (requires static deps)" OFF)
 option(MINIMA_BUILD_ANALYTICS "Build the optional minima-analytics sidecar" OFF)
+option(MINIMA_STATIC_NO_LMDB "Disable LMDB for fully static builds" OFF)
 
 set(MINIMA_SOURCES
     org/minima/database/minima_d_b.cpp
@@ -447,6 +448,7 @@ endif()
 
 # LMDB (RFC-0001 R2 coin store: mmap-backed UTXO/coin store). Optional: without
 # it MegaMMR falls back to its in-memory coin map.
+if(NOT MINIMA_STATIC_NO_LMDB)
 find_path(LMDB_INCLUDE_DIR lmdb.h)
 find_library(LMDB_LIBRARY lmdb)
 if(LMDB_INCLUDE_DIR AND LMDB_LIBRARY)
@@ -459,6 +461,7 @@ if(LMDB_INCLUDE_DIR AND LMDB_LIBRARY)
     message(STATUS "minima: using LMDB (${LMDB_LIBRARY})")
 else()
     message(STATUS "minima: LMDB not found - MegaMMR coin store uses memory")
+endif()
 endif()
 
 # Fully static link. Static curl must precede its OpenSSL/zlib deps; the early

@@ -34,9 +34,16 @@ if [ ! -f "$PREFIX/lib/libcurl.a" ]; then
     rm -rf "$TMP"
 fi
 
+if [ -f "$LIBROOT/liblmdb.a" ]; then
+    LMDB_OPT="-DLMDB_LIBRARY=$LIBROOT/liblmdb.a"
+else
+    LMDB_OPT="-DMINIMA_STATIC_NO_LMDB=ON"
+fi
+
 cmake -S "$ROOT" -B "$ROOT/build-static" \
     -DCMAKE_BUILD_TYPE=Release \
     -DMINIMA_STATIC=ON \
+    $LMDB_OPT \
     -DCMAKE_FIND_LIBRARY_SUFFIXES=".a" \
     -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=OFF \
     -DSQLite3_LIBRARY="$LIBROOT/libsqlite3.a" \
