@@ -761,7 +761,7 @@ std::string capabilitiesJson(const ApiOptions& opt) {
 
     std::ostringstream out;
     out << "{";
-    out << "\"node\":{\"name\":\"minima-analytics\",\"version\":\"0.1.0\"},";
+    out << "\"node\":{\"name\":\"minima-analytics\",\"version\":\"0.5.0\"},";
     out << "\"modes\":" << modes.str() << ",";
     out << "\"coverage\":{";
 

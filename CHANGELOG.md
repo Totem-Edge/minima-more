@@ -1,5 +1,15 @@
 # PureMinima C++ — Change Report
 
+## v0.5.0 — conformance + analytics
+
+- KISSVM parity fixes: `HEX()` sign-byte removal, Java-identical
+  `cleanScript()` spacing, non-recursive token classifiers (long-hex crash).
+  18/18 deployed Stables scripts match Java addresses; consensus vectors 12/12.
+- Apache-2.0 licensing (`LICENSE`, `NOTICE`, `SECURITY.md`).
+- Chunked archive storage, complete import tail, `-ibdlimit` cooldown.
+- Optional `minima-analytics`: DuckDB indexer/API, tokens/NFTs/media, scripts,
+  magic numbers, HODL waves, burn, backup/restore.
+
 This report summarises the substantive changes made during the recent development push on the PureMinima C++ node. The goal was to fix correctness/robustness issues, safely improve performance, and prove the code builds cleanly across macOS (Clang) and Linux (GCC).
 
 ---

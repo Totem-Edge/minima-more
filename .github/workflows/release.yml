@@ -43,7 +43,7 @@ jobs:
         run: |
           VER="${{ github.ref_name }}"
           [ -z "$VER" ] && VER="${{ github.event.inputs.tag }}"
-          BIN="minima-${VER}-linux-${{ matrix.arch }}"
+          BIN="minima-more-${VER}-linux-${{ matrix.arch }}"
           mkdir -p dist
           cp build/minima "dist/$BIN"
           tar -C dist -czf "dist/${BIN}.tar.gz" "$BIN"
@@ -82,7 +82,7 @@ jobs:
         run: |
           VER="${{ github.ref_name }}"
           [ -z "$VER" ] && VER="${{ github.event.inputs.tag }}"
-          BIN="minima-${VER}-linux-${{ matrix.arch }}-static"
+          BIN="minima-more-${VER}-linux-${{ matrix.arch }}-static"
           mkdir -p dist
           cp build-static/minima "dist/$BIN"
           tar -C dist -czf "dist/${BIN}.tar.gz" "$BIN"
@@ -95,9 +95,63 @@ jobs:
           name: dist-static-${{ matrix.arch }}
           path: dist/*
 
+  build-analytics:
+    name: analytics ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04,     arch: x86_64, duckdb_arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64, duckdb_arch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             build-essential cmake pkg-config             libssl-dev libsqlite3-dev zlib1g-dev libcurl4-openssl-dev             libboost-dev liblmdb-dev patchelf
+
+      - name: Fetch DuckDB (pinned)
+        run: |
+          curl -fsSL -o duckdb.zip \
+            "https://github.com/duckdb/duckdb/releases/download/v1.5.6/libduckdb-linux-${{ matrix.duckdb_arch }}.zip"
+          python3 -m zipfile -e duckdb.zip duckdb
+          ls -l duckdb/libduckdb.so duckdb/duckdb.hpp
+
+      - name: Configure (analytics)
+        run: |
+          cmake -S . -B build-analytics -DCMAKE_BUILD_TYPE=Release \
+            -DMINIMA_BUILD_ANALYTICS=ON \
+            -DDUCKDB_INCLUDE_DIR="$PWD/duckdb" \
+            -DDUCKDB_LIBRARY="$PWD/duckdb/libduckdb.so"
+
+      - name: Build analytics
+        run: cmake --build build-analytics --target minima-analytics -j"$(nproc)"
+
+      - name: Package
+        run: |
+          VER="${{ github.ref_name }}"
+          [ -z "$VER" ] && VER="${{ github.event.inputs.tag }}"
+          BIN="minima-more-analytics-${VER}-linux-${{ matrix.arch }}"
+          mkdir -p pkg dist
+          cp build-analytics/analytics/minima-analytics "pkg/$BIN"
+          cp duckdb/libduckdb.so pkg/
+          cp LICENSE NOTICE pkg/
+          patchelf --set-rpath '$ORIGIN' "pkg/$BIN"
+          tar -C pkg -czf "dist/${BIN}.tar.gz" "$BIN" libduckdb.so LICENSE NOTICE
+          ( cd dist && sha256sum "${BIN}.tar.gz" > "${BIN}.tar.gz.sha256" )
+          ls -l dist
+
+      - name: Upload artifacts (for the release job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-analytics-${{ matrix.arch }}
+          path: dist/*
+
   release:
     name: publish GitHub release
-    needs: [build, build-static]
+    needs: [build, build-static, build-analytics]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
