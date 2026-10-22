@@ -1,0 +1,4 @@
+.rill/
+data/
+*.duckdb
+*.duckdb.wal

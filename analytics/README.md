@@ -89,6 +89,10 @@ corruption.
 Overrides: `-archivepath`, `-mmrpath`, `-archive`, `-megammr`, `-rebuild`,
 `-indexonly`.
 
+BI templates: `integrations/evidence/` (history, MIT) and
+`integrations/rill/` (live/ops, Apache-2.0), sharing
+`integrations/common/metrics.yaml`.
+
 `-index` is incremental: it starts from `MAX(height)` in the DuckDB index.
 `-rebuild` recreates the index. Full 2.37M-block index measured at 12.5 min,
 2.7 GB DuckDB, 2.86 GB peak RSS on a 16 GB / 8 vCPU host.

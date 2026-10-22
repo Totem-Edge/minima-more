@@ -1,0 +1,5 @@
+node_modules/
+.evidence/
+build/
+sources/minima/*.duckdb
+sources/minima/*.duckdb.wal

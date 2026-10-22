@@ -1,0 +1,7 @@
+type: model
+materialize: true
+connector: duckdb
+sql: |
+  select status, last_height, last_hash, lag_blocks, updated_at_ms
+  from minima.analytics.index_state
+  where id = 1

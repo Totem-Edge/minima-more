@@ -1,0 +1,15 @@
+{
+  "name": "minima-more-evidence",
+  "private": true,
+  "scripts": {
+    "dev": "evidence dev",
+    "build": "evidence build",
+    "sources": "evidence sources",
+    "preview": "evidence preview"
+  },
+  "dependencies": {
+    "@evidence-dev/core-components": "latest",
+    "@evidence-dev/duckdb": "latest",
+    "@evidence-dev/evidence": "latest"
+  }
+}

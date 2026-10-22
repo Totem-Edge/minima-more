@@ -1,0 +1,4 @@
+name: minima
+type: duckdb
+options:
+  filename: ./analytics.duckdb

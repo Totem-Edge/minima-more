@@ -1,0 +1,3 @@
+compiler: rillv1
+display_name: Minima More — Live
+olap_connector: duckdb

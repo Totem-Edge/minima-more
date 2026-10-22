@@ -1,0 +1,8 @@
+type: model
+materialize: true
+connector: duckdb
+sql: |
+  select height, field, old_value, new_value
+  from minima.analytics.magic_changes
+  order by height desc
+  limit 200

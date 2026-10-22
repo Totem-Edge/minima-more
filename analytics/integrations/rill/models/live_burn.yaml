@@ -1,0 +1,12 @@
+type: model
+materialize: true
+connector: duckdb
+sql: |
+  select
+    to_timestamp(bucket_start_ms / 1000) as day,
+    value as burn_count,
+    value_raw as burned_raw
+  from minima.analytics.metric_series
+  where metric = 'burn_raw' and granularity = '1d'
+  order by bucket_start_ms desc
+  limit 365

@@ -1,0 +1,8 @@
+type: model
+materialize: true
+connector: duckdb
+sql: |
+  select height, hash, timestamp_ms, tx_count, size_bytes, finalized
+  from minima.analytics.chain_blocks
+  order by height desc
+  limit 500

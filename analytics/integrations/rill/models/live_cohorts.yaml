@@ -1,0 +1,9 @@
+type: model
+materialize: true
+connector: duckdb
+sql: |
+  select cohort, address_count, balance_raw
+  from minima.analytics.asset_holder_cohorts
+  where token_id = '0x00'
+    and snapshot_day_ms = (select max(snapshot_day_ms) from minima.analytics.asset_holder_cohorts)
+  order by cohort

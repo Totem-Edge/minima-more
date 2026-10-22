@@ -1,0 +1,97 @@
+version: 1
+contract: minima-more-analytics
+schema: analytics
+
+platforms:
+  evidence:
+    focus: history
+    refresh: build-time
+    license: MIT
+    datasets:
+      - chain_blocks
+      - metric_series
+      - asset_snapshots
+      - asset_age_bands
+      - asset_value_bands
+      - asset_holder_cohorts
+      - token_metadata
+      - scripts
+      - known_scripts
+  rill:
+    focus: live
+    refresh: query-time
+    license: Apache-2.0
+    datasets:
+      - index_state
+      - chain_blocks
+      - metric_series (burn/index lag)
+      - magic_snapshots
+      - magic_changes
+      - scripts
+      - token_metadata
+
+metrics:
+  - name: block_height
+    source: index_state.last_height
+    platform: rill
+    kind: gauge
+  - name: index_lag_blocks
+    source: index_state.lag_blocks
+    platform: rill
+    kind: gauge
+  - name: recent_blocks
+    source: chain_blocks
+    platform: rill
+    kind: table
+  - name: burn_raw
+    source: metric_series (burn_raw, 1d)
+    platform: both
+    kind: time_series
+  - name: magic_changes
+    source: magic_changes
+    platform: rill
+    kind: event
+  - name: script_activity
+    source: scripts + known_scripts
+    platform: both
+    kind: table
+  - name: block_count
+    source: metric_series (block_count, 1d)
+    platform: evidence
+    kind: time_series
+  - name: tx_count
+    source: metric_series (tx_count, 1d)
+    platform: evidence
+    kind: time_series
+  - name: supply_raw
+    source: metric_series (supply_raw, snapshot)
+    platform: evidence
+    kind: snapshot
+  - name: hodl_waves
+    source: asset_age_bands (native, latest day)
+    platform: evidence
+    kind: composition
+  - name: utxo_age_bands
+    source: asset_age_bands (native)
+    platform: evidence
+    kind: composition
+  - name: holder_cohorts
+    source: asset_holder_cohorts (native)
+    platform: both
+    kind: composition
+  - name: cdd
+    source: metric_series (cdd/cdd_90/cyd, 1d)
+    platform: evidence
+    kind: time_series
+  - name: spent_output_lifespan
+    source: metric_series (spent_output_age_*, 1d)
+    platform: evidence
+    kind: time_series
+  - name: token_distribution
+    source: asset_snapshots + token_metadata
+    platform: evidence
+    kind: table
+  - name: nft_media
+    source: token_metadata + token_media
+    platform: evidence
+    kind: table

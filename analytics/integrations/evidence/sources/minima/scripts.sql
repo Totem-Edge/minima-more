@@ -1,0 +1,11 @@
+select
+  s.script_hash,
+  coalesce(k.name, 'unlabelled') as name,
+  coalesce(k.category, 'custom') as category,
+  s.output_count,
+  s.spent_count,
+  s.unspent_value_raw
+from analytics.scripts s
+left join analytics.known_scripts k on k.script_hash = s.script_hash
+order by s.unspent_value_raw desc
+limit 100
