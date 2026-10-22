@@ -9,6 +9,8 @@
 - Chunked archive storage, complete import tail, `-ibdlimit` cooldown.
 - Optional `minima-analytics`: DuckDB indexer/API, tokens/NFTs/media, scripts,
   magic numbers, HODL waves, burn, backup/restore.
+- BI templates: **Evidence** (history; MIT) and **Rill** (live/ops;
+  Apache-2.0), sharing `analytics/integrations/common/metrics.yaml`.
 
 This report summarises the substantive changes made during the recent development push on the PureMinima C++ node. The goal was to fix correctness/robustness issues, safely improve performance, and prove the code builds cleanly across macOS (Clang) and Linux (GCC).
 

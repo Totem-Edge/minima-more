@@ -46,6 +46,16 @@ The conformance + analytics release. Apache-2.0 licensed.
 - **Backup**: full 4.4 GB DuckDB → **1.2 GB Parquet in 4.7 s**, with
   `analytics_manifest.json`; restore verified at 2,376,119 blocks.
 
+### BI templates (optional)
+
+- **Evidence** (`analytics/integrations/evidence/`, **MIT**) — historical
+  reports: blocks/txs/burn, HODL waves, CDD, UTXO/cohorts, tokens/NFTs, scripts.
+- **Rill** (`analytics/integrations/rill/`, **Apache-2.0**) — live/ops
+  dashboards: tip/lag, recent blocks, burn, magic changes, script activity,
+  alerts; attaches the DuckDB index.
+- Shared metric ownership/refresh contract:
+  `analytics/integrations/common/metrics.yaml`.
+
 ## Artifacts
 
 - `minima-more-v0.5.0-linux-{x86_64,aarch64}` — standard dynamic node
