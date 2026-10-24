@@ -18,7 +18,17 @@ Models provided:
 - `history_block_count` — daily blocks
 
 Use Rill Developer to create metrics views/explores and alerts from these
-models. Keep deep history (HODL waves, CDD, token charts) in the Evidence
+models.
+
+### Omnia live chain events
+
+`models/omnia_chain_events.yaml` and `models/omnia_chain_blocks.yaml` read the
+Canary `observe.jsonl` journal produced by the Minima More SSE source
+(`chain.block`, `chain.txpow.mined`, `chain.coin.created/spent`). Set the
+absolute path at the top of both models. They join to
+`analytics.chain_blocks` by `txpow_id` when an archive is present; in
+MegaMMR-only mode the block join is empty, but the coin/transaction events stay
+queryable for live Omnia correlation. Keep deep history (HODL waves, CDD, token charts) in the Evidence
 template; this project is intentionally live/ops-focused.
 
 Rill Cloud/embedding is paid; local `rill start` is free. The DuckDB attach is

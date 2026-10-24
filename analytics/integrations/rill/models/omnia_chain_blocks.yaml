@@ -1,0 +1,20 @@
+type: model
+materialize: true
+connector: duckdb
+sql: |
+  with events as (
+    select
+      eventId as event_id,
+      sourceNodeId as source_node_id,
+      kind,
+      epoch_ms(occurredAt) as occurred_at,
+      entity.id as entity_id,
+      data.txpowId as txpow_id,
+      data.coinId as coin_id,
+      cast(amounts.amountAtoms as hugeint) as amount_raw
+    from read_json_auto('/ABSOLUTE/PATH/TO/observe.jsonl', format='newline_delimited')
+    where domain = 'chain'
+  )
+  select e.*, b.height, b.timestamp_ms as block_time_ms
+  from events e
+  left join minima.analytics.chain_blocks b on b.hash = e.txpow_id

@@ -1,0 +1,21 @@
+type: model
+materialize: true
+connector: duckdb
+sql: |
+  select
+    eventId as event_id,
+    sourceNodeId as source_node_id,
+    networkId as network_id,
+    kind,
+    domain,
+    phase,
+    epoch_ms(occurredAt) as occurred_at,
+    entity.type as entity_type,
+    entity.id as entity_id,
+    data.txpowId as txpow_id,
+    data.coinId as coin_id,
+    cast(amounts.amountAtoms as hugeint) as amount_raw,
+    data.address as address,
+    data.tokenId as token_id
+  from read_json_auto('/ABSOLUTE/PATH/TO/observe.jsonl', format='newline_delimited')
+  where domain = 'chain'
