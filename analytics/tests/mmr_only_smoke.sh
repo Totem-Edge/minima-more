@@ -7,6 +7,8 @@ set -euo pipefail
 DATA="${1:?usage: $0 <data-dir> [index.duckdb]}"
 IDX="${2:-$DATA/minima-mmr-only.$$.duckdb}"
 BIN="${MINIMA_ANALYTICS_BIN:-./build-analytics/analytics/minima-analytics}"
+# Sidecar binaries are often deployed next to libduckdb.so.
+export LD_LIBRARY_PATH="$(cd "$(dirname "$BIN")" && pwd):${LD_LIBRARY_PATH:-}"
 
 "$BIN" -data "$DATA" -indexdb "$IDX" -megammr -mmr-enrich -indexonly
 test -s "$IDX"
