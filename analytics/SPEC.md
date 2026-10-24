@@ -16,6 +16,12 @@ answers *the live tip*. The API never pretends a mode has data it does not have.
 One node may run `-archive -megammr -analytics`; flags are independent. Initial data loads
 are separate (`archive action:importraw`, `megammr action:import`).
 
+**MegaMMR-only** (`-megammr` without `-archive`) is a supported recent/unpruned
+profile: the API reports `megammr` coverage and `archive_incomplete`, and the
+index contains `mmr_coins`/`mmr_snapshots` with archive-backed metrics marked
+unavailable. Historical flows and archived transaction detail require
+`-archive`.
+
 ### Deployment profiles
 
 | Profile | Runs | Footprint |

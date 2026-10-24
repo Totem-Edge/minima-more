@@ -13,12 +13,15 @@ struct IndexOptions {
     std::string knownScriptsPath;
     std::string rawPath;
     bool enrichMmr = false;
+    bool forceMmr = false;
     bool rebuild = false;
 };
 
 struct IndexResult {
     bool ok = false;
     long long blocks = 0;
+    bool mmrOnly = false;
+    std::string warning;
     std::string error;
 };
 

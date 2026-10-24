@@ -1,5 +1,21 @@
 # PureMinima C++ — Change Report
 
+## Unreleased
+
+### Added
+
+- `minima-analytics -megammr` MegaMMR-only mode: indexes the unpruned recent
+  coin set and MMR root without an archive, and reports `index_state=ready`
+  instead of failing on empty archive-backed metric tables.
+- `analytics/tests/mmr_only_smoke.sh` live smoke test.
+
+### Fixed
+
+- MegaMMR-only indexing no longer inserts NULL `metric_series.bucket_start_ms`
+  rows; archive-backed metrics are skipped when no archive source exists.
+- Document the DuckDB catalog/schema collision when the index file is named
+  `analytics.duckdb`; use `minima.duckdb` (or any non-`analytics` name).
+
 ## v0.5.0 — conformance + analytics
 
 - KISSVM parity fixes: `HEX()` sign-byte removal, Java-identical
