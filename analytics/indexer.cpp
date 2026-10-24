@@ -560,6 +560,48 @@ IndexResult buildIndex(const IndexOptions& options) {
         lastHeight = res->GetValue(0, 0).GetValue<std::int64_t>();
     }
 
+    // MegaMMR-only mode: no archive blocks (or -megammr forced). Archive-backed
+    // tables/metrics cannot be rebuilt, but the unpruned recent coin set and
+    // MMR root can be indexed and served. Long-term history still needs -archive.
+    const ArchiveStats archiveStats = readArchiveStats(options.archivePath);
+    const bool archiveSource = !options.forceMmr &&
+        ((archiveStats.exists && archiveStats.count > 0) || !options.rawPath.empty());
+    if (!archiveSource) {
+        if (options.mmrPath.empty() || !std::filesystem::exists(options.mmrPath)) {
+            result.error = "no archive blocks and no MegaMMR source; pass -archive or -megammr -mmrpath";
+            return result;
+        }
+        std::string mmrError;
+        if (!enrichMmr(con, options, mmrError)) {
+            result.error = mmrError;
+            return result;
+        }
+        const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::system_clock::now().time_since_epoch())
+                                  .count();
+        std::ostringstream upsert;
+        upsert << "INSERT INTO analytics.index_state "
+                  "(id,schema_version,last_height,last_hash,archive_from,archive_to,tx_detail_from,"
+                  "mmr_as_of,mmr_hash,lag_blocks,status,updated_at_ms) VALUES "
+                  "(1,1,NULL,NULL,NULL,NULL,NULL,"
+                  "(SELECT as_of_height FROM analytics.mmr_snapshots LIMIT 1),"
+                  "(SELECT root FROM analytics.mmr_snapshots LIMIT 1),0,'ready',"
+               << now << ") ON CONFLICT (id) DO UPDATE SET "
+                  "last_height=excluded.last_height,last_hash=excluded.last_hash,"
+                  "archive_from=excluded.archive_from,archive_to=excluded.archive_to,"
+                  "mmr_as_of=excluded.mmr_as_of,mmr_hash=excluded.mmr_hash,"
+                  "lag_blocks=0,status='ready',updated_at_ms=excluded.updated_at_ms;";
+        if (!exec(con, upsert.str(), error)) {
+            result.error = error;
+            return result;
+        }
+        result.ok = true;
+        result.blocks = 0;
+        result.mmrOnly = true;
+        result.warning = "archive-backed metrics skipped: MegaMMR-only mode";
+        return result;
+    }
+
     duckdb::Appender blocks(con, "analytics", "chain_blocks");
     duckdb::Appender txs(con, "analytics", "txs");
     duckdb::Appender inputs(con, "analytics", "tx_inputs");

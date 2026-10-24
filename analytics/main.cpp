@@ -228,14 +228,20 @@ int main(int argc, char** argv) {
         iopt.mmrStorePath = mmrStorePath;
         iopt.knownScriptsPath = knownScriptsPath;
         iopt.rawPath = rawPath;
-        iopt.enrichMmr = enrichMmr;
+        iopt.enrichMmr = enrichMmr || opt.forceMmr;
+        iopt.forceMmr = opt.forceMmr;
         iopt.rebuild = rebuild;
         auto ir = minima::analytics::buildIndex(iopt);
         if (!ir.ok) {
             std::cerr << "index failed: " << ir.error << "\n";
             return 1;
         }
-        std::cerr << "indexed " << ir.blocks << " blocks into " << opt.indexPath << "\n";
+        if (ir.mmrOnly) {
+            std::cerr << "indexed MegaMMR-only state into " << opt.indexPath << "\n";
+        } else {
+            std::cerr << "indexed " << ir.blocks << " blocks into " << opt.indexPath << "\n";
+        }
+        if (!ir.warning.empty()) std::cerr << "warning: " << ir.warning << "\n";
         if (indexOnly) return 0;
     }
 

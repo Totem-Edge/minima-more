@@ -21,6 +21,27 @@ Build the index (reads the archive **read-only**; never touches wallet/keys):
   -data ~/.minima -index -indexdb ~/.minima/analytics.duckdb
 ```
 
+### MegaMMR-only mode (recent, unpruned)
+
+For a node that runs `-megammr` without `-archive`, index the unpruned coin set
+and MMR root directly. Archive-backed `chain_blocks` and historical metrics are
+not available in this mode; the indexer skips that rebuild instead of failing
+with a NULL `metric_series.bucket_start_ms`.
+
+```bash
+./build-analytics/analytics/minima-analytics \
+  -data ~/.minima -indexdb ~/.minima/minima.duckdb \
+  -megammr -mmr-enrich -indexonly
+```
+
+- `-megammr` implies `-mmr-enrich` in the CLI.
+- Writes `mmr_coins`, `mmr_snapshots` and `index_state.status = 'ready'`.
+- `/v1/capabilities` reports `megammr` and `archive_incomplete`; `index` is ready.
+- Historical flows/balances still require `-archive` (long-term Omnia analytics).
+- Use a DB filename other than `analytics.duckdb`: DuckDB's catalog then has the
+  same name as the `analytics` schema, and `analytics.table` is ambiguous. The
+  examples above use `minima.duckdb` for that reason.
+
 Serve the API:
 
 ```bash
