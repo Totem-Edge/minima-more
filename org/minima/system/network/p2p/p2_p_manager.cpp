@@ -302,7 +302,7 @@ void P2PManager::doDiscoveryPing() {
     // network and fan out beyond its single connection.
     auto seeds = P2PParams::DEFAULT_NODE_LIST;
 
-    if (seeds.empty() && !org::minima::system::params::GeneralParams::P2P_ADDNODES.empty()) {
+    if (!org::minima::system::params::GeneralParams::P2P_ADDNODES.empty()) {
         // Fall back to the configured -p2pnodes, skipping any peer we already hold
         // a connection to (a discovery ping to such a peer is refused - it only
         // accepts one link). Pinging our OTHER configured peers lets the node learn
@@ -654,10 +654,19 @@ std::vector<Message> P2PManager::processLoop(P2PState& state) {
 
         if (!known.empty()) {
             if (state.getOutLinks().size() < 1) {
-                std::uniform_int_distribution<std::size_t> dist(0, known.size() - 1);
-                auto it = known.begin();
-                std::advance(it, dist(mRng));
-                InetSocketAddress connectionAddress = *it;
+                std::vector<InetSocketAddress> available;
+                available.reserve(known.size());
+                for (const auto& peer : known) {
+                    if (!mPeersChecker || mPeersChecker->isPeerAvailable(peer)) {
+                        available.push_back(peer);
+                    }
+                }
+                if (available.empty()) {
+                    doDiscoveryPing();
+                    return sendMsgs;
+                }
+                std::uniform_int_distribution<std::size_t> dist(0, available.size() - 1);
+                InetSocketAddress connectionAddress = available[dist(mRng)];
                 sendMsgs.push_back(Message(P2PManager::P2P_SEND_CONNECT).addObject(ADDRESS_LITERAL, connectionAddress));
             } else if (state.getOutLinks().size() < static_cast<std::size_t>(state.getMaxNumP2PConnections())) {
                 // Copy unique_ptr list to value list

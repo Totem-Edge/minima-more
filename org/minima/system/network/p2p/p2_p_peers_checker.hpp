@@ -5,6 +5,12 @@
 #include <cstdint>
 #include <random>
 #include <functional> // for std::hash
+#include <chrono>
+#include <unordered_map>
+#include <mutex>
+#include <thread>
+#include <atomic>
+#include <vector>
 
 // Base class include (inheritance)
 #include "org/minima/utils/messages/message_processor.hpp"
@@ -67,11 +73,11 @@ namespace p2p {
 
 class P2PPeersChecker : public org::minima::utils::messages::MessageProcessor {
 public:
-    inline static const char* PEERS_INIT          = "PEERS_INIT";
-    inline static const char* PEERS_ADDPEERS      = "PEERS_ADDPEERS";
-    inline static const char* PEERS_CHECKPEERS    = "PEERS_CHECKPEERS";
-    inline static const char* PEERS_LOOP          = "PEERS_LOOP";
-    inline static const char* PEERS_FORCEFULLCHECK= "PEERS_FORCEFULLCHECK";
+    inline static const char* PEERS_INIT           = "PEERS_INIT";
+    inline static const char* PEERS_ADDPEERS       = "PEERS_ADDPEERS";
+    inline static const char* PEERS_CHECKPEERS     = "PEERS_CHECKPEERS";
+    inline static const char* PEERS_LOOP           = "PEERS_LOOP";
+    inline static const char* PEERS_FORCEFULLCHECK = "PEERS_FORCEFULLCHECK";
 
     static int MAX_VERIFIED_PEERS;
 
@@ -86,7 +92,11 @@ public:
     bool haveAnyPeers() const;
     void checkUnverifiedPeer(const InetSocketAddress& zAddress);
 
-    virtual ~P2PPeersChecker() = default;
+    // Liveness/backoff: false while a peer is in its retry cooldown.
+    bool isPeerAvailable(const InetSocketAddress& zAddress) const;
+    std::int64_t retryDelayMs(const InetSocketAddress& zAddress) const;
+
+    ~P2PPeersChecker() override;
 
 protected:
     void processMessage(org::minima::utils::messages::Message& zMessage) override;
@@ -94,6 +104,14 @@ protected:
 private:
     // Remove one random element from set; returns true if removed and sets out parameter
     bool removeRandomItem(std::unordered_set<InetSocketAddress>& zSet, InetSocketAddress& outRemoved);
+
+    struct PeerHealth {
+        int failures {0};
+        std::chrono::steady_clock::time_point nextAttempt {};
+        std::chrono::steady_clock::time_point lastSeen {};
+    };
+    void recordSuccess(const InetSocketAddress& zAddress);
+    void recordFailure(const InetSocketAddress& zAddress, bool zPermanent);
 
     // Sets of peers
     std::unordered_set<InetSocketAddress> m_unverifiedPeers;
@@ -107,6 +125,17 @@ private:
 
     // RNG
     std::mt19937 m_rng;
+
+    // Liveness state (guarded because the manager reads availability).
+    mutable std::mutex m_healthMutex;
+    std::unordered_map<InetSocketAddress, PeerHealth> m_health;
+
+    std::atomic<bool> m_alive {true};
+    std::atomic<int> m_activeChecks {0};
+    std::mutex m_workersMutex;
+    std::vector<std::thread> m_workers;
+    std::unordered_set<InetSocketAddress> m_checking;
+    std::mutex m_checkingMutex;
 };
 
 } // namespace p2p

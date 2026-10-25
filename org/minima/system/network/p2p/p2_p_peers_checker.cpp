@@ -74,6 +74,18 @@ P2PPeersChecker::P2PPeersChecker(org::minima::system::network::p2p::P2PManager* 
     startMessageProcessorThread();
 }
 
+P2PPeersChecker::~P2PPeersChecker() {
+    m_alive.store(false, std::memory_order_release);
+    std::vector<std::thread> workers;
+    {
+        std::lock_guard<std::mutex> lock(m_workersMutex);
+        workers.swap(m_workers);
+    }
+    for (auto& t : workers) {
+        if (t.joinable()) t.join();
+    }
+}
+
 const std::unordered_set<InetSocketAddress>& P2PPeersChecker::getUnverifiedPeers() const {
     return m_unverifiedPeers;
 }
@@ -90,7 +102,50 @@ bool P2PPeersChecker::haveAnyPeers() const {
     return (!m_verifiedPeers.empty() || !m_unverifiedPeers.empty());
 }
 
+bool P2PPeersChecker::isPeerAvailable(const InetSocketAddress& zAddress) const {
+    std::lock_guard<std::mutex> lock(m_healthMutex);
+    auto it = m_health.find(zAddress);
+    if (it == m_health.end()) return true;
+    return std::chrono::steady_clock::now() >= it->second.nextAttempt;
+}
+
+std::int64_t P2PPeersChecker::retryDelayMs(const InetSocketAddress& zAddress) const {
+    std::lock_guard<std::mutex> lock(m_healthMutex);
+    auto it = m_health.find(zAddress);
+    if (it == m_health.end()) return 0;
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= it->second.nextAttempt) return 0;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(it->second.nextAttempt - now).count();
+}
+
+void P2PPeersChecker::recordSuccess(const InetSocketAddress& zAddress) {
+    std::lock_guard<std::mutex> lock(m_healthMutex);
+    auto& h = m_health[zAddress];
+    h.failures = 0;
+    h.lastSeen = std::chrono::steady_clock::now();
+    h.nextAttempt = h.lastSeen;
+}
+
+void P2PPeersChecker::recordFailure(const InetSocketAddress& zAddress, bool zPermanent) {
+    std::lock_guard<std::mutex> lock(m_healthMutex);
+    auto& h = m_health[zAddress];
+    if (h.failures < 16) ++h.failures;
+    const auto now = std::chrono::steady_clock::now();
+    if (zPermanent) {
+        h.nextAttempt = now + std::chrono::hours(6);
+    } else {
+        // 30s, 60s, 120s ... capped at 30 minutes.
+        const int shift = std::min(h.failures - 1, 6);
+        const auto delay = std::chrono::seconds(30) * (1 << shift);
+        h.nextAttempt = now + std::min(delay, std::chrono::seconds(30 * 60));
+    }
+}
+
 void P2PPeersChecker::checkUnverifiedPeer(const InetSocketAddress& zAddress) {
+    if (!isPeerAvailable(zAddress)) {
+        return;
+    }
+
     // Do we know it
     if (m_unverifiedPeers.find(zAddress) != m_unverifiedPeers.end() ||
         m_verifiedPeers.find(zAddress)   != m_verifiedPeers.end()) {
@@ -187,12 +242,66 @@ void P2PPeersChecker::processMessage(Message& zMessage) {
         if (zMessage.exists("forcelog")) {
             forcelog = zMessage.getBoolean("forcelog");
         }
-        // Connectivity gate: either forced or there is at least one connected connection
-        if (force || (P2PFunctions::getAllConnectedConnections().size() > 0)) {
-            // Get a Greeting if possible (best effort, for version/chain info)
-            std::shared_ptr<Greeting> greet = org::minima::system::network::minima::NIOManager::sendPingMessage(
-                address.getAddress().getHostAddress(), address.getPort(), true);
+        const bool pingDone = zMessage.exists("pingDone") && zMessage.getBoolean("pingDone");
+        std::shared_ptr<Greeting> greet;
 
+        if (pingDone) {
+            std::lock_guard<std::mutex> lock(m_checkingMutex);
+            m_checking.erase(address);
+            if (zMessage.exists("greeting")) {
+                try {
+                    greet = std::any_cast<std::shared_ptr<Greeting>>(zMessage.getObject("greeting"));
+                } catch (const std::bad_any_cast&) {
+                    greet.reset();
+                }
+            }
+        } else {
+            if (!force && !isPeerAvailable(address)) {
+                return;
+            }
+            if (!force && P2PFunctions::getAllConnectedConnections().empty()) {
+                auto tmsg = std::make_shared<TimerMessage>(static_cast<std::int64_t>(60'000), PEERS_CHECKPEERS);
+                tmsg->addObject("address", address);
+                PostTimerMessage(tmsg);
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> lock(m_checkingMutex);
+                if (m_checking.find(address) != m_checking.end()) return;
+                m_checking.insert(address);
+            }
+            if (m_activeChecks.load(std::memory_order_acquire) >= 8) {
+                std::lock_guard<std::mutex> lock(m_checkingMutex);
+                m_checking.erase(address);
+                auto tmsg = std::make_shared<TimerMessage>(static_cast<std::int64_t>(1000), PEERS_CHECKPEERS);
+                tmsg->addObject("address", address).addBoolean("force", force).addBoolean("forcelog", forcelog);
+                PostTimerMessage(tmsg);
+                return;
+            }
+            m_activeChecks.fetch_add(1, std::memory_order_acq_rel);
+            std::thread worker([this, address, force, forcelog]() {
+                auto g = org::minima::system::network::minima::NIOManager::sendPingMessage(
+                    address.getAddress().getHostAddress(), address.getPort(), true);
+                if (m_alive.load(std::memory_order_acquire)) {
+                    auto result = std::make_shared<Message>(PEERS_CHECKPEERS);
+                    result->addObject("address", address)
+                          .addBoolean("pingDone", true)
+                          .addBoolean("force", force)
+                          .addBoolean("forcelog", forcelog);
+                    if (g) result->addObject("greeting", g);
+                    PostMessage(result);
+                }
+                m_activeChecks.fetch_sub(1, std::memory_order_acq_rel);
+            });
+            {
+                std::lock_guard<std::mutex> lock(m_workersMutex);
+                m_workers.emplace_back(std::move(worker));
+            }
+            return;
+        }
+
+        // Connectivity gate: either forced / async result, or at least one live link.
+        if (pingDone || force || (P2PFunctions::getAllConnectedConnections().size() > 0)) {
             bool validversion = false;
 
             if (greet) {
@@ -249,6 +358,7 @@ void P2PPeersChecker::processMessage(Message& zMessage) {
             bool shouldAdd = validversion;
 
             if (shouldAdd) {
+                recordSuccess(address);
                 m_unverifiedPeers.erase(address);
 
                 if (static_cast<int>(m_verifiedPeers.size()) >= MAX_VERIFIED_PEERS) {
@@ -271,6 +381,7 @@ void P2PPeersChecker::processMessage(Message& zMessage) {
                     m_p2pManager->PostMessage(msg);
                 }
             } else {
+                recordFailure(address, greet != nullptr);
                 if (m_verifiedPeers.find(address) != m_verifiedPeers.end()) {
                     m_verifiedPeers.erase(address);
                     if (m_verifiedPeers.empty()) {
@@ -278,7 +389,8 @@ void P2PPeersChecker::processMessage(Message& zMessage) {
                     }
                     m_unverifiedPeers.insert(address);
 
-                    auto tmsg = std::make_shared<TimerMessage>(static_cast<std::int64_t>(1000) * 60 * 30, PEERS_CHECKPEERS);
+                    const std::int64_t delay = std::max<std::int64_t>(1000, retryDelayMs(address));
+                    auto tmsg = std::make_shared<TimerMessage>(delay, PEERS_CHECKPEERS);
                     tmsg->addObject("address", address);
                     PostTimerMessage(tmsg);
                 } else {
@@ -304,6 +416,7 @@ void P2PPeersChecker::processMessage(Message& zMessage) {
         if (P2PFunctions::isNetAvailable()) {
             // Check all the verified Peers again
             for (const InetSocketAddress& address : m_verifiedPeers) {
+                if (!isPeerAvailable(address)) continue;
                 // FIX: PostMessage expects a std::shared_ptr
                 auto msg = std::make_shared<Message>(PEERS_CHECKPEERS);
                 msg->addObject("address", address);
