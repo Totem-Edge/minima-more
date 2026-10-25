@@ -1,3 +1,8 @@
+# Minima More v0.5.1
+
+Testnet block-production patch. Test/solo mining now continues after each block;
+funding coins confirm without `automine` or restarts. No consensus change.
+
 # Minima More v0.5.0
 
 The conformance + analytics release. Apache-2.0 licensed.

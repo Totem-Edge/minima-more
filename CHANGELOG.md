@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.5.1 — testnet block production
+
+### Fixed
+
+- Test/solo mode now reschedules `TXPOWMINER_MINEPULSE` after each mined block,
+  so fresh genesis/funding coins confirm continuously without `automine` or a
+  node restart. Mainnet/consensus behavior is unchanged.
+
 ### Added
 
 - `minima-analytics -megammr` MegaMMR-only mode: indexes the unpruned recent
