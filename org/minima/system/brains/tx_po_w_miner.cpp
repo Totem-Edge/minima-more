@@ -24,6 +24,7 @@
 #include "org/minima/system/network/minima/n_i_o_manager.hpp"
 #include "org/minima/system/network/minima/n_i_o_message.hpp"
 #include "org/minima/system/params/general_params.hpp"
+#include "org/minima/system/params/global_params.hpp"
 #include "org/minima/utils/crypto.hpp"
 #include "org/minima/utils/minima_logger.hpp"
 #include "org/minima/utils/messages/message.hpp"
@@ -248,6 +249,14 @@ void TxPoWMiner::processMessage(org::minima::utils::messages::Message& zMessage)
             msg->addObject("txpow", txpow);
             msg->addBoolean("automine", true);
             this->PostMessage(msg);
+
+            // Test/solo networks must keep producing blocks so fresh coins
+            // confirm and MMR proofs remain usable without restarting the node.
+            if (GeneralParams::TEST_PARAMS) {
+                long long delay = 1000 / org::minima::system::params::GlobalParams::MINIMA_BLOCK_SPEED.getAsLong();
+                if (delay < 1000) delay = 1000;
+                this->PostTimerMessage(std::make_shared<TimerMessage>(delay, TXPOWMINER_MINEPULSE));
+            }
 
         } else {
 
