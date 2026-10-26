@@ -5,17 +5,15 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include <stdexcept>
 
 #include <boost/multiprecision/cpp_int.hpp>
-#include <boost/multiprecision/cpp_dec_float.hpp>
 
 namespace org {
 namespace minima {
 namespace objects {
 namespace base {
 
-class MiniNumber : public org::minima::utils::Streamable {
+class MiniNumber final : public org::minima::utils::Streamable {
 public:
     // Constants matching Java
     static constexpr int MAX_DIGITS = 64;
@@ -24,6 +22,7 @@ public:
     // Constructors
     MiniNumber();                          // 0
     explicit MiniNumber(int zNumber);
+    explicit MiniNumber(long zNumber);     // int64_t == long on LP64 (Linux)
     explicit MiniNumber(long long zNumber);
     explicit MiniNumber(const boost::multiprecision::cpp_int& zNumber); // integer value
     explicit MiniNumber(const std::string& zNumber); // decimal string (may include 'E' exponent)
@@ -93,6 +92,9 @@ public:
     // Useful constants (matching Java)
     static const MiniNumber& MINI_UNIT(); // 1E- MAX_DECIMAL_PLACES
     static const MiniNumber& MAXIMUM(); // 2^64 - 1
+    // Internal wide value used only for chain weight totals, which Java stores
+    // as BigDecimal and which can exceed the Java MiniNumber bound.
+    static MiniNumber fromWideString(const std::string& zNumber);
 
     static const MiniNumber& ZERO();
     static const MiniNumber& ONE();
@@ -124,6 +126,7 @@ private:
     // Internal representation: value = m_unscaled * 10^(-m_scale)
     boost::multiprecision::cpp_int m_unscaled;
     int m_scale;
+    bool m_wide { false };
 
     // Helpers
     static boost::multiprecision::cpp_int pow10(unsigned int n);
@@ -170,6 +173,8 @@ private:
 
     static const boost::multiprecision::cpp_int& get_max_value();
     static const boost::multiprecision::cpp_int& get_min_value();
+    static const boost::multiprecision::cpp_int& get_java_max_value();
+    static const boost::multiprecision::cpp_int& get_java_min_value();
 };
 
 } // namespace base

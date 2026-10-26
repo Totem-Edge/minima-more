@@ -69,7 +69,7 @@ void Cascade::cascadeChain() {
     std::shared_ptr<CascadeNode> newcascade = mTip;
     std::shared_ptr<CascadeNode> current = getParentNoLock(mTip);
 
-    org::minima::objects::base::MiniNumber totalWeightCalc(newcascade->getCurrentWeight());
+    org::minima::objects::base::MiniNumber totalWeightCalc = org::minima::objects::base::MiniNumber::fromWideString(newcascade->getCurrentWeight());
 
     int casclevel = 0;
     int totlevel  = 1;
@@ -87,7 +87,7 @@ void Cascade::cascadeChain() {
             keptNodes.insert(current.get());
 
             totalWeightCalc = totalWeightCalc.add(
-                org::minima::objects::base::MiniNumber(newcascade->getCurrentWeight()));
+                org::minima::objects::base::MiniNumber::fromWideString(newcascade->getCurrentWeight()));
 
             totlevel++;
             if (totlevel >= org::minima::system::params::GlobalParams::MINIMA_CASCADE_LEVEL_NODES) {

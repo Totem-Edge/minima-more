@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <cstdint>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -32,6 +31,15 @@ const boost::multiprecision::cpp_int& MiniNumber::get_min_value() {
     // Note: We call get_max_value() to ensure it's also initialized
     // Match the relaxed MAX so MIN is -(2^256 - 1) for the same reasons (weights/totals).
     static const cpp_int min_val = -get_max_value();
+    return min_val;
+}
+
+const boost::multiprecision::cpp_int& MiniNumber::get_java_max_value() {
+    static const cpp_int max_val = (cpp_int(1) << 64) - 1;
+    return max_val;
+}
+const boost::multiprecision::cpp_int& MiniNumber::get_java_min_value() {
+    static const cpp_int min_val = -get_java_max_value();
     return min_val;
 }
 
@@ -88,6 +96,11 @@ MiniNumber::MiniNumber(long long zNumber) : m_unscaled(zNumber), m_scale(0) {
     checkLimits();
 }
 
+MiniNumber::MiniNumber(long zNumber) : m_unscaled(zNumber), m_scale(0) {
+    apply_math_context_default();
+    checkLimits();
+}
+
 MiniNumber::MiniNumber(const cpp_int& zNumber) : m_unscaled(zNumber), m_scale(0) {
     apply_math_context_default();
     checkLimits();
@@ -96,7 +109,6 @@ MiniNumber::MiniNumber(const cpp_int& zNumber) : m_unscaled(zNumber), m_scale(0)
 MiniNumber::MiniNumber(const std::string& zNumber) : m_unscaled(0), m_scale(0) {
     // Handle empty strings gracefully - default to zero
     if (zNumber.empty() || zNumber.find_first_not_of(" \t\r\n") == std::string::npos) {
-        // MinimaLogger::log("[DEBUG MININUM] Empty string provided, defaulting to ZERO");
         m_unscaled = 0;
         m_scale = 0;
         return;
@@ -107,7 +119,7 @@ MiniNumber::MiniNumber(const std::string& zNumber) : m_unscaled(0), m_scale(0) {
     checkLimits();
 }
 
-MiniNumber::MiniNumber(const MiniNumber& other) : m_unscaled(other.m_unscaled), m_scale(other.m_scale) {
+MiniNumber::MiniNumber(const MiniNumber& other) : m_unscaled(other.m_unscaled), m_scale(other.m_scale), m_wide(other.m_wide) {
     apply_math_context_default();
     checkLimits();
 }
@@ -122,6 +134,7 @@ MiniNumber& MiniNumber::operator=(const MiniNumber& other) {
     if (this != &other) {
         m_unscaled = other.m_unscaled;
         m_scale = other.m_scale;
+        m_wide = other.m_wide;
         apply_math_context_default();
         checkLimits();
     }
@@ -160,12 +173,12 @@ long long MiniNumber::getAsLong() const {
 }
 
 int MiniNumber::getAsInt() const {
+    // Java BigDecimal.intValue(): low 32 bits of the integer part.
     cpp_int bi = getAsBigInteger();
     cpp_int mask = (cpp_int(1) << 32) - 1;
-    cpp_int mod = bi & mask; // low 32 bits
+    cpp_int mod = bi & mask;
     uint32_t u = mod.convert_to<uint32_t>();
-    int s = static_cast<int>(u);
-    return s;
+    return static_cast<int>(u);
 }
 
 double MiniNumber::getAsDouble() const {
@@ -199,16 +212,12 @@ unsigned int MiniNumber::count_decimal_digits(const cpp_int& v) {
     cpp_int a = v;
     if (a < 0) a = -a;
     if (a == 0) return 1;
-    // Fast path: values that fit in 64 bits (the common case - amounts, sums)
-    // have at most 20 decimal digits, far below MAX_DIGITS (64). Count them
-    // without converting the cpp_int to a decimal string.
+    // Fast path (RFC-0014 D5): values that fit in 64 bits skip the
+    // cpp_int -> ostringstream -> string conversion (amounts, sums).
     if (a <= std::numeric_limits<std::uint64_t>::max()) {
-        std::uint64_t x = a.convert_to<std::uint64_t>();
+        std::uint64_t u = a.convert_to<std::uint64_t>();
         unsigned int digits = 1;
-        while (x >= 10) {
-            x /= 10;
-            ++digits;
-        }
+        while (u >= 10) { u /= 10; ++digits; }
         return digits;
     }
     std::ostringstream oss;
@@ -297,13 +306,15 @@ int MiniNumber::compare_values(const cpp_int& ua, int sa, const cpp_int& ub, int
 void MiniNumber::checkLimits() {
     enforce_max_decimal_places();
 
-    int cmpMax = compare_values(m_unscaled, m_scale, get_max_value(), 0);
+    const cpp_int& maxv = m_wide ? get_max_value() : get_java_max_value();
+    const cpp_int& minv = m_wide ? get_min_value() : get_java_min_value();
+    int cmpMax = compare_values(m_unscaled, m_scale, maxv, 0);
     if (cmpMax > 0) {
         throw std::runtime_error(std::string("MiniNumber too large - outside allowed range 2^64 ") + toString());
     }
 
     // Compare to MIN_VALUE (scale 0)
-    int cmpMin = compare_values(m_unscaled, m_scale, get_min_value(), 0);
+    int cmpMin = compare_values(m_unscaled, m_scale, minv, 0);
     if (cmpMin < 0) {
         throw std::runtime_error("MiniNumber too small - outside allowed range -(2^64)");
     }
@@ -351,6 +362,7 @@ MiniNumber MiniNumber::add(const MiniNumber& zNumber) const {
     MiniNumber res;
     res.m_unscaled = ua + ub;
     res.m_scale = sc;
+    res.m_wide = m_wide || zNumber.m_wide;
     res.apply_math_context_default();
     res.checkLimits();
     return res;
@@ -363,6 +375,7 @@ MiniNumber MiniNumber::sub(const MiniNumber& zNumber) const {
     MiniNumber res;
     res.m_unscaled = ua - ub;
     res.m_scale = sc;
+    res.m_wide = m_wide || zNumber.m_wide;
     res.apply_math_context_default();
     res.checkLimits();
     return res;
@@ -376,8 +389,6 @@ MiniNumber MiniNumber::divide_with_context(const MiniNumber& other) const {
     const int t = MAX_DIGITS + 2; // extra precision before rounding
     const int exp = other.m_scale + t;
     if (exp < 0) {
-        // A negative exponent cast to unsigned would explode into a huge pow10
-        // (DoS). Reject instead.
         throw std::runtime_error("MiniNumber::divide: negative scaling exponent");
     }
     cpp_int N = m_unscaled * pow10(static_cast<unsigned int>(exp));
@@ -385,6 +396,7 @@ MiniNumber MiniNumber::divide_with_context(const MiniNumber& other) const {
     MiniNumber res;
     res.m_unscaled = Q;
     res.m_scale = m_scale + t;
+    res.m_wide = m_wide || other.m_wide;
     res.apply_math_context_default();
     res.checkLimits();
     return res;
@@ -398,6 +410,7 @@ MiniNumber MiniNumber::mult(const MiniNumber& zNumber) const {
     MiniNumber res;
     res.m_unscaled = m_unscaled * zNumber.m_unscaled;
     res.m_scale = m_scale + zNumber.m_scale;
+    res.m_wide = m_wide || zNumber.m_wide;
     res.apply_math_context_default();
     res.checkLimits();
     return res;
@@ -468,6 +481,7 @@ MiniNumber MiniNumber::sqrt() const {
     // Convert to string with extra precision then parse and round-down
     std::string sstr = s.str(MAX_DIGITS + 10, std::ios_base::fmtflags(0)); // may be scientific; parser handles exponent
     MiniNumber res(sstr);
+    res.m_wide = m_wide;
     // Constructor applies precision and limits already
     res.apply_math_context_default();
     res.checkLimits();
@@ -487,9 +501,11 @@ MiniNumber MiniNumber::remainder_toward_zero(const MiniNumber& other) const {
     MiniNumber qmul;
     qmul.m_unscaled = q * ub;
     qmul.m_scale = sc;
+    qmul.m_wide = m_wide || other.m_wide;
     MiniNumber r;
     r.m_unscaled = ua - q * ub;
     r.m_scale = sc;
+    r.m_wide = m_wide || other.m_wide;
     r.apply_math_context_default();
     r.checkLimits();
     return r;
@@ -600,12 +616,18 @@ std::string MiniNumber::toString() const {
 // Streamable
 void MiniNumber::writeDataStream(std::ostream& out) {
     // scale as signed byte
+    if (m_scale < -128 || m_scale > 127) {
+        throw std::ios_base::failure("MiniNumber writeDataStream: scale out of range");
+    }
     int8_t scale_byte = static_cast<int8_t>(m_scale);
     out.write(reinterpret_cast<const char*>(&scale_byte), 1);
 
     // unscaled as two's complement minimal big-endian bytes
     std::vector<uint8_t> bytes = to_twos_complement_bytes(m_unscaled);
     // length as signed byte (Java writeByte). We assume length fits in 0..127
+    if (bytes.size() > 32) {
+        throw std::ios_base::failure("MiniNumber writeDataStream: data too large");
+    }
     int8_t len_byte = static_cast<int8_t>(bytes.size());
     out.write(reinterpret_cast<const char*>(&len_byte), 1);
     if (!bytes.empty()) {
@@ -647,15 +669,12 @@ void MiniNumber::readDataStream(std::istream& in) {
 
 // Static helpers
 MiniNumber MiniNumber::ReadFromStream(std::istream& in) {
-    // DEBUG
     // signed char scale_byte, length_byte;
     // in.read(reinterpret_cast<char*>(&scale_byte), 1);
     // in.read(reinterpret_cast<char*>(&length_byte), 1);
     
-    // std::cout << "  [DEBUG MININUM] scale=" << (int)scale_byte 
     //           << " len=" << (int)length_byte 
     //           << " pos=" << in.tellg() << std::endl;
-    // DEBUG END
 
     MiniNumber data;
     data.readDataStream(in);
@@ -667,19 +686,26 @@ void MiniNumber::WriteToStream(std::ostream& out, int zNumber) {
     tmp.writeDataStream(out);
 }
 
+MiniNumber MiniNumber::fromWideString(const std::string& zNumber) {
+    MiniNumber n;
+    n.parse_decimal_string(zNumber, n.m_unscaled, n.m_scale);
+    n.m_wide = true;
+    n.apply_math_context_default();
+    n.checkLimits();
+    return n;
+}
+
 // Parsing / formatting
 void MiniNumber::parse_decimal_string(const std::string& s,
                                       cpp_int& unscaled_out,
                                       int& scale_out) {
     // Parse optional sign, digits with optional '.', optional exponent 'e' or 'E'
-    // MinimaLogger::log("[DEBUG MININUM] parse_decimal_string: input='" + s + "'");
     std::string str = s;
     // Trim spaces
     auto ltrim = [](std::string& x){ x.erase(x.begin(), std::find_if(x.begin(), x.end(), [](unsigned char ch){ return !std::isspace(ch); })); };
     auto rtrim = [](std::string& x){ x.erase(std::find_if(x.rbegin(), x.rend(), [](unsigned char ch){ return !std::isspace(ch); }).base(), x.end()); };
     ltrim(str); rtrim(str);
     if (str.empty()) {
-        // MinimaLogger::log("[DEBUG MININUM] Empty after trim, original='" + s + "'");
         throw std::invalid_argument("Invalid decimal string: empty");
     }
 

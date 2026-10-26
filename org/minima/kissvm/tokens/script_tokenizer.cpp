@@ -91,7 +91,7 @@ bool ScriptTokenizer::isNumeric(const std::string& zWord) {
 }
 
 bool ScriptTokenizer::isHex(const std::string& zWord) {
-    if (zWord.size() < 3 || zWord[0] != '0' || (zWord[1] != 'x' && zWord[1] != 'X')) return false;
+    if (zWord.size() < 3 || zWord[0] != '0' || zWord[1] != 'x') return false;
     for (std::size_t i = 2; i < zWord.size(); ++i) {
         if (!std::isxdigit(static_cast<unsigned char>(zWord[i]))) return false;
     }

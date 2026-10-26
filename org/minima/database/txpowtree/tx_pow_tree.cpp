@@ -127,7 +127,7 @@ void TxPowTree::recalculateTree() {
             auto& txp = zNode->getTxPoW();
             
             auto weight = txp.getWeight(); // BigDecimal -> std::string (per mapping)
-            zNode->setTotalWeight(MiniNumber(weight));
+            zNode->setTotalWeight(MiniNumber::fromWideString(weight));
             m_allnodes.push_back(zNode);
             m_fastlink[txp.getTxPoWID()] = zNode;
             

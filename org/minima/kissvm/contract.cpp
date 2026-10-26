@@ -704,7 +704,7 @@ std::string Contract::cleanScript(const std::string& zScript, bool zLog) {
             } else if (contains(bools, t)) {
                 ret += " " + t + " ";
                 whites = true;
-            } else if (t.rfind("0x", 0) == 0 || t.rfind("0X", 0) == 0) {
+            } else if (t.rfind("0x", 0) == 0) {
                 std::string hex = "0x" + t.substr(2);
                 std::transform(hex.begin() + 2, hex.end(), hex.begin() + 2,
                                [](unsigned char c) { return static_cast<char>(std::toupper(c)); });

@@ -104,7 +104,7 @@ std::string CascadeNode::getCurrentWeight() const {
     // return weight.multiply(factor, MathContext.DECIMAL32); [cite: 1]
 
     // C++ Logic using MiniNumber:
-    org::minima::objects::base::MiniNumber weight(getTxPoW().getWeight());
+    org::minima::objects::base::MiniNumber weight = org::minima::objects::base::MiniNumber::fromWideString(getTxPoW().getWeight());
     org::minima::objects::base::MiniNumber factor = org::minima::objects::base::MiniNumber::TWO().pow(getLevel());
     org::minima::objects::base::MiniNumber result = weight.mult(factor);
 
