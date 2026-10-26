@@ -85,8 +85,6 @@ std::vector<std::string> keys::getValidParams() const {
 static JSONObject makeKeyJSON(const KeyRow& kr) {
     JSONObject dets;
     std::string pub0x = MiniData(kr.getPublicKey()).to0xString();
-    std::string priv = kr.getPrivateKey();
-    std::string priv0x = priv.empty() ? std::string("") : MiniData(priv).to0xString();
 
     dets.put("size", kr.getSize());
     dets.put("depth", kr.getDepth());
@@ -94,7 +92,8 @@ static JSONObject makeKeyJSON(const KeyRow& kr) {
     dets.put("maxuses", kr.getMaxUses());
     dets.put("modifier", kr.getModifier());
     dets.put("publickey", pub0x);
-    dets.put("privatekey", priv0x);
+    // Do not expose the private key. Java's KeyRow.toJSON() omits it for
+    // list/new; only the explicit genkey action returns key material.
     return dets;
 }
 

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <climits>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -267,7 +268,8 @@ void MiniNumber::apply_precision_down(int precision) {
         m_unscaled /= divisor;
         m_scale -= static_cast<int>(k);
     }
-    normalize_zero();
+    // Java MathContext does not canonicalise a zero's scale, so do not call
+    // normalize_zero() here.
 }
 
 void MiniNumber::apply_math_context_default() {
@@ -277,30 +279,68 @@ void MiniNumber::apply_math_context_default() {
 void MiniNumber::enforce_max_decimal_places() {
     if (m_scale > MAX_DECIMAL_PLACES) {
         int k = m_scale - MAX_DECIMAL_PLACES;
-        cpp_int divisor = pow10(static_cast<unsigned int>(k));
-        // RoundingMode.DOWN -> toward zero truncation
-        m_unscaled /= divisor;
+        // RoundingMode.DOWN -> toward zero truncation.
+        //
+        // Java BigDecimal.setScale(44, DOWN) keeps scale 44 even when the
+        // result is zero (e.g. 1E-45 becomes 0E-44). Preserve that scale so
+        // the serialized MiniNumber bytes match Java exactly.
+        //
+        // Avoid pow10(k) for huge k: if k is at least the number of digits in
+        // the unscaled value, truncation is guaranteed to reach zero. This
+        // also prevents an unbounded pow10 allocation from a hostile exponent
+        // such as "1E-999999999".
+        cpp_int absu = m_unscaled >= 0 ? m_unscaled : -m_unscaled;
+        unsigned int digits = (m_unscaled == 0) ? 1u : count_decimal_digits(absu);
+        if (static_cast<unsigned int>(k) >= digits) {
+            m_unscaled = 0;
+        } else {
+            cpp_int divisor = pow10(static_cast<unsigned int>(k));
+            m_unscaled /= divisor;
+        }
         m_scale = MAX_DECIMAL_PLACES;
-        normalize_zero();
     }
 }
 
 int MiniNumber::compare_values(const cpp_int& ua, int sa, const cpp_int& ub, int sb) {
-    if (sa == sb) {
-        if (ua < ub) return -1;
-        if (ua > ub) return 1;
-        return 0;
+    // Zero handling: the sign of the number is the sign of its unscaled value,
+    // independent of scale.
+    if (ua == 0 || ub == 0) {
+        if (ua == 0 && ub == 0) return 0;
+        return (ua == 0) ? ((ub > 0) ? -1 : 1) : ((ua > 0) ? 1 : -1);
     }
-    // scale to common
-    cpp_int uaa, ubb;
-    int scale;
-    MiniNumber tmpa, tmpb;
-    tmpa.m_unscaled = ua; tmpa.m_scale = sa;
-    tmpb.m_unscaled = ub; tmpb.m_scale = sb;
-    align_scales(tmpa, tmpb, uaa, ubb, scale);
-    if (uaa < ubb) return -1;
-    if (uaa > ubb) return 1;
-    return 0;
+
+    const bool na = (ua < 0);
+    const bool nb = (ub < 0);
+    if (na != nb) return na ? -1 : 1;
+
+    cpp_int A = na ? -ua : ua;
+    cpp_int B = nb ? -ub : ub;
+
+    // Compare magnitudes without aligning scales through pow10 of a huge
+    // exponent. The decimal exponent of the leading digit is
+    // digits(A) - 1 - scale; if those differ the comparison is decided.
+    const long long ea = static_cast<long long>(count_decimal_digits(A)) - 1 - static_cast<long long>(sa);
+    const long long eb = static_cast<long long>(count_decimal_digits(B)) - 1 - static_cast<long long>(sb);
+    int mag;
+    if (ea < eb) {
+        mag = -1;
+    } else if (ea > eb) {
+        mag = 1;
+    } else {
+        // Equal leading exponent implies (sa - sb) == (digits(A) - digits(B)),
+        // so any alignment multiplier is bounded by the operand digit counts.
+        const long long diff = static_cast<long long>(sa) - static_cast<long long>(sb);
+        if (diff == 0) {
+            mag = (A < B) ? -1 : ((A > B) ? 1 : 0);
+        } else if (diff > 0) {
+            cpp_int B2 = B * pow10(static_cast<unsigned int>(diff));
+            mag = (A < B2) ? -1 : ((A > B2) ? 1 : 0);
+        } else {
+            cpp_int A2 = A * pow10(static_cast<unsigned int>(-diff));
+            mag = (A2 < B) ? -1 : ((A2 > B) ? 1 : 0);
+        }
+    }
+    return na ? -mag : mag;
 }
 
 void MiniNumber::checkLimits() {
@@ -350,7 +390,8 @@ MiniNumber MiniNumber::setScale_impl(int newScale, RoundMode mode) const {
         res.m_unscaled = q;
         res.m_scale = newScale;
     }
-    res.normalize_zero();
+    // Java BigDecimal.setScale always keeps the requested scale, including for
+    // zero (0E-44), so do not canonicalise here.
     return res;
 }
 
@@ -723,7 +764,14 @@ void MiniNumber::parse_decimal_string(const std::string& s,
     if (epos != std::string::npos) {
         std::string expstr = str.substr(epos + 1);
         try {
-            exponent = std::stoi(expstr);
+            std::size_t used = 0;
+            long long exp_ll = std::stoll(expstr, &used);
+            if (used != expstr.size() || exp_ll < INT_MIN || exp_ll > INT_MAX) {
+                throw std::invalid_argument("Invalid exponent in decimal string: " + s);
+            }
+            exponent = static_cast<int>(exp_ll);
+        } catch (const std::invalid_argument&) {
+            throw;
         } catch (...) {
             throw std::invalid_argument("Invalid exponent in decimal string: " + s);
         }
@@ -752,15 +800,22 @@ void MiniNumber::parse_decimal_string(const std::string& s,
         first_nonzero++;
     }
     std::string core = digits.substr(first_nonzero);
-    if (core.empty()) {
-        // Zero
-        unscaled_out = 0;
-        scale_out = 0;
-        return;
-    }
 
     // Compute scale = frac_digits - exponent adjustment (note: "1E2" -> exponent=2 reduces scale)
-    int scale = frac_digits - exponent;
+    // Java BigDecimal rejects a scale outside the int range.
+    long long scale_ll = static_cast<long long>(frac_digits) - static_cast<long long>(exponent);
+    if (scale_ll < INT_MIN || scale_ll > INT_MAX) {
+        throw std::invalid_argument("Scale out of range.");
+    }
+    int scale = static_cast<int>(scale_ll);
+
+    if (core.empty()) {
+        // Zero. Java BigDecimal keeps the written scale (e.g. "0.0" -> scale 1,
+        // "0E+5" -> scale -5), and that scale is serialized, so preserve it.
+        unscaled_out = 0;
+        scale_out = scale;
+        return;
+    }
 
     // Build unscaled
     cpp_int unscaled = 0;
@@ -815,11 +870,20 @@ std::string MiniNumber::to_plain_string_strip_trailing_zeros() const {
             }
         }
     } else {
-        // s < 0 -> append zeros on the right
-        std::string intpart = digs;
-        int zeros = -s;
-        intpart.append(static_cast<size_t>(zeros), '0');
-        result = intpart;
+        // s < 0 -> append zeros on the right.
+        // Valid MiniNumbers have at most 20 integer digits, so a larger
+        // expansion can only belong to a value about to be rejected. Bound the
+        // work so formatting a hostile scale (e.g. 1E+2147483647) cannot
+        // allocate gigabytes while building an error message.
+        const unsigned long long zeros =
+            static_cast<unsigned long long>(-static_cast<long long>(s));
+        if (zeros > 100000ull) {
+            result = digs + "E+" + std::to_string(zeros);
+        } else {
+            std::string intpart = digs;
+            intpart.append(static_cast<size_t>(zeros), '0');
+            result = intpart;
+        }
     }
 
     if (m_unscaled < 0 && result != "0") {

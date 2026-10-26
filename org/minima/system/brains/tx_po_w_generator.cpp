@@ -188,6 +188,12 @@ TxPoWGenerator::generateTxPoW(const org::minima::objects::Transaction& zTransact
     //
     auto tip = MinimaDB::getDB()->getTxPoWTree().getTip();
 
+    // Generating a TxPoW requires a chain tip for the next block number and the
+    // median-time window. Fail cleanly rather than dereferencing null.
+    if (!tip) {
+        throw std::runtime_error("TxPoWGenerator::generateTxPoW: no chain tip available");
+    }
+
     // Set the block number (tip + 1)
     txpow.setBlockNumber(tip->getTxPoW().getBlockNumber().increment());
 

@@ -8,7 +8,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <mutex>
-#include <thread>
+#include <future>
 #include <atomic>
 #include <vector>
 
@@ -133,7 +133,10 @@ private:
     std::atomic<bool> m_alive {true};
     std::atomic<int> m_activeChecks {0};
     std::mutex m_workersMutex;
-    std::vector<std::thread> m_workers;
+    // Futures rather than raw threads so completed peer checks can be reaped
+    // during runtime instead of accumulating until shutdown.
+    std::vector<std::future<void>> m_workers;
+    void reapFinishedWorkers();
     std::unordered_set<InetSocketAddress> m_checking;
     std::mutex m_checkingMutex;
 };

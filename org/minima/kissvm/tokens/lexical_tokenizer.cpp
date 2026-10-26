@@ -15,9 +15,12 @@ LexicalTokenizer::LexicalTokenizer(const std::vector<ScriptToken>& zTokens, int 
     : mTokens(zTokens),  // Make a copy of the tokens - this ensures lifetime safety
       mPos(0),
       mSize(static_cast<int>(zTokens.size())),
-      mStackDepth(zStackDepth)  // Use the provided stack depth
+      mStackDepth(0)  // Java ignores the supplied statement depth; expressions start at 0
 {
-    // std::cerr << "DEBUG_LT: LexicalTokenizer created with " << mSize << " tokens, stackDepth=" << mStackDepth << "\n" << std::flush;
+    // Java's LexicalTokenizer(List, int) ignores the int argument and leaves
+    // mStackDepth at its default of 0. Match that exactly so a script with 64
+    // nested brackets is accepted (and 65 rejected) as in the Java node.
+    (void)zStackDepth;
 }
 
 const ScriptToken& LexicalTokenizer::getNextToken() {

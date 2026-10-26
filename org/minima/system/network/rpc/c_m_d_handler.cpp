@@ -48,6 +48,11 @@ public:
 // Helpers (internal linkage)
 namespace {
 
+// Bound request-line and body sizes so a client cannot force unbounded
+// allocation before authentication or command dispatch.
+static const std::size_t MAX_RPC_LINE_BYTES = 8u * 1024u * 1024u;
+static const int MAX_RPC_BODY_BYTES = 8 * 1024 * 1024;
+
 #ifdef _WIN32
 static SOCKET to_os_socket(std::intptr_t s) { return static_cast<SOCKET>(s); }
 #else
@@ -146,6 +151,9 @@ static std::string readLine(ByteStream& stream) {
             break;
         }
         line.push_back(ch);
+        if (line.size() > MAX_RPC_LINE_BYTES) {
+            throw std::runtime_error("RPC request line too long");
+        }
         // In case the client sent only '\r' terminated lines (unlikely)
         if (ch == '\r') {
             // Peek next; if it's '\n', the next loop iteration will consume it
@@ -404,6 +412,21 @@ void CMDHandler::run() {
                     }
                 }
             }
+        }
+
+        // Reject oversized bodies before allocating from the declared length.
+        if (contentlength < 0) {
+            contentlength = 0;
+        } else if (contentlength > MAX_RPC_BODY_BYTES) {
+            const std::string payload_nl =
+                org::minima::system::params::GeneralParams::RPC_CRLF ? "\r\n" : "\n";
+            const std::string resp = "HTTP/1.1 413 Payload Too Large" + payload_nl +
+                "Content-Type: application/json" + payload_nl +
+                "Access-Control-Allow-Origin: *" + payload_nl + payload_nl +
+                "{\"error\":\"Request body too large\"}" + payload_nl;
+            send_all(*stream, resp.c_str(), resp.size());
+            closeSocket();
+            return;
         }
 
         // Are we Authorised

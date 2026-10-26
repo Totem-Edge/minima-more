@@ -168,6 +168,14 @@ std::unique_ptr<JSONObject> txncheck::runCommand() {
     std::shared_ptr<org::minima::database::txpowtree::TxPoWTreeNode> tip =
         org::minima::database::MinimaDB::getDB()->getTxPoWTree().getTip();
 
+    // generateTxPoW needs a tip to derive block number and median time. Without
+    // one (e.g. chain not loaded yet) it would dereference null, so refuse the
+    // command instead of crashing the node.
+    if (!tip) {
+        throw org::minima::system::commands::CommandException(
+            "Cannot check transaction - no chain tip available");
+    }
+
     auto temp_ptr = org::minima::system::brains::TxPoWGenerator::generateTxPoW(txn, wit);
 
     // Redo checks: reset monotonic flag on transaction

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Conformance & security (external review follow-up)
+
+- `MiniNumber` preserves the Java scale for values truncated past 44 decimals
+  and for written zeros (`0.0`, `0E+5`), so serialized bytes match the Java
+  node (`1E-45` serializes as `2C0100`).
+- Hostile exponents no longer trigger unbounded `pow10` or string expansion;
+  `1E+2147483647` is rejected and `1E-999999999` resolves to `0E-44`
+  immediately.
+- `LEN`/`SUBSTR` operate on UTF-16 code units like Java (`LEN([é]) == 1`;
+  surrogate pairs count as two units).
+- Expressions start at stack depth 0, so 64 nested brackets are accepted and
+  65 rejected, matching Java.
+- `keys action:list|new` no longer returns `privatekey` (Java `KeyRow.toJSON`
+  omits it; only `genkey` returns key material).
+- `txncheck` and `TxPoWGenerator` reject a missing chain tip instead of
+  dereferencing null.
+- Peer-check workers are reaped during runtime and worker exceptions are
+  contained; RPC request-line size is capped (POST bodies were already capped).
+- Regression coverage added to `test_script_conformance`; MiniNumber
+  parse/format/wire and ordering differentials match `minima.jar` 1.0.45.15.
+
 ## v0.5.1 — testnet block production + hardening
 
 ### Fixed

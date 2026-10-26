@@ -9,6 +9,7 @@
 #include "org/minima/kissvm/values/value.hpp"
 #include "org/minima/kissvm/values/number_value.hpp"
 #include "org/minima/objects/base/mini_number.hpp"
+#include "org/minima/utils/utf16.hpp"
 
 namespace org {
 namespace minima {
@@ -35,9 +36,10 @@ SUBSTR::runFunction(org::minima::kissvm::Contract& zContract) {
             std::string("Negative SUBSTR length ") + std::to_string(len));
     }
 
-    // Get the string value
+    // Get the string value. Java SUBSTR indexes java.lang.String, so offsets
+    // are UTF-16 code units, not UTF-8 bytes.
     auto strVal = zContract.getStringParam(2, *this);
-    std::string main = strVal->toString();
+    const std::u16string main = org::minima::utils::utf16::from_utf8(strVal->toString());
 
     // Bounds check
     if (start < 0 || end > static_cast<int>(main.length())) {
@@ -47,9 +49,10 @@ SUBSTR::runFunction(org::minima::kissvm::Contract& zContract) {
             + " length:" + std::to_string(main.length()));
     }
 
-    // Extract substring [start, end)
-    std::string substr = main.substr(static_cast<std::size_t>(start),
-                                     static_cast<std::size_t>(len));
+    // Extract substring [start, end) in code units, then re-encode as UTF-8.
+    const std::u16string units = main.substr(static_cast<std::size_t>(start),
+                                             static_cast<std::size_t>(len));
+    std::string substr = org::minima::utils::utf16::to_utf8(units);
 
     return std::make_unique<org::minima::kissvm::values::StringValue>(substr);
 }

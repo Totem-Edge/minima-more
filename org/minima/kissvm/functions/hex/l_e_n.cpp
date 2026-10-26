@@ -10,6 +10,7 @@
 #include "org/minima/kissvm/values/hex_value.hpp"
 #include "org/minima/kissvm/values/string_value.hpp"
 #include "org/minima/kissvm/values/number_value.hpp"
+#include "org/minima/utils/utf16.hpp"
 
 namespace org {
 namespace minima {
@@ -54,7 +55,9 @@ std::unique_ptr<Value> LEN::runFunction(Contract& zContract) {
         if (!sv) {
             throw ExecutionException("Internal type error in LEN for STRING parameter");
         }
-        int len = static_cast<int>(sv->toString().size());
+        // Java String.length() counts UTF-16 code units, not UTF-8 bytes.
+        const std::u16string units = org::minima::utils::utf16::from_utf8(sv->toString());
+        int len = static_cast<int>(units.size());
         return std::make_unique<NumberValue>(len);
     }
 

@@ -76,13 +76,36 @@ P2PPeersChecker::P2PPeersChecker(org::minima::system::network::p2p::P2PManager* 
 
 P2PPeersChecker::~P2PPeersChecker() {
     m_alive.store(false, std::memory_order_release);
-    std::vector<std::thread> workers;
+    std::vector<std::future<void>> workers;
     {
         std::lock_guard<std::mutex> lock(m_workersMutex);
         workers.swap(m_workers);
     }
-    for (auto& t : workers) {
-        if (t.joinable()) t.join();
+    for (auto& f : workers) {
+        if (!f.valid()) continue;
+        try {
+            f.get();
+        } catch (...) {
+            // Worker failures are already contained; never propagate at shutdown.
+        }
+    }
+}
+
+void P2PPeersChecker::reapFinishedWorkers() {
+    std::lock_guard<std::mutex> lock(m_workersMutex);
+    auto it = m_workers.begin();
+    while (it != m_workers.end()) {
+        if (it->valid() &&
+            it->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            try {
+                it->get();
+            } catch (...) {
+                // Ignore contained worker failures.
+            }
+            it = m_workers.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
@@ -279,17 +302,28 @@ void P2PPeersChecker::processMessage(Message& zMessage) {
                 return;
             }
             m_activeChecks.fetch_add(1, std::memory_order_acq_rel);
-            std::thread worker([this, address, force, forcelog]() {
-                auto g = org::minima::system::network::minima::NIOManager::sendPingMessage(
-                    address.getAddress().getHostAddress(), address.getPort(), true);
-                if (m_alive.load(std::memory_order_acquire)) {
-                    auto result = std::make_shared<Message>(PEERS_CHECKPEERS);
-                    result->addObject("address", address)
-                          .addBoolean("pingDone", true)
-                          .addBoolean("force", force)
-                          .addBoolean("forcelog", forcelog);
-                    if (g) result->addObject("greeting", g);
-                    PostMessage(result);
+
+            // Reap completed checks before adding another so the vector does
+            // not grow without bound over the node's lifetime.
+            reapFinishedWorkers();
+
+            auto worker = std::async(std::launch::async, [this, address, force, forcelog]() {
+                // Never let an exception escape a worker: an uncaught exception
+                // in a std::thread body terminates the process.
+                try {
+                    auto g = org::minima::system::network::minima::NIOManager::sendPingMessage(
+                        address.getAddress().getHostAddress(), address.getPort(), true);
+                    if (m_alive.load(std::memory_order_acquire)) {
+                        auto result = std::make_shared<Message>(PEERS_CHECKPEERS);
+                        result->addObject("address", address)
+                              .addBoolean("pingDone", true)
+                              .addBoolean("force", force)
+                              .addBoolean("forcelog", forcelog);
+                        if (g) result->addObject("greeting", g);
+                        PostMessage(result);
+                    }
+                } catch (...) {
+                    // A failed check is treated as an unreachable peer.
                 }
                 m_activeChecks.fetch_sub(1, std::memory_order_acq_rel);
             });
