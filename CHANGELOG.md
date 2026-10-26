@@ -2,13 +2,20 @@
 
 ## Unreleased
 
-## v0.5.1 — testnet block production
+## v0.5.1 — testnet block production + hardening
 
 ### Fixed
 
 - Test/solo mode now reschedules `TXPOWMINER_MINEPULSE` after each mined block,
   so fresh genesis/funding coins confirm continuously without `automine` or a
   node restart. Mainnet/consensus behavior is unchanged.
+- Java-compatible `MiniNumber::getAsInt()` low-32-bit truncation.
+- Normal `MiniNumber` values enforce the Java 2^64−1 bound; chain-weight totals
+  retain a separate wide path.
+- Uppercase `0X` is no longer accepted as a hex literal.
+- NIO frames no longer reserve the full declared wire size; per-type frame
+  ceilings, per-peer backpressure and an 8-connection per-IP inbound cap are
+  active. Global 256 MB NIO / 512 MB MiniData ceilings remain.
 
 ### Added
 

@@ -1,7 +1,24 @@
 # Minima More v0.5.1
 
-Testnet block-production patch. Test/solo mining now continues after each block;
-funding coins confirm without `automine` or restarts. No consensus change.
+Testnet block-production and hardening release.
+
+## Fixed
+
+- Test/solo mining now continues after each block; funding coins confirm without
+  `automine` or restarts.
+- Java-compatible `MiniNumber::getAsInt()` low-32-bit truncation.
+- Normal `MiniNumber` values now enforce the Java 2^64−1 bound; wide chain-weight
+  totals retain their separate internal path.
+- Uppercase `0X` is no longer accepted as a hex literal.
+
+## Security / availability
+
+- NIO frames no longer allocate the full declared size up front.
+- Per-message-type frame ceilings are enforced.
+- Per-peer backpressure and an 8-connection per-IP inbound cap are active.
+- The 256 MB NIO and 512 MB MiniData compatibility ceilings are retained.
+
+No consensus or wire-format change.
 
 # Minima More v0.5.0
 
