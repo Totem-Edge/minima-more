@@ -1,6 +1,6 @@
 # PureMinima C++ — Change Report
 
-## Unreleased
+## v0.5.5 — conformance & security hardening
 
 ### Conformance & security (external review follow-up)
 

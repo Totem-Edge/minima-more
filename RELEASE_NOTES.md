@@ -1,3 +1,36 @@
+# Minima More v0.5.5
+
+Conformance and security hardening release, following an external review of
+v0.5.1. Every behavioural change below makes the node agree with the Java
+reference implementation or closes an availability/key-exposure issue.
+
+## Consensus / wire-format parity
+
+- **MiniNumber scale:** values truncated past 44 decimals and written zeros keep
+  the Java scale, so serialized bytes match the Java node
+  (`1E-45` → `2C0100`, `0.0` → `010100`, `0E+5` → `FB0100`).
+- **Nested expressions:** expressions start at stack depth 0, so 64 nested
+  brackets are accepted and 65 rejected, exactly as in Java.
+- **Strings:** `LEN` and `SUBSTR` operate on UTF-16 code units
+  (`LEN([é]) == 1`; surrogate pairs count as two units), matching Java
+  `String.length()`/`substring()`.
+
+Validated against `minima.jar` 1.0.45.15: 191-value parse/format/wire
+differential and pairwise ordering matrix match exactly; 12/12 consensus
+vectors and `test_script_conformance` pass.
+
+## Security / availability
+
+- Hostile exponents no longer trigger unbounded `pow10` or string expansion
+  (`1E+2147483647` is rejected quickly; `1E-999999999` resolves to `0E-44`).
+- `keys action:list|new` no longer returns `privatekey`; only `genkey` returns
+  key material.
+- `txncheck` and `TxPoWGenerator` reject a missing chain tip instead of
+  dereferencing null.
+- Peer-check workers are reaped during runtime and worker exceptions are
+  contained, preventing unbounded thread accumulation.
+- RPC request-line size is capped (POST bodies remain capped).
+
 # Minima More v0.5.1
 
 Testnet block-production and hardening release.
