@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <set>
 #include <shared_mutex>
+#include <mutex>
 
 #include "org/minima/database/cascade/cascade_node.hpp"
 #include "org/minima/objects/tx_po_w.hpp"
