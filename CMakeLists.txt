@@ -287,6 +287,7 @@ set(MINIMA_SOURCES
     org/minima/system/genesis/genesis_tx_po_w.cpp
     org/minima/system/network/network_manager.cpp
     org/minima/system/network/minima/n_i_o_client.cpp
+    org/minima/system/network/minima/connection_backpressure.cpp
     org/minima/system/network/minima/n_i_o_client_info.cpp
     org/minima/system/network/minima/n_i_o_manager.cpp
     org/minima/system/network/minima/n_i_o_message.cpp

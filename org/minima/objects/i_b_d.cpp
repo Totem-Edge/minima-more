@@ -31,7 +31,7 @@ namespace minima {
 namespace objects {
 
 // Static constant
-const org::minima::objects::base::MiniNumber IBD::MAX_BLOCKS_FOR_IBD = org::minima::objects::base::MiniNumber(34000);
+const org::minima::objects::base::MiniNumber IBD::MAX_BLOCKS_FOR_IBD = org::minima::objects::base::MiniNumber(20000);
 
 // Constructor
 IBD::IBD() : mCascade(nullptr), mTxBlocks() {}

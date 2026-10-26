@@ -1,4 +1,5 @@
 #include "org/minima/system/network/minima/n_i_o_server.hpp"
+#include "org/minima/system/params/general_params.hpp"
 
 #include <chrono>
 #include <thread>
@@ -703,6 +704,27 @@ void NIOServer::acceptNewConnections(SocketHandle serverSock) {
         }
         SocketHandle cli = static_cast<SocketHandle>(s);
 #endif
+        constexpr int MAX_INCOMING_PER_IP = 8;
+        {
+            auto peer = getPeerAddressAndPort(cli);
+            int sameIp = 0;
+            std::size_t total = 0;
+            {
+                std::lock_guard<std::mutex> lock(mClientsMutex);
+                total = mClients.size();
+                for (const auto& kv : mClients) {
+                    if (kv.second && kv.second->isIncoming() && kv.second->getHost() == peer.first) {
+                        ++sameIp;
+                    }
+                }
+            }
+            constexpr int maxConns = 500;
+            if (sameIp >= MAX_INCOMING_PER_IP || total >= static_cast<std::size_t>(maxConns)) {
+                org::minima::utils::MinimaLogger::log("[NIOSERVER] connection cap reached for " + peer.first);
+                closeSocket(cli);
+                continue;
+            }
+        }
         try {
             addChannel(true, cli);
         } catch (...) {

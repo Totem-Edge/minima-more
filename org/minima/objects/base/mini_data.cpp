@@ -25,7 +25,7 @@ using org::minima::utils::MinimaLogger;
 // Static variable definitions
 int MiniData::MINIMA_MAX_HASH_LENGTH = 64;
 // 16 MB
-int MiniData::MINIMA_MAX_MINIDATA_LENGTH = 1024 * 1024 * 16;
+int MiniData::MINIMA_MAX_MINIDATA_LENGTH = 1024 * 1024 * 512;
 
 // Static constants
 const MiniData& MiniData::ZERO_TXPOWID() {

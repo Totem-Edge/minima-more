@@ -24,10 +24,43 @@
 
 #include "org/minima/objects/base/mini_data.hpp"
 #include "org/minima/utils/fast_byte_array_stream.hpp"
+#include "org/minima/system/network/minima/connection_backpressure.hpp"
 #include "org/minima/utils/mini_format.hpp"
 #include "org/minima/utils/minima_logger.hpp"
 #include "org/minima/utils/json/j_s_o_n_object.hpp"
 #include "org/minima/utils/messages/message.hpp"
+
+namespace {
+
+int frameCapForType(std::uint8_t type) {
+    switch (type) {
+        case 0:  return 1 * 1024 * 1024;       // greeting
+        case 1:  return 192 * 1024 * 1024;     // IBD
+        case 7:  return 1 * 1024 * 1024;       // P2P
+        case 8:  return 1 * 1024 * 1024;       // ping
+        case 9:  return 10 * 1024 * 1024;      // lookup
+        case 11: return 1 * 1024 * 1024;       // single ping
+        case 12: return 1 * 1024 * 1024;       // single pong
+        case 13: return 192 * 1024 * 1024;     // IBD request
+        case 14: return 192 * 1024 * 1024;     // IBD response
+        case 15: return 192 * 1024 * 1024;     // archive request
+        case 16: return 192 * 1024 * 1024;     // archive data
+        case 17: return 192 * 1024 * 1024;     // archive single request
+        case 18: return 64 * 1024 * 1024;      // TxBlockID
+        case 19: return 64 * 1024 * 1024;      // TxBlock request
+        case 20: return 64 * 1024 * 1024;      // TxBlock
+        case 21: return 64 * 1024 * 1024;      // TxBlockMine
+        case 22: return 192 * 1024 * 1024;     // MegaMMR request
+        case 23: return 192 * 1024 * 1024;     // MegaMMR response
+        case 24: return 192 * 1024 * 1024;     // genesis sync request
+        case 25: return 192 * 1024 * 1024;     // genesis sync response
+        case 2: case 3: case 4: case 5: case 6:
+            return 64 * 1024 * 1024;           // TxPoW / pulse / genmessage
+        default: return 4 * 1024;              // unknown types
+    }
+}
+
+} // namespace
 
 namespace org {
 namespace minima {
@@ -457,6 +490,15 @@ void NIOClient::handleRead() {
         if (mReadByteArray) {
             int readremaining = mReadCurrentLimit - mReadCurrentPosition;
             int buffread = static_cast<int>(mInSize - offset);
+            if (mReadCurrentPosition == 0 && buffread > 0) {
+                const std::uint8_t type = mInBuf[offset];
+                const int cap = frameCapForType(type);
+                if (mReadCurrentLimit > cap) {
+                    throw std::runtime_error("Frame exceeds per-type cap: type="
+                        + std::to_string(type) + " size=" + std::to_string(mReadCurrentLimit)
+                        + " cap=" + std::to_string(cap));
+                }
+            }
             if (buffread > readremaining) buffread = readremaining;
             if (buffread <= 0) break;
 
@@ -476,6 +518,12 @@ void NIOClient::handleRead() {
 
 
                 if (!mIncomingMsgType.empty() && mPoster) {
+                    auto& bp = ConnectionBackpressure::getInstance();
+                    if (!bp.allowMessage(mUID, mReadCurrentLimit)) {
+                        mReadByteArray.reset();
+                        throw std::runtime_error("Peer message rate/size limit exceeded");
+                    }
+                    bp.recordMessage(mUID, mReadCurrentLimit);
 
                     org::minima::utils::messages::Message msg(mIncomingMsgType);
                     msg.addString("uid", mUID);
