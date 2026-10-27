@@ -1,5 +1,28 @@
 # PureMinima C++ — Change Report
 
+## v0.5.7 — RPC error reporting
+
+### Fixed
+
+- **Command errors were reported as empty strings.** `CommandRunner` stored
+  `CommandException::what()` (a `const char*`) in the JSON reply, but the JSON
+  writer only serialises `std::string` from `std::any`. Every command that
+  failed with a `CommandException` returned `"error": ""`, while
+  `std::exception` failures (already wrapped in `std::string`) reported
+  correctly. This affected all command-level validation errors, e.g.
+  `archive action:importraw` on a missing file and `archive action:export` with
+  a bad `index:` directory.
+
+### Changed
+
+- `analytics/SPEC.md` no longer advertises `GET /v1/export`; it was never
+  implemented and is not part of this node's public API.
+
+### Notes
+
+- No consensus, wire-format, storage or API-shape changes. Error strings are the
+  only behavioural difference.
+
 ## v0.5.6 — IBD, archive and analytics fixes
 
 ### Fixed

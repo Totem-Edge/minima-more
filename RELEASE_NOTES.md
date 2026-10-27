@@ -1,3 +1,24 @@
+# Minima More v0.5.7
+
+Error-reporting patch.
+
+## Fixed
+
+- RPC command failures returned an empty `error` string when the command threw
+  a `CommandException`. The message is now included — e.g.
+  `archive action:importraw file:<missing>` reports
+  "Restore file doesn't exist : ..." instead of `""`. This affects every
+  command-level validation error, not just archive.
+
+## Changed
+
+- Removed the unimplemented `GET /v1/export` row from `analytics/SPEC.md`.
+
+## Compatibility
+
+- No consensus, wire-format, storage or API-shape changes. No new endpoints,
+  commands or flags. Safe drop-in for v0.5.6.
+
 # Minima More v0.5.6
 
 Archive, IBD and analytics fixes.
