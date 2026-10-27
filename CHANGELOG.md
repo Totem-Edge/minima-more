@@ -1,5 +1,52 @@
 # PureMinima C++ — Change Report
 
+## v0.5.6 — IBD, archive and analytics fixes
+
+### Fixed
+
+- **IBD chain contest never ran.** The v0.5.4 fresh-node sync fix set
+  `Main::setSyncIBD(true)` in the NIO `MSG_IBD` handler, but `isSyncIBD()` was
+  also the guard around `IBD::checkOurChainHeavier()`, so the guard was always
+  true and heavier-chain rejection was dead. Chain acceptance is now decided
+  from the local chain (`tree root == nullptr || cascade length == 0`), which
+  restores the Java behaviour, and the flag is `std::atomic<bool>` because it is
+  written by both the NIO and processor threads.
+- **Stuck sync mode.** The flag is cleared on every early exit from the
+  `MSG_IBD` handler (invalid IBD, heavier-chain disconnect) and in the
+  processor's outer `catch`, so a rejected or throwing IBD no longer leaves the
+  node permanently in sync mode.
+- **Legacy archives were unreadable.** The analytics reader always selected
+  `chunkid, offset, len`, so any pre-v0.5 or Java-written archive failed with
+  `no such column: chunkid`. Both layouts (chunked and per-row `syncdata`) are
+  detected and read; completeness reporting handles either.
+- **Truncated raw archives looked like success.** A short or corrupt gzip
+  stream returned end-of-file, so `archive action:import` reported
+  "Archive sync completed" after importing a prefix. Corruption, a missing
+  end-of-stream marker and short reads now fail explicitly, including in the
+  `mysql` import and the analytics raw path.
+- **A fresh analytics index always aborted.** `buildIndex` ran the magic
+  backfill and then appended the same heights from the block pass, and
+  `magic_snapshots.height` is a primary key. The main pass now owns magic on a
+  fresh index.
+- **Silent archive scan aborts.** `forEachArchiveBlock` discarded the final
+  `sqlite3_step` result, so `SQLITE_BUSY` (node writing a chunk, checkpoint,
+  vacuum), `SQLITE_IOERR` or corruption ended the scan exactly like a clean
+  end-of-data and truncated the index at an arbitrary height. Failures now
+  report the height, return code and message.
+
+### Added
+
+- Every analytics index pass prints the archive range, storage layout and
+  completeness, then the indexed height and lag, so an apparent "stops at
+  block N" can be attributed to a live tip, a pruned archive, or a real stop.
+- `AGENTS.md`, and an import-order callout plus bootstrap URLs in `README.md`.
+
+### Notes
+
+- `MAX_KEEP_BLOCKS` (`2000 × NUMBER_DAYS_ARCHIVE`, default 100,000) prunes the
+  archive to a sliding window unless `-archive` is set; an index that appears to
+  stop often has `MIN(block) = tip - 100,000`.
+
 ## v0.5.5 — conformance & security hardening
 
 ### Conformance & security (external review follow-up)

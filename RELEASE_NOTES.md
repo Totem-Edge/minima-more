@@ -1,3 +1,44 @@
+# Minima More v0.5.6
+
+Archive, IBD and analytics fixes.
+
+## IBD / networking
+
+- **Heavier-chain rejection is active again.** v0.5.4 disabled it accidentally
+  by setting the sync flag inside the IBD message handler, which also guarded
+  the chain-weight contest. Acceptance is now decided from the local chain,
+  matching the Java node.
+- `isSyncIBD()` is atomic and is cleared on rejected and throwing IBDs, so a
+  node can no longer get stuck in sync mode after a bad peer.
+
+## Archive
+
+- **Legacy archives read correctly.** Pre-v0.5 and Java-written archives store
+  blocks per row; the analytics reader assumed chunked storage and failed with
+  `no such column: chunkid`. Both layouts are now supported.
+- **Truncated `.raw.dat` imports fail loudly.** A cut-off download used to
+  import its prefix and report success; corrupt gzip, a missing end-of-stream
+  marker and short reads are now errors.
+- **A fresh analytics index no longer aborts** on a duplicate
+  `magic_snapshots` key.
+
+## Analytics
+
+- Archive scan failures (`SQLITE_BUSY`/IO) report the block, code and message
+  instead of silently ending the pass.
+- Every pass prints the archive range, storage layout and completeness, plus the
+  indexed height and lag.
+
+## Operator notes
+
+- Import **MegaMMR first, archive second** — never the reverse, never
+  concurrently.
+- `-archive` is required for an unpruned archive; otherwise only the last
+  `2000 × NUMBER_DAYS_ARCHIVE` blocks (default 100,000) are retained.
+
+Verified: 12/12 consensus vectors, script conformance, ctest 5/5, and an
+85,211-block legacy archive indexes end to end (full pass plus a 0-block rerun).
+
 # Minima More v0.5.5
 
 Conformance and security hardening release, following an external review of
