@@ -224,7 +224,10 @@ std::unique_ptr<JSONArray> CommandRunner::runMultiCommand(const std::string& zMi
             } catch (const CommandException& cexc) {
                 result = cmd->getJSONReply();
                 result->put("status", false);
-                result->put("error", cexc.what());
+                // std::string, not const char*: the JSON writer only handles
+                // std::string in std::any, so a raw char* silently serialised
+                // to an empty error.
+                result->put("error", std::string(cexc.what()));
             } catch (const std::exception& exc) {
                 org::minima::utils::MinimaLogger::log(exc);
                 result = cmd->getJSONReply();
