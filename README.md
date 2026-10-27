@@ -579,6 +579,12 @@ platform notes.
 
 ## Importing legacy node data
 
+> **Import order is mandatory: MegaMMR first, archive second.**
+> Always run `megammr action:import` and let it finish, then run
+> `archive action:import`. Never import the archive first, and never run the two
+> imports concurrently. That order is the only supported one; any other order is
+> an unsupported state and may leave the node needing a full re-derivation.
+
 Two import paths accept **both** Minima More exports and legacy (Java) node files:
 
 - **MegaMMR** — `megammr action:import file:<path>` accepts the versioned
@@ -595,6 +601,16 @@ Two import paths accept **both** Minima More exports and legacy (Java) node file
   (`CREATE`/`INSERT` for `SYNCBLOCK`/`CASCADEDATA`, blobs as `X'…'`), converts it
   to the raw archive stream and runs the normal resync. This is a focused reader
   for the archive schema, not a general H2 engine.
+
+With no `file:`, each import downloads the public bootstrap record:
+
+| Import | Default source |
+|---|---|
+| `megammr action:import` | `https://eurobuddha.com/mega.mmr` |
+| `archive action:import` | `https://eurobuddha.com/archive.raw.dat` |
+
+Override with `-megammrurl <url>` / `-archiveurl <url>` or
+`MINIMA_MEGAMMR_URL` / `MINIMA_ARCHIVE_URL`.
 
 ## Verify
 
