@@ -64,30 +64,32 @@ protected:
                 std::streamsize got = m_file.gcount();
                 if (got <= 0) {
                     m_in_eof = true;
-                    // No more input available; let inflate consume what's left (if any)
                 } else {
                     m_zstrm.next_in = reinterpret_cast<Bytef*>(m_inbuf.data());
                     m_zstrm.avail_in = static_cast<uInt>(got);
                 }
             }
 
+            const uInt before_in = m_zstrm.avail_in;
+            const uInt before_out = m_zstrm.avail_out;
+
             int ret = inflate(&m_zstrm, Z_NO_FLUSH);
             if (ret == Z_STREAM_END) {
                 m_finished = true;
                 break;
             }
-            if (ret != Z_OK) {
-                // On Z_BUF_ERROR with no output produced and EOF, treat as finished
-                if (ret == Z_BUF_ERROR && m_in_eof && m_zstrm.avail_out != m_outbuf.size()) {
-                    break;
-                }
-                return traits_type::eof();
+            if (ret != Z_OK && ret != Z_BUF_ERROR) {
+                // Z_DATA_ERROR / Z_NEED_DICT / Z_MEM_ERROR: never report this as
+                // a normal end-of-file, or a corrupt download would import
+                // silently as a short archive.
+                throw std::runtime_error("gzip archive stream error (inflate=" +
+                                         std::to_string(ret) + ")");
             }
 
-            // If no input and no output progress but EOF, break
-            if (m_in_eof && m_zstrm.avail_out == m_outbuf.size()) {
-                m_finished = true;
-                break;
+            // No input consumed and no output produced with the file exhausted
+            // means the gzip member has no end-of-stream marker: truncated.
+            if (m_in_eof && before_in == m_zstrm.avail_in && before_out == m_zstrm.avail_out) {
+                throw std::runtime_error("truncated gzip archive stream (no end-of-stream marker)");
             }
         }
 
@@ -136,6 +138,11 @@ RawArchiveInput& RawArchiveInput::operator=(RawArchiveInput&&) noexcept = defaul
 void RawArchiveInput::connect() {
     // Create the decompressed input stream over the gzip file
     mDataIn = std::make_unique<GzipIStream>(mFile, 65536, 65536);
+    // Surface decompression failures as exceptions instead of silently turning
+    // them into end-of-file (the default stream behaviour).
+    mDataIn->exceptions(std::ios::badbit);
+    mHasError = false;
+    mError.clear();
 
     // Is there a cascade
     org::minima::objects::base::MiniByte hasCasc = org::minima::objects::base::MiniByte::ReadFromStream(*mDataIn);
@@ -150,6 +157,11 @@ void RawArchiveInput::connect() {
     // Now how many blocks in total
     mTotalFound = org::minima::objects::base::MiniNumber::ReadFromStream(*mDataIn).getAsInt();
     mTotalAdded = 0;
+
+    if (!mDataIn->good() || mTotalFound < 0) {
+        throw std::runtime_error("raw archive header is truncated or invalid (declared blocks " +
+                                 std::to_string(mTotalFound) + ")");
+    }
 
     org::minima::utils::MinimaLogger::log("Blocks found in RAW Archive : " + std::to_string(mTotalFound));
 }
@@ -179,7 +191,24 @@ std::unique_ptr<org::minima::objects::IBD> RawArchiveInput::getNextIBD() {
         // Try and load up to 256 blocks
         for (int i = 0; i < 256; ++i) {
             // Load a block
-            std::unique_ptr<TxBlock> upblock = TxBlock::ReadFromStream(*mDataIn);
+            std::unique_ptr<TxBlock> upblock;
+            try {
+                upblock = TxBlock::ReadFromStream(*mDataIn);
+            } catch (const std::exception& exc) {
+                mHasError = true;
+                mError = "raw archive ended after " + std::to_string(mTotalAdded) +
+                         " of " + std::to_string(mTotalFound) + " blocks: " + exc.what();
+                return std::make_unique<IBD>();
+            }
+
+            // A short read still returns a TxBlock; the stream state is what
+            // tells us the declared block count was not met.
+            if (!upblock || !mDataIn->good()) {
+                mHasError = true;
+                mError = "raw archive ended early after " + std::to_string(mTotalAdded) +
+                         " of " + std::to_string(mTotalFound) + " blocks";
+                return std::make_unique<IBD>();
+            }
 
             // Add to IBD (convert unique_ptr -> shared_ptr)
             std::shared_ptr<TxBlock> spblock(std::move(upblock));

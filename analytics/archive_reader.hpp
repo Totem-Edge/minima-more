@@ -19,6 +19,9 @@ struct ArchiveStats {
     std::int64_t distinctIds = 0;
     std::int64_t chunks = -1;
     std::int64_t missingChunks = -1;
+    /// True when the archive predates chunked storage (no chunkid/blockchunks),
+    /// i.e. blocks live in the per-row `syncdata` blob.
+    bool legacyStorage = false;
 };
 
 ArchiveStats readArchiveStats(const std::string& path);

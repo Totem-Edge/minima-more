@@ -261,6 +261,11 @@ bool forEachBlock(const IndexOptions& options,
                     }
                 }
             }
+            if (rawin.hasError()) {
+                error = rawin.errorMessage();
+                rawin.stop();
+                return false;
+            }
             rawin.stop();
             return true;
         } catch (const std::exception& ex) {
@@ -526,13 +531,37 @@ IndexResult buildIndex(const IndexOptions& options) {
         }
     }
 
+    long long lastHeight = 0;
     {
+        auto res = con.Query("SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks;");
+        if (!res || res->HasError()) {
+            result.error = res ? res->GetError() : "index_state query failed";
+            return result;
+        }
+        lastHeight = res->GetValue(0, 0).GetValue<std::int64_t>();
+    }
+
+    const ArchiveStats archiveStats = readArchiveStats(options.archivePath);
+    const bool archiveSource = !options.forceMmr &&
+        ((archiveStats.exists && archiveStats.count > 0) || !options.rawPath.empty());
+
+    if (archiveSource) {
         auto count = con.Query("SELECT COUNT(*) FROM analytics.magic_snapshots;");
         if (!count || count->HasError()) {
             result.error = count ? count->GetError() : "magic count failed";
             return result;
         }
-        if (count->GetValue(0, 0).GetValue<std::int64_t>() == 0) {
+        if (lastHeight == 0) {
+            // Fresh index: the main block loop below writes magic for every
+            // block, so a backfill here would insert the same heights twice
+            // (magic_snapshots.height is a primary key). Clear any rows left by
+            // an aborted run and let the main pass own the table.
+            if (!exec(con, "DELETE FROM analytics.magic_changes;", error) ||
+                !exec(con, "DELETE FROM analytics.magic_snapshots;", error)) {
+                result.error = error;
+                return result;
+            }
+        } else if (count->GetValue(0, 0).GetValue<std::int64_t>() == 0) {
             std::string magicError;
             if (!backfillMagic(con, options, magicError)) {
                 std::cerr << "Magic backfill skipped: " << magicError << "\n";
@@ -550,22 +579,9 @@ IndexResult buildIndex(const IndexOptions& options) {
         }
     }
 
-    long long lastHeight = 0;
-    {
-        auto res = con.Query("SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks;");
-        if (!res || res->HasError()) {
-            result.error = res ? res->GetError() : "index_state query failed";
-            return result;
-        }
-        lastHeight = res->GetValue(0, 0).GetValue<std::int64_t>();
-    }
-
     // MegaMMR-only mode: no archive blocks (or -megammr forced). Archive-backed
     // tables/metrics cannot be rebuilt, but the unpruned recent coin set and
     // MMR root can be indexed and served. Long-term history still needs -archive.
-    const ArchiveStats archiveStats = readArchiveStats(options.archivePath);
-    const bool archiveSource = !options.forceMmr &&
-        ((archiveStats.exists && archiveStats.count > 0) || !options.rawPath.empty());
     if (!archiveSource) {
         if (options.mmrPath.empty() || !std::filesystem::exists(options.mmrPath)) {
             result.error = "no archive blocks and no MegaMMR source; pass -archive or -megammr -mmrpath";

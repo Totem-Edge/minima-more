@@ -636,6 +636,12 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             }
         }
 
+        // A short/corrupt raw archive also ends with an empty IBD, so check the
+        // reader's error state rather than trusting the empty chunk.
+        if (usinglocal && !H2_TEMPARCHIVE && STATIC_RAW && STATIC_RAW->hasError()) {
+            throw CommandException("RAW archive is incomplete: " + STATIC_RAW->errorMessage());
+        }
+
         NotifyListener(minimalistener, "All blocks loaded.. pls wait");
         MinimaLogger::log("All Archive data received and processed.");
 
@@ -947,6 +953,10 @@ std::unique_ptr<JSONObject> archive::runCommand() {
 
         rawin.stop();
 
+        if (rawin.hasError()) {
+            throw CommandException("RAW archive import incomplete: " + rawin.errorMessage());
+        }
+
         // Force the final recalculation: the processor only flushes the archive
         // when it sees an empty IBD (or every 2048 blocks). Without this the
         // last partial batch is processed in RAM but never committed.
@@ -978,6 +988,9 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                 }
             }
             tailraw.stop();
+            if (tailraw.hasError()) {
+                MinimaLogger::log("[-] RAW archive tail read incomplete: " + tailraw.errorMessage());
+            }
             arch.flushPending();
         }
 
@@ -1039,6 +1052,10 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         }
 
         rawin.stop();
+
+        if (rawin.hasError()) {
+            MinimaLogger::log("[-] RAW archive inspection stopped early: " + rawin.errorMessage());
+        }
 
         long long timenow = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
                            std::chrono::system_clock::now().time_since_epoch()).count());

@@ -25,6 +25,37 @@ std::int64_t scalar(sqlite3* db, const char* sql, bool& ok) {
     return value;
 }
 
+bool tableExists(sqlite3* db, const char* name) {
+    sqlite3_stmt* stmt = nullptr;
+    bool found = false;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?;",
+                           -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+        found = sqlite3_step(stmt) == SQLITE_ROW;
+    }
+    if (stmt) sqlite3_finalize(stmt);
+    return found;
+}
+
+// `table`/`column` are internal literals, so the PRAGMA is built directly
+// (PRAGMA does not accept bound parameters).
+bool columnExists(sqlite3* db, const char* table, const char* column) {
+    const std::string sql = std::string("PRAGMA table_info(") + table + ");";
+    sqlite3_stmt* stmt = nullptr;
+    bool found = false;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const unsigned char* name = sqlite3_column_text(stmt, 1);
+            if (name && std::strcmp(reinterpret_cast<const char*>(name), column) == 0) {
+                found = true;
+                break;
+            }
+        }
+    }
+    if (stmt) sqlite3_finalize(stmt);
+    return found;
+}
+
 } // namespace
 
 ArchiveStats readArchiveStats(const std::string& path) {
@@ -57,17 +88,29 @@ ArchiveStats readArchiveStats(const std::string& path) {
     out.minBlock = scalar(db, "SELECT MIN(block) FROM syncblock;", ok);
     out.maxBlock = scalar(db, "SELECT MAX(block) FROM syncblock;", ok);
     out.distinctIds = scalar(db, "SELECT COUNT(DISTINCT txpowid) FROM syncblock;", ok);
-    out.chunks = scalar(db, "SELECT COUNT(*) FROM blockchunks;", ok);
-    out.missingChunks = scalar(
-        db,
-        "SELECT COUNT(*) FROM syncblock s LEFT JOIN blockchunks b "
-        "ON s.chunkid = b.id WHERE s.chunkid >= 0 AND b.id IS NULL;",
-        ok);
+
+    // A pre-v0.5 archive stores each block in its own `syncdata` blob and has
+    // neither the chunkid column nor the blockchunks table. Both forms are
+    // valid; only the completeness checks differ.
+    const bool hasChunkId = columnExists(db, "syncblock", "chunkid");
+    const bool hasChunks = tableExists(db, "blockchunks");
+    out.legacyStorage = !(hasChunkId && hasChunks);
+
+    if (hasChunks) {
+        out.chunks = scalar(db, "SELECT COUNT(*) FROM blockchunks;", ok);
+    }
+    if (hasChunkId && hasChunks) {
+        out.missingChunks = scalar(
+            db,
+            "SELECT COUNT(*) FROM syncblock s LEFT JOIN blockchunks b "
+            "ON s.chunkid = b.id WHERE s.chunkid >= 0 AND b.id IS NULL;",
+            ok);
+    }
 
     if (out.count > 0 && out.minBlock >= 0 && out.maxBlock >= out.minBlock) {
         out.complete = (out.count == (out.maxBlock - out.minBlock + 1)) &&
                        (out.distinctIds == out.count) &&
-                       (out.missingChunks == 0);
+                       (!hasChunkId || (hasChunks && out.missingChunks == 0));
     }
 
     sqlite3_close(db);
@@ -127,8 +170,15 @@ bool forEachArchiveBlock(const std::string& path, std::int64_t fromHeight,
     sqlite3_busy_timeout(db, 2000);
 
     sqlite3_stmt* stmt = nullptr;
-    const char* sql = "SELECT block, syncdata, chunkid, offset, len FROM syncblock "
-                      "WHERE block > ? ORDER BY block;";
+    // Legacy archives have no chunkid/offset/len; the constant columns keep the
+    // row shape identical so the -1 chunkid path reads `syncdata` directly.
+    const bool chunked = columnExists(db, "syncblock", "chunkid") &&
+                         tableExists(db, "blockchunks");
+    const char* sql = chunked
+                          ? "SELECT block, syncdata, chunkid, offset, len FROM syncblock "
+                            "WHERE block > ? ORDER BY block;"
+                          : "SELECT block, syncdata, -1, 0, 0 FROM syncblock "
+                            "WHERE block > ? ORDER BY block;";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         error = sqlite3_errmsg(db);
         sqlite3_finalize(stmt);
@@ -159,7 +209,8 @@ bool forEachArchiveBlock(const std::string& path, std::int64_t fromHeight,
                 if (sqlite3_step(cstmt) != SQLITE_ROW ||
                     !unpackChunk(sqlite3_column_blob(cstmt, 0),
                                  sqlite3_column_bytes(cstmt, 0), cachedChunk)) {
-                    error = "missing or invalid archive chunk";
+                    error = "missing or invalid archive chunk " + std::to_string(chunkId) +
+                            " at block " + std::to_string(height);
                     sqlite3_finalize(cstmt);
                     ok = false;
                     break;
@@ -171,7 +222,9 @@ bool forEachArchiveBlock(const std::string& path, std::int64_t fromHeight,
             const int len = sqlite3_column_int(stmt, 4);
             if (offset < 0 || len < 0 ||
                 static_cast<std::size_t>(offset + len) > cachedChunk.size()) {
-                error = "invalid archive chunk offset";
+                error = "invalid archive chunk offset at block " + std::to_string(height) +
+                        " (chunk " + std::to_string(chunkId) + ", offset " +
+                        std::to_string(offset) + ", len " + std::to_string(len) + ")";
                 ok = false;
                 break;
             }

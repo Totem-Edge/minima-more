@@ -759,6 +759,11 @@ std::unique_ptr<JSONObject> mysql::runCommand() {
 
                 rawin.stop();
 
+                if (rawin.hasError()) {
+                    throw org::minima::system::commands::CommandException(
+                        "RAW archive import incomplete: " + rawin.errorMessage());
+                }
+
                 auto timediff = std::chrono::steady_clock::now() - timestart;
                 auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(timediff).count();
 
@@ -829,6 +834,10 @@ std::unique_ptr<JSONObject> mysql::runCommand() {
             }
 
             rawin.stop();
+
+            if (rawin.hasError()) {
+                MinimaLogger::log("[-] RAW archive read incomplete: " + rawin.errorMessage());
+            }
 
             auto timediff = std::chrono::steady_clock::now() - timestart;
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(timediff).count();
