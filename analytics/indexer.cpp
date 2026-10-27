@@ -618,6 +618,14 @@ IndexResult buildIndex(const IndexOptions& options) {
         return result;
     }
 
+    // Make the source of any "stops at block N" report self-evident: a live
+    // node writes its archive continuously, and a one-shot -index only ever
+    // covers the range that exists at the moment it runs.
+    std::cerr << "archive: blocks=" << archiveStats.count
+              << " range=[" << archiveStats.minBlock << "," << archiveStats.maxBlock << "]"
+              << " storage=" << (archiveStats.legacyStorage ? "legacy" : "chunked")
+              << " complete=" << (archiveStats.complete ? "yes" : "no") << "\n";
+
     duckdb::Appender blocks(con, "analytics", "chain_blocks");
     duckdb::Appender txs(con, "analytics", "txs");
     duckdb::Appender inputs(con, "analytics", "tx_inputs");
@@ -628,6 +636,7 @@ IndexResult buildIndex(const IndexOptions& options) {
     MagicState magicState;
 
     long long processed = 0;
+    long long lastIndexedHeight = lastHeight;
     std::string lastHash;
 
     const bool ok = forEachArchiveBlock(
@@ -699,6 +708,7 @@ IndexResult buildIndex(const IndexOptions& options) {
             }
 
             lastHash = hash;
+            lastIndexedHeight = height;
             ++processed;
             return true;
         },
@@ -1171,6 +1181,21 @@ IndexResult buildIndex(const IndexOptions& options) {
 
     result.ok = true;
     result.blocks = processed;
+
+    std::cerr << "index: blocks=" << processed << " height=" << lastIndexedHeight;
+    if (archiveStats.maxBlock > lastIndexedHeight) {
+        std::cerr << " (archive tip " << archiveStats.maxBlock << ", lag "
+                  << (archiveStats.maxBlock - lastIndexedHeight)
+                  << "; re-run -index to catch up)";
+    }
+    std::cerr << "\n";
+    if (archiveStats.count > 0 && !archiveStats.complete) {
+        result.warning = "archive is not contiguous/complete: " +
+                         std::to_string(archiveStats.count) + " rows in [" +
+                         std::to_string(archiveStats.minBlock) + "," +
+                         std::to_string(archiveStats.maxBlock) + "]";
+    }
+
     return result;
 }
 

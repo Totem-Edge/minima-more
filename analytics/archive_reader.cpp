@@ -191,8 +191,22 @@ bool forEachArchiveBlock(const std::string& path, std::int64_t fromHeight,
     std::vector<std::uint8_t> cachedChunk;
     std::vector<std::uint8_t> bytes;
     bool ok = true;
+    std::int64_t lastHeight = fromHeight;
 
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
+    while (true) {
+        const int rc = sqlite3_step(stmt);
+        if (rc == SQLITE_DONE) break;
+        if (rc != SQLITE_ROW) {
+            // Any mid-scan failure (SQLITE_BUSY while the node writes a chunk,
+            // SQLITE_IOERR, corruption) used to fall out of the ROW loop and be
+            // reported as a clean end-of-scan, silently truncating the index at
+            // an arbitrary height.
+            error = "archive read failed after block " + std::to_string(lastHeight) +
+                    " (sqlite rc=" + std::to_string(rc) + "): " + sqlite3_errmsg(db);
+            ok = false;
+            break;
+        }
+
         const std::int64_t height = sqlite3_column_int64(stmt, 0);
         const std::int64_t chunkId = sqlite3_column_int64(stmt, 2);
 
@@ -238,6 +252,7 @@ bool forEachArchiveBlock(const std::string& path, std::int64_t fromHeight,
             }
         }
 
+        lastHeight = height;
         if (!sink(height, bytes)) break;
     }
 
