@@ -62,7 +62,6 @@ unavailable. Historical flows and archived transaction detail require
 | `GET /v1/utxo/distribution?at=tip\|height&bands=` | UTXO value/age distribution |
 | `GET /v1/cohorts/{name}?at=` | holder cohorts |
 | `GET /v1/consistency?height=` | archive vs MMR snapshot check |
-| `GET /v1/export?dataset=&format=parquet` | async export (v1 limited) |
 | `GET /v1/stream` (SSE) | height/metric updates |
 | MCP tools | same operations for agents |
 
