@@ -898,6 +898,9 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
             // MinimaLogger::log("DEBUG_SYNC: Current isSyncIBD state: " + std::string(Main::getInstance()->isSyncIBD() ? "TRUE" : "FALSE"));
             MinimaLogger::log(std::string("[!] TXPOWPROCESSOR_PROCESS_IBD ERROR ") + exc.what());
             MinimaLogger::log(exc);
+            // Match the Java reference: the big catch exists so sync mode is
+            // always cleared, even when IBD processing throws.
+            Main::getInstance()->setSyncIBD(false);
         }
 
     } else if (zMessage.isMessageType(TXPOWPROCESSOR_PROCESS_SYNCIBD)) {

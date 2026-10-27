@@ -229,6 +229,18 @@ protected:
         return seekoff(off_type(pos), std::ios_base::beg, which);
     }
 };
+
+// A node is genuinely bootstrapping (and so must accept a peer's chain rather
+// than contest it) only while it has no active tree root or no cascade at all.
+// This is a real property of the local chain, unlike isSyncIBD(), which is a
+// transient flag set by the processor while it drains an IBD and must not be
+// used to decide chain acceptance.
+bool isBootstrappingChain() {
+    MinimaDB* db = MinimaDB::getDB();
+    if (db == nullptr) return true;
+    return db->getTxPoWTree().getRoot() == nullptr ||
+           db->getCascade().getLength() == 0;
+}
 } // namespace
 
 void NIOMessage::run() {
@@ -521,15 +533,16 @@ void NIOMessage::run() {
                     P2PFunctions::addInvalidPeer(mFullAdrress);
                 }
                 Main::getInstance()->getNIOManager().disconnect(mClientUID, true);
+                Main::getInstance()->setSyncIBD(false);
                 return;
             }
 
             if (MinimaDB::getDB()->getCascade().getLength() > 0 && ibd->hasCascadeWithBlocks()) {
-                // During an Initial Block Download / resync we must accept the peers' consensus
-                // chain rather than contest it with our own (potentially stale or empty) view.
-                // isSyncIBD() is set true above as soon as an IBD is received, so this covers
-                // fresh boots and nodes that have been offline.
-                if (!Main::getInstance()->isSyncIBD()) {
+                // A node that is genuinely bootstrapping must accept the peer's
+                // consensus chain rather than contest it with its own (empty or
+                // genesis-only) view. Once we hold a real chain we still reject
+                // a peer whose chain is not heavier, as the Java node does.
+                if (!isBootstrappingChain()) {
                     bool heavier = IBD::checkOurChainHeavier(*ibd); // Dereference shared_ptr
 
                     if (!heavier) {
@@ -550,13 +563,14 @@ void NIOMessage::run() {
                                 Main::getInstance()->PostTimerMessage(std::make_shared<TimerMessage>(TimerMessage(1000, Main::MAIN_DO_RESCUE)));
                             }
                         }
+                        Main::getInstance()->setSyncIBD(false);
                         return;
                     } else if (GeneralParams::IBDSYNC_LOGS) {
                         // Downgraded from always-log with [!] to gated behind IBDSYNC_LOGS to reduce spam
                         MinimaLogger::log("Received IBD with cascade from " + mClientUID + " (we already have one)");
                     }
                 } else if (GeneralParams::IBDSYNC_LOGS) {
-                    MinimaLogger::log("Skipping chain-weight contest while in IBD sync from " + mClientUID);
+                    MinimaLogger::log("Skipping chain-weight contest while bootstrapping from " + mClientUID);
                 }
             }
 

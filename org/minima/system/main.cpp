@@ -343,11 +343,11 @@ void Main::setSyncIBD(bool zSync) {
     if (org::minima::system::params::GeneralParams::IBDSYNC_LOGS) {
         MinimaLogger::log(std::string("SYNC IBD LOCK : ") + (zSync ? "true" : "false"));
     }
-    mSyncIBD = zSync;
+    mSyncIBD.store(zSync, std::memory_order_release);
 }
 
 bool Main::isSyncIBD() const {
-    return mSyncIBD;
+    return mSyncIBD.load(std::memory_order_acquire);
 }
 
 void Main::setHasShutDown() {

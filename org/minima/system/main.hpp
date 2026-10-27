@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdint>
 #include <any>
+#include <atomic>
 
 #include "org/minima/utils/messages/message_processor.hpp"
 #include "org/minima/objects/base/mini_data.hpp"
@@ -188,7 +189,7 @@ private:
     bool mShuttingdown {false};
     bool mHaveShutDownFinalProcs {false};
     bool mRestoring {false};
-    bool mSyncIBD {false};
+    std::atomic<bool> mSyncIBD {false};
 
     // Mining mode
     bool mNormalMineMode {true};
