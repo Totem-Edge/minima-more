@@ -108,21 +108,16 @@ MiniNumber::MiniNumber(const cpp_int& zNumber) : m_unscaled(zNumber), m_scale(0)
 }
 
 MiniNumber::MiniNumber(const std::string& zNumber) : m_unscaled(0), m_scale(0) {
-    // Handle empty strings gracefully - default to zero
-    if (zNumber.empty() || zNumber.find_first_not_of(" \t\r\n") == std::string::npos) {
-        m_unscaled = 0;
-        m_scale = 0;
-        return;
-    }
-
     parse_decimal_string(zNumber, m_unscaled, m_scale);
     apply_math_context_default();
     checkLimits();
 }
 
 MiniNumber::MiniNumber(const MiniNumber& other) : m_unscaled(other.m_unscaled), m_scale(other.m_scale), m_wide(other.m_wide) {
-    apply_math_context_default();
-    checkLimits();
+    // Copying is a field copy. Java re-validates only in constructors from a
+    // String/BigDecimal and in arithmetic results, never on a copy or on a
+    // value read from the wire. Re-running checkLimits() here truncated
+    // scale-45 wire values to 44 decimals and range-checked them on read.
 }
 
 MiniNumber::MiniNumber(const cpp_int& zNumber, UncheckedCtor) : m_unscaled(zNumber), m_scale(0) {
@@ -136,8 +131,8 @@ MiniNumber& MiniNumber::operator=(const MiniNumber& other) {
         m_unscaled = other.m_unscaled;
         m_scale = other.m_scale;
         m_wide = other.m_wide;
-        apply_math_context_default();
-        checkLimits();
+        // Assignment is a field copy (see the copy constructor): no
+        // re-validation or scale truncation.
     }
     return *this;
 }
@@ -746,6 +741,9 @@ void MiniNumber::parse_decimal_string(const std::string& s,
     auto ltrim = [](std::string& x){ x.erase(x.begin(), std::find_if(x.begin(), x.end(), [](unsigned char ch){ return !std::isspace(ch); })); };
     auto rtrim = [](std::string& x){ x.erase(std::find_if(x.rbegin(), x.rend(), [](unsigned char ch){ return !std::isspace(ch); }).base(), x.end()); };
     ltrim(str); rtrim(str);
+    if (str.size() != s.size()) {
+        throw std::invalid_argument("Invalid decimal string: leading or trailing whitespace");
+    }
     if (str.empty()) {
         throw std::invalid_argument("Invalid decimal string: empty");
     }

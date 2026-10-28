@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest `0.2.x` release line. Older releases
+Security fixes are provided for the latest `0.5.x` release line. Older releases
 and unmaintained forks are not supported.
 
 ## Reporting a vulnerability

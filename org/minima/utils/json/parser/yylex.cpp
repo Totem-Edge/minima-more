@@ -28,32 +28,34 @@ namespace parser {
 
 const int Yylex::ZZ_LEXSTATE[4] = { 0, 0, 1, 1 };
 
-const std::u16string Yylex::ZZ_CMAP_PACKED =
-    u"\11\0\1\7\1\7\2\0\1\7\22\0\1\7\1\0\1\11\10\0"
+namespace {
+template <std::size_t N>
+std::u16string u16_lit(const char16_t (&a)[N]) { return std::u16string(a, N - 1); }
+}
+
+const std::u16string Yylex::ZZ_CMAP_PACKED = u16_lit(u"\11\0\1\7\1\7\2\0\1\7\22\0\1\7\1\0\1\11\10\0"
     u"\1\6\1\31\1\2\1\4\1\12\12\3\1\32\6\0\4\1\1\5"
     u"\1\1\24\0\1\27\1\10\1\30\3\0\1\22\1\13\2\1\1\21"
     u"\1\14\5\0\1\23\1\0\1\15\3\0\1\16\1\24\1\17\1\20"
-    u"\5\0\1\25\1\0\1\26\uff82\0";
+    u"\5\0\1\25\1\0\1\26\uff82\0");
 
 // uint16_t is now defined
 const std::vector<uint16_t> Yylex::ZZ_CMAP = Yylex::zzUnpackCMap(Yylex::ZZ_CMAP_PACKED);
 
-const std::u16string Yylex::ZZ_ACTION_PACKED_0 =
-    u"\2\0\2\1\1\2\1\3\1\4\3\1\1\5\1\6"
+const std::u16string Yylex::ZZ_ACTION_PACKED_0 = u16_lit(u"\2\0\2\1\1\2\1\3\1\4\3\1\1\5\1\6"
     u"\1\7\1\10\1\11\1\12\1\13\1\14\1\15\5\0"
     u"\1\14\1\16\1\17\1\20\1\21\1\22\1\23\1\24"
     u"\1\0\1\25\1\0\1\25\4\0\1\26\1\27\2\0"
-    u"\1\30";
+    u"\1\30");
 
 const std::vector<int> Yylex::ZZ_ACTION = Yylex::zzUnpackAction(Yylex::ZZ_ACTION_PACKED_0);
 
-const std::u16string Yylex::ZZ_ROWMAP_PACKED_0 =
-    u"\0\0\0\33\0\66\0\121\0\154\0\207\0\66\0\242"
+const std::u16string Yylex::ZZ_ROWMAP_PACKED_0 = u16_lit(u"\0\0\0\33\0\66\0\121\0\154\0\207\0\66\0\242"
     u"\0\275\0\330\0\66\0\66\0\66\0\66\0\66\0\66"
     u"\0\363\0\u010e\0\66\0\u0129\0\u0144\0\u015f\0\u017a\0\u0195"
     u"\0\66\0\66\0\66\0\66\0\66\0\66\0\66\0\66"
     u"\0\u01b0\0\u01cb\0\u01e6\0\u01e6\0\u0201\0\u021c\0\u0237\0\u0252"
-    u"\0\66\0\66\0\u026d\0\u0288\0\66";
+    u"\0\66\0\66\0\u026d\0\u0288\0\66");
 
 const std::vector<int> Yylex::ZZ_ROWMAP = Yylex::zzUnpackRowMap(Yylex::ZZ_ROWMAP_PACKED_0);
 
@@ -110,10 +112,9 @@ const char* const Yylex::ZZ_ERROR_MSG[3] = {
     "Error: pushback value was too large"
 };
 
-const std::u16string Yylex::ZZ_ATTRIBUTE_PACKED_0 =
-    u"\2\0\1\11\3\1\1\11\3\1\6\11\2\1\1\11"
+const std::u16string Yylex::ZZ_ATTRIBUTE_PACKED_0 = u16_lit(u"\2\0\1\11\3\1\1\11\3\1\6\11\2\1\1\11"
     u"\5\0\10\11\1\0\1\1\1\0\1\1\4\0\2\11"
-    u"\2\0\1\11";
+    u"\2\0\1\11");
 
 const std::vector<int> Yylex::ZZ_ATTRIBUTE = Yylex::zzUnpackAttribute(Yylex::ZZ_ATTRIBUTE_PACKED_0);
 

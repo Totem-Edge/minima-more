@@ -238,6 +238,8 @@ protected:
 bool isBootstrappingChain() {
     MinimaDB* db = MinimaDB::getDB();
     if (db == nullptr) return true;
+    // Callers guard with getCascade().getLength() > 0, so the second disjunct
+    // is dead there and this reduces to "no TxPoW tree root yet".
     return db->getTxPoWTree().getRoot() == nullptr ||
            db->getCascade().getLength() == 0;
 }

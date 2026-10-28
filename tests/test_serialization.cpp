@@ -148,6 +148,76 @@ int main() {
     }
     std::cout << std::endl;
 
+
+    // =====================================================================
+    // 6. MiniNumber wire-scale preservation (Java parity)
+    // =====================================================================
+    std::cout << "--- 6. MiniNumber wire-scale preservation ---" << std::endl;
+    {
+        bool ok = true;
+        auto from_hex = [](const std::string& hex, MiniNumber& out) {
+            std::string bytes;
+            for (std::size_t i = 0; i + 1 < hex.size(); i += 2) {
+                bytes.push_back(static_cast<char>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+            }
+            std::istringstream iss(bytes, std::ios::binary);
+            out = MiniNumber::ReadFromStream(iss);
+        };
+        auto to_hex = [](MiniNumber n) {
+            std::ostringstream oss(std::ios::binary);
+            n.writeDataStream(oss);
+            std::ostringstream hex;
+            for (char c : oss.str()) {
+                hex << std::hex << std::setfill('0') << std::setw(2)
+                    << (static_cast<unsigned int>(static_cast<unsigned char>(c)));
+            }
+            return hex.str();
+        };
+
+        MiniNumber s45;
+        from_hex("2D170A70C3C40A64E6C51999090B65F67D9240000000000001", s45);
+        const std::string rt = to_hex(s45);
+        if (rt != "2d170a70c3c40a64e6c51999090b65f67d9240000000000001") {
+            std::cout << "  FAIL scale-45 roundtrip: " << rt << std::endl;
+            ok = false;
+        } else {
+            std::cout << "  PASS scale-45 roundtrip" << std::endl;
+        }
+
+        MiniNumber tiny(std::string("1E-45"));
+        if (to_hex(tiny) != "2c0100") {
+            std::cout << "  FAIL 1E-45 -> " << to_hex(tiny) << std::endl;
+            ok = false;
+        } else {
+            std::cout << "  PASS 1E-45 truncates to scale 44" << std::endl;
+        }
+
+        MiniNumber big;
+        from_hex("0009010000000000000000", big);
+        bool threw = false;
+        try { MiniNumber bad(std::string("18446744073709551616")); } catch (...) { threw = true; }
+        if (!threw) {
+            std::cout << "  FAIL string 2^64 did not throw" << std::endl;
+            ok = false;
+        } else {
+            std::cout << "  PASS wire 2^64 read, string 2^64 rejected" << std::endl;
+        }
+
+        auto rejects_txt = [](const char* txt) {
+            try { MiniNumber m{std::string(txt)}; } catch (...) { return true; }
+            return false;
+        };
+        if (!rejects_txt(" 5") || !rejects_txt("5 ") || !rejects_txt("")) {
+            std::cout << "  FAIL strict string parsing accepted whitespace/empty" << std::endl;
+            ok = false;
+        } else {
+            std::cout << "  PASS strict string parsing rejects whitespace/empty" << std::endl;
+        }
+
+        if (!ok) return 1;
+    }
+    std::cout << std::endl;
+
     // =====================================================================
     // Done
     // =====================================================================

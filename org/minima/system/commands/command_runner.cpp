@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
-#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
@@ -321,7 +320,9 @@ std::unique_ptr<Command> CommandRunner::getCommand(const std::string& zCommand) 
                 std::any anyv = parser.parse(value);
                 // Expect a std::shared_ptr<JSONObject>
                 if (auto jobj = std::any_cast<std::shared_ptr<JSONObject>>(&anyv)) {
-                    comms->getParams().put(name, *jobj);
+                    comms->getParams().put(name, **jobj);
+                } else if (auto vobj = std::any_cast<JSONObject>(&anyv)) {
+                    comms->getParams().put(name, *vobj);
                 } else {
                     // Fallback: store raw string if type unexpected
                     comms->getParams().put(name, value);
@@ -343,7 +344,9 @@ std::unique_ptr<Command> CommandRunner::getCommand(const std::string& zCommand) 
                 std::any anyv = parser.parse(value);
                 // Expect a std::shared_ptr<JSONArray>
                 if (auto jarr = std::any_cast<std::shared_ptr<JSONArray>>(&anyv)) {
-                    comms->getParams().put(name, *jarr);
+                    comms->getParams().put(name, **jarr);
+                } else if (auto varr = std::any_cast<JSONArray>(&anyv)) {
+                    comms->getParams().put(name, *varr);
                 } else {
                     // Otherwise it's a broken JSONArray
                     return std::unique_ptr<Command>(
@@ -584,6 +587,33 @@ std::vector<std::string> CommandRunner::splitStringJSON(bool zForceNormal, const
 }
 
 // Very fast splitter for non-JSON inputs (mirrors Java regex method)
+
+// Linear equivalent of the Java regex "\"([^\"]*)\"|(\S+)" used for command
+// tokenising. std::regex recursed per character and overflowed the stack on
+// long values (e.g. a serialized transaction in data:0x...).
+static std::vector<std::string> splitQuotedPatternLinear(const std::string& ss) {
+    std::vector<std::string> token;
+    const std::size_t n = ss.size();
+    std::size_t i = 0;
+    while (i < n) {
+        while (i < n && std::isspace(static_cast<unsigned char>(ss[i]))) ++i;
+        if (i >= n) break;
+        if (ss[i] == '"') {
+            const std::size_t close = ss.find('"', i + 1);
+            if (close != std::string::npos) {
+                token.emplace_back(ss.substr(i + 1, close - i - 1));
+                i = close + 1;
+                continue;
+            }
+            // Unterminated quote: the regex fallback (\S+) matches from here.
+        }
+        const std::size_t start = i;
+        while (i < n && !std::isspace(static_cast<unsigned char>(ss[i]))) ++i;
+        token.emplace_back(ss.substr(start, i - start));
+    }
+    return token;
+}
+
 std::vector<std::string> CommandRunner::splitterQuotedPattern(const std::string& zInput) {
     std::vector<std::string> token;
 
@@ -603,54 +633,39 @@ std::vector<std::string> CommandRunner::splitterQuotedPattern(const std::string&
         ss.swap(replaced);
     }
 
-    try {
-        std::regex re("\"([^\"]*)\"|(\\S+)");
-        std::sregex_iterator it(ss.begin(), ss.end(), re);
-        std::sregex_iterator end;
-        for (; it != end; ++it) {
-            const std::smatch& m = *it;
-            if (m[1].matched) {
-                token.emplace_back(m[1].str());
-            } else if (m[2].matched) {
-                token.emplace_back(m[2].str());
-            }
-        }
+    token = splitQuotedPatternLinear(ss);
 
-        // Now build name:value pairs
-        std::vector<std::string> finaltokens;
-        bool first = true;
-        bool namefound = false;
-        std::string nvpair;
+    // Now build name:value pairs
+    std::vector<std::string> finaltokens;
+    bool first = true;
+    bool namefound = false;
+    std::string nvpair;
 
-        for (const auto& tok : token) {
-            if (first) {
-                first = false;
-                finaltokens.push_back(tok);
+    for (const auto& tok : token) {
+        if (first) {
+            first = false;
+            finaltokens.push_back(tok);
+        } else {
+            if (!namefound) {
+                if (trim(tok) == ":") {
+                    // Unexpected; fail and let slow method handle it
+                    return {};
+                }
+                namefound = true;
+                nvpair = tok;
             } else {
-                if (!namefound) {
-                    if (trim(tok) == ":") {
-                        // Unexpected; fail and let slow method handle it
-                        return {};
-                    }
-                    namefound = true;
-                    nvpair = tok;
+                if (trim(tok) == ":") {
+                    nvpair += ":";
                 } else {
-                    if (trim(tok) == ":") {
-                        nvpair += ":";
-                    } else {
-                        namefound = false;
-                        nvpair += tok;
-                        finaltokens.push_back(nvpair);
-                    }
+                    namefound = false;
+                    nvpair += tok;
+                    finaltokens.push_back(nvpair);
                 }
             }
         }
-
-        return finaltokens;
-    } catch (...) {
-        // Fallback on any regex failure
-        return {};
     }
+
+    return finaltokens;
 }
 
 std::string CommandRunner::trim(const std::string& s) {
