@@ -345,7 +345,10 @@ void MiniNumber::checkLimits() {
     const cpp_int& minv = m_wide ? get_min_value() : get_java_min_value();
     int cmpMax = compare_values(m_unscaled, m_scale, maxv, 0);
     if (cmpMax > 0) {
-        throw std::runtime_error(std::string("MiniNumber too large - outside allowed range 2^64 ") + toString());
+        // Do not echo an arbitrarily long input value back to the caller.
+        std::string shown = toString();
+        if (shown.size() > 64) shown = shown.substr(0, 64) + "...";
+        throw std::runtime_error("MiniNumber too large - outside allowed range 2^64 " + shown);
     }
 
     // Compare to MIN_VALUE (scale 0)

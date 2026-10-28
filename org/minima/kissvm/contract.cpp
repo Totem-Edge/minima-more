@@ -473,6 +473,11 @@ org::minima::utils::json::JSONObject Contract::getAllVariables() const {
 
         if (key.find(',') != std::string::npos) {
             std::replace(key.begin(), key.end(), ',', ' ');
+            const auto first = key.find_first_not_of(' ');
+            const auto last  = key.find_last_not_of(' ');
+            key = (first == std::string::npos)
+                      ? std::string()
+                      : key.substr(first, last - first + 1);
             key = "( " + key + " )";
         }
 
@@ -612,6 +617,11 @@ void Contract::traceVariables() {
 
         if (key.find(',') != std::string::npos) {
             std::replace(key.begin(), key.end(), ',', ' ');
+            const auto first = key.find_first_not_of(' ');
+            const auto last  = key.find_last_not_of(' ');
+            key = (first == std::string::npos)
+                      ? std::string()
+                      : key.substr(first, last - first + 1);
             key = "( " + key + " )";
         }
         varlist += key + " = " + (valptr ? valptr->toString() : std::string("")) + ", ";
