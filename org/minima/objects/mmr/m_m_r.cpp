@@ -5,6 +5,8 @@
 #include <utility>
 #include <any>
 #include <optional> 
+#include <stdexcept>
+#include <string>
 #include <boost/multiprecision/cpp_int.hpp>
 
 #include "org/minima/database/minima_d_b.hpp"
@@ -30,6 +32,17 @@ namespace org {
 namespace minima {
 namespace objects {
 namespace mmr {
+
+namespace {
+inline const MMRData& mmr_require_data(const MMREntry& zEntry, const char* zWhere) {
+    const MMRData* data = zEntry.getMMRData();
+    if (data == nullptr) {
+        throw std::runtime_error(std::string("MMR: missing MMRData in ") + zWhere +
+                                 " at row " + std::to_string(zEntry.getRow()));
+    }
+    return *data;
+}
+} // namespace
 
 // Destructor and special members definitions
 MMR::~MMR() = default;
@@ -318,7 +331,7 @@ MMREntry MMR::addEntry(const MMRData& zData) {
         MMREntry sibling = getEntry(entry.getRow(), entry.getSibling());
 
         // Create the new row - hash LEFT + RIGHT
-        std::unique_ptr<MMRData> parentdata = MMRData::CreateMMRDataParentNode(*sibling.getMMRData(), *entry.getMMRData()); 
+        std::unique_ptr<MMRData> parentdata = MMRData::CreateMMRDataParentNode(mmr_require_data(sibling, "addEntry sibling"), mmr_require_data(entry, "addEntry entry"));
 
         // Set the Parent Entry
         entry = setEntry(entry.getParentRow(), entry.getParentEntry(), *parentdata); 
@@ -364,13 +377,16 @@ void MMR::updateEntry(const MMREntryNumber& zEntry, const MMRProof& zOldProof, c
         currentproof++;
 
         // Ensure sibling exists at top level in this MMR
-        MMREntry siblingtop = setEntry(sibling.getRow(), sibling.getEntryNumber(), *siblingdata_ptr); 
+        if (siblingdata_ptr == nullptr) {
+            throw std::runtime_error("MMR: updateEntry missing sibling data");
+        }
+        MMREntry siblingtop = setEntry(sibling.getRow(), sibling.getEntryNumber(), *siblingdata_ptr);
 
         // Calculate the parent
         if (entry.isLeft()) {
-            parentdata = MMRData::CreateMMRDataParentNode(*entry.getMMRData(), *siblingtop.getMMRData()); 
+            parentdata = MMRData::CreateMMRDataParentNode(mmr_require_data(entry, "updateEntry entry"), mmr_require_data(siblingtop, "updateEntry sibling top"));
         } else {
-            parentdata = MMRData::CreateMMRDataParentNode(*siblingtop.getMMRData(), *entry.getMMRData()); 
+            parentdata = MMRData::CreateMMRDataParentNode(mmr_require_data(siblingtop, "updateEntry sibling top"), mmr_require_data(entry, "updateEntry entry"));
         }
 
         // Set parent
@@ -386,7 +402,7 @@ MMRProof MMR::getProof(const MMREntryNumber& zEntryNumber) {
     MMRProof proof = getProofToPeak(zEntryNumber);
 
     // Calculate the peak
-    std::unique_ptr<MMRData> peak = proof.calculateProof(*entry.getMMRData()); 
+    std::unique_ptr<MMRData> peak = proof.calculateProof(mmr_require_data(entry, "getProof entry"));
 
     // Path from peak to root
     MMRProof rootproof = getPeakToRoot(*peak); 
@@ -411,7 +427,7 @@ MMRProof MMR::getProofToPeak(const MMREntryNumber& zEntryNumber) {
     MMREntry sibling = getEntry(entry.getRow(), entry.getSibling());
     while (!sibling.isEmpty()) {
         // Add to proof
-        proof.addProofChunk(sibling.isLeft(), *sibling.getMMRData()); 
+        proof.addProofChunk(sibling.isLeft(), mmr_require_data(sibling, "getProofToPeak sibling"));
 
         // Parent reference (may be empty)
         MMREntry parent(sibling.getParentRow(), sibling.getParentEntry());
@@ -439,7 +455,7 @@ MMRProof MMR::getPeakToRoot(const MMRData& zPeak) {
 
         // Add all peaks to the new MMR
         for (const MMREntry& peak : peaks) {
-            MMREntry current = newmmr.addEntry(*peak.getMMRData()); 
+            MMREntry current = newmmr.addEntry(mmr_require_data(peak, "calculateProof peak"));
             if (peak.getMMRData()->getData().isEqual(currentpeak->getData())) { 
                 keeper = current; 
             }
@@ -477,7 +493,7 @@ bool MMR::checkProof(const MMRData& zMMRData, const MMRProof& zProof) const {
     // Check against all peaks
     std::vector<MMREntry> peaks = getPeaks();
     for (const MMREntry& peak : peaks) {
-        if (rootcalc->isEqual(*peak.getMMRData())) { 
+        if (rootcalc->isEqual(mmr_require_data(peak, "calculateRoot peak"))) {
             return true;
         }
     }
