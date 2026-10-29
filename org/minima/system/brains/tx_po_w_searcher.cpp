@@ -550,6 +550,27 @@ TxPoWSearcher::getAllTokens() {
     return tokens;
 }
 
+std::shared_ptr<Coin>
+TxPoWSearcher::getTokenCoin(const MiniData& zTokenID) {
+    std::lock_guard<std::mutex> lock(s_importedTokensMutex);
+
+    TxPowTree& tree = MinimaDB::getDB()->getTxPoWTree();
+    std::shared_ptr<TxPoWTreeNode> tip = tree.getTip();
+
+    while (tip) {
+        const auto& coins = tip->getAllCoins();
+        for (const auto& coin : coins) {
+            if (!coin.getToken()) continue;
+            if (coin.getTokenID().isEqual(zTokenID)) {
+                return std::make_shared<Coin>(coin);
+            }
+        }
+        tip = tip->getParent();
+    }
+
+    return nullptr;
+}
+
 void
 TxPoWSearcher::importToken(const std::shared_ptr<Token>& zToken) {
     std::lock_guard<std::mutex> lock(s_importedTokensMutex);

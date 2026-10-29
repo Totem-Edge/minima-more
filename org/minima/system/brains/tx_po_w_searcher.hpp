@@ -99,6 +99,12 @@ public:
     static std::shared_ptr<org::minima::objects::Token>
     getToken(const org::minima::objects::base::MiniData& zTokenID);
 
+    // The on-chain coin that carries this token's create descriptor. This is the
+    // coin ID `tokencreate signtoken:` signs, unlike the descriptor's own
+    // placeholder coin ID (0x00).
+    static std::shared_ptr<org::minima::objects::Coin>
+    getTokenCoin(const org::minima::objects::base::MiniData& zTokenID);
+
 private:
     static std::mutex s_importedTokensMutex;
     static std::vector<std::shared_ptr<org::minima::objects::Token>> s_importedTokens;

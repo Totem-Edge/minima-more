@@ -617,6 +617,20 @@ if(APPLE)
 endif()
 target_link_libraries(test_serialization PRIVATE OpenSSL::Crypto Threads::Threads)
 
+# signtoken verification: tokencreate signs the create-output coin ID, not the
+# token descriptor's 0x00 placeholder.
+add_executable(test_signtoken_coinid
+    EXCLUDE_FROM_ALL
+    tests/test_signtoken_coinid.cpp
+)
+target_compile_features(test_signtoken_coinid PRIVATE cxx_std_17)
+target_include_directories(test_signtoken_coinid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(test_signtoken_coinid PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(test_signtoken_coinid PRIVATE minima_core OpenSSL::Crypto Threads::Threads)
+add_test(NAME test_signtoken_coinid COMMAND test_signtoken_coinid)
+
 # Standalone MMR correctness test - exercises peak/root caching without heavy deps
 add_executable(test_mmr
     EXCLUDE_FROM_ALL

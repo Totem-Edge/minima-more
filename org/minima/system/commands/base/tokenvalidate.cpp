@@ -10,6 +10,7 @@
 #include "org/minima/system/brains/tx_po_w_searcher.hpp"
 #include "org/minima/system/commands/command_exception.hpp"
 
+#include "org/minima/objects/coin.hpp"
 #include "org/minima/objects/token.hpp"
 #include "org/minima/objects/base/mini_data.hpp"
 #include "org/minima/objects/base/mini_string.hpp"
@@ -152,8 +153,14 @@ std::unique_ptr<JSONObject> tokenvalidate::runCommand() {
         } else {
             sign.put("signedby", pubkey.to0xString());
 
-            // Get the coinid of the token
-            const MiniData& coinid = tok->getCoinID();
+            // `tokencreate signtoken:` signs the coin ID of the output that
+            // carries the token-create descriptor. The descriptor's own coinid
+            // field is the 0x00 placeholder, so verifying against it would
+            // always fail for chain-created tokens.
+            MiniData coinid = tok->getCoinID();
+            if (auto carrying = TxPoWSearcher::getTokenCoin(MiniData(tokenid))) {
+                coinid = carrying->getCoinID();
+            }
 
             // Verify the signature..
             TreeKey tk;
