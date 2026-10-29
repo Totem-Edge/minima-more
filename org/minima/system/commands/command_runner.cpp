@@ -79,6 +79,7 @@
 #include "org/minima/system/commands/base/seedrandom.hpp"
 #include "org/minima/system/commands/base/slavenode.hpp"
 #include "org/minima/system/commands/base/status.hpp"
+#include "org/minima/system/commands/base/state.hpp"
 #include "org/minima/system/commands/base/capabilities.hpp"
 #include "org/minima/system/commands/base/memreport.hpp"
 #include "org/minima/system/commands/base/systemcheck.hpp"
@@ -413,6 +414,7 @@ std::vector<std::unique_ptr<Command>>& CommandRunner::getPrototypes() {
         // The order here MUST match CommandRunner.java ALL_COMMANDS array
         s_protos.push_back(std::make_unique<base::quit>());
         s_protos.push_back(std::make_unique<base::status>());
+        s_protos.push_back(std::make_unique<base::state>());
         s_protos.push_back(std::make_unique<base::capabilities>());
         s_protos.push_back(std::make_unique<base::memreport>());
         s_protos.push_back(std::make_unique<search::coins>());

@@ -12,6 +12,7 @@ option(MINIMA_STATIC_NO_LMDB "Disable LMDB for fully static builds" OFF)
 
 set(MINIMA_SOURCES
     org/minima/database/minima_d_b.cpp
+    org/minima/database/state_report.cpp
     org/minima/database/archive/archive_manager.cpp
     org/minima/database/archive/raw_archive_input.cpp
     org/minima/database/archive/h2_sql_import.cpp
@@ -214,6 +215,7 @@ set(MINIMA_SOURCES
     org/minima/system/commands/base/seedrandom.cpp
     org/minima/system/commands/base/slavenode.cpp
     org/minima/system/commands/base/status.cpp
+    org/minima/system/commands/base/state.cpp
     org/minima/system/commands/base/systemcheck.cpp
     org/minima/system/commands/base/test.cpp
     org/minima/system/commands/base/timemilli.cpp
@@ -376,6 +378,7 @@ set(MINIMA_SOURCES
 # Shared object library: the node executable and the manifest/MCP tests compile
 # the same sources once.
 add_library(minima_core OBJECT ${MINIMA_SOURCES})
+target_compile_definitions(minima_core PUBLIC TOTEM_NODE_VERSION="${PROJECT_VERSION}")
 
 add_executable(minima
     org/minima/minima.cpp

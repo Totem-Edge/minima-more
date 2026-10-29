@@ -37,6 +37,8 @@
 
 // Project headers
 #include "org/minima/system/commands/command_exception.hpp"
+#include "org/minima/database/state_report.hpp"
+#include "org/minima/database/cascade/cascade_node.hpp"
 #include "org/minima/database/minima_d_b.hpp"
 #include "org/minima/database/archive/archive_manager.hpp"
 #include "org/minima/database/archive/raw_archive_input.hpp"
@@ -243,7 +245,7 @@ archive::archive()
 
 std::vector<std::string> archive::getValidParams() const {
     return std::vector<std::string>{
-        "action","host","phrase","anyphrase","keys","keyuses","file","address","statecheck","logs","maxexport","raw"
+        "action","host","phrase","anyphrase","keys","keyuses","file","address","statecheck","logs","maxexport","raw","from","to"
     };
 }
 
@@ -1063,6 +1065,65 @@ std::unique_ptr<JSONObject> archive::runCommand() {
 
         JSONObject resp;
         resp.put("time", MiniFormat::ConvertMilliToTime(timediff));
+        ret->put("response", resp);
+        return ret;
+    } else if (action == "verify") {
+        JSONObject report;
+        org::minima::database::StateReport::build(report);
+        ret->put("response", report);
+        return ret;
+    } else if (action == "replay") {
+        auto* db = MinimaDB::getDB();
+        if (db == nullptr) throw CommandException("No database available");
+        auto& cascade = db->getCascade();
+        auto tipnode = cascade.getTip();
+        if (!tipnode) throw CommandException("Cascade is empty - nothing to replay");
+        const long long tipblock = tipnode->getTxPoW().getBlockNumber().getAsLong();
+        auto last = db->getArchive().loadLastBlock();
+        const long long archive_next =
+            last ? last->getTxPoW().getBlockNumber().getAsLong() + 1 : 0;
+        long long fromblock = existsParam("from")
+            ? getNumberParam("from")->getAsLong()
+            : archive_next;
+        // Never replay blocks already in the archive (block is UNIQUE).
+        if (fromblock < archive_next) fromblock = archive_next;
+        long long toblock = tipblock;
+        if (existsParam("to")) {
+            const long long requested = getNumberParam("to")->getAsLong();
+            if (requested < toblock) toblock = requested;
+        }
+        if (fromblock > toblock) {
+            JSONObject resp;
+            resp.put("from", fromblock);
+            resp.put("to", toblock);
+            resp.put("saved", 0);
+            resp.put("failed", 0);
+            resp.put("message", std::string("archive is current"));
+            ret->put("response", resp);
+            return ret;
+        }
+        std::vector<std::shared_ptr<org::minima::database::cascade::CascadeNode>> nodes;
+        auto current = tipnode;
+        while (current) {
+            const long long block = current->getTxPoW().getBlockNumber().getAsLong();
+            if (block < fromblock) break;
+            if (block <= toblock) nodes.push_back(current);
+            current = cascade.getParent(current);
+        }
+        std::reverse(nodes.begin(), nodes.end());
+        long long saved = 0;
+        long long failed = 0;
+        for (auto& node : nodes) {
+            org::minima::objects::TxBlock block(node->getTxPoW());
+            if (db->getArchive().saveBlock(block)) ++saved; else ++failed;
+        }
+        db->getArchive().flushPending();
+        JSONObject resp;
+        resp.put("from", fromblock);
+        resp.put("to", toblock);
+        resp.put("saved", saved);
+        resp.put("failed", failed);
+        resp.put("cascade_tip", tipblock);
         ret->put("response", resp);
         return ret;
     } else if (action == "inspect") {

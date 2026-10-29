@@ -1,4 +1,5 @@
 #include "org/minima/database/minima_d_b.hpp"
+#include "org/minima/database/state_report.hpp"
 
 #include <sstream>
 #include <exception>
@@ -396,6 +397,19 @@ void MinimaDB::loadAllDB() {
 
         // Ensure Archive Cascade consistency
         mArchive->checkCascadeRequired(*mCascade);
+
+        // Surface coupled-state divergence early; never block startup here.
+        try {
+            org::minima::utils::json::JSONObject report;
+            org::minima::database::StateReport::build(report);
+            if (!report.getBoolean("ok")) {
+                org::minima::utils::MinimaLogger::log(
+                    std::string("STATE_INVALID: ") + report.getString("issues"));
+            }
+        } catch (const std::exception& exc) {
+            org::minima::utils::MinimaLogger::log(
+                std::string("STATE_CHECK_FAILED: ") + exc.what());
+        }
 
     } catch (const std::exception& exc) {
         org::minima::utils::MinimaLogger::log("SERIOUS ERROR loadAllDB : ");

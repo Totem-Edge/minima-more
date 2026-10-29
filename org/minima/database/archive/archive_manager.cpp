@@ -276,21 +276,26 @@ void ArchiveManager::checkCascadeRequired(const Cascade& zCascade) {
             // Check alignment with archive blocks
             auto last = loadLastBlock();
             if (last) {
-                MiniNumber archstart = last->getTxPoW().getBlockNumber();
                 auto first = loadFirstBlock();
                 if (!first) {
                     MinimaLogger::log(std::string("Cascade already in ARCHIVEDB.. tip : ")
                                       + casc->getTip()->getTxPoW().getBlockNumber().toString());
                     return;
                 }
-                MiniNumber archend = first->getTxPoW().getBlockNumber();
+                MiniNumber arch_first = first->getTxPoW().getBlockNumber();
+                MiniNumber arch_last  = last->getTxPoW().getBlockNumber();
+                MiniNumber casc_tip   = casc->getTip()->getTxPoW().getBlockNumber();
 
-                MiniNumber cascstart = casc->getTip()->getTxPoW().getBlockNumber();
-                // cascstart in [archstart - 1, archend]
-                if (cascstart.isMoreEqual(archstart.sub(MiniNumber::ONE())) &&
-                    cascstart.isLessEqual(archend)) {
+                // The cascade tip must sit inside the archive block range.
+                const bool in_range =
+                    casc_tip.isMoreEqual(arch_first) && casc_tip.isLessEqual(arch_last);
+                if (in_range) {
                     // OK
                 } else {
+                    MinimaLogger::log("ARCHIVE_GAP: cascade tip " + casc_tip.toString() +
+                                      " is outside archive " + arch_first.toString() +
+                                      ".." + arch_last.toString() +
+                                      " - run 'archive action:replay'");
                     MinimaLogger::log(std::string("RE-Saving Cascade in ARCHIVEDB.. tip : ")
                                       + zCascade.getTip()->getTxPoW().getBlockNumber().toString());
                     saveCascade(const_cast<Cascade&>(zCascade));
