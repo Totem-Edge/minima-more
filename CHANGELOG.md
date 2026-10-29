@@ -1,5 +1,19 @@
 # PureMinima C++ — Change Report
 
+## v0.5.8 — MMR null-entry hardening
+
+### Fixed
+
+- **SIGSEGV when an MMR entry is missing.** `MMREntry::getMMRData()` returns
+  `nullptr` for empty entries, and `MMR::addEntry`/`updateEntry` dereferenced it
+  unconditionally. The Java node throws `NullPointerException` at the same point
+  and the block is rejected; the C++ port dereferenced null and crashed the
+  process (observed in `MiniNumber::align_scales` when a restored/incomplete
+  MegaMMR produced an empty sibling). The MMR now throws a catchable
+  `std::runtime_error` (`MMR: missing MMRData ...`) so the TxPoW processor
+  rejects the block and the node keeps running. The MMR sources themselves are
+  unchanged since v0.5.0 — this is a latent porting bug exposed by inconsistent
+  MMR data.
 ## v0.5.7 — RPC error reporting
 
 ### Fixed

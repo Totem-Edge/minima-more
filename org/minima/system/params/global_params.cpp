@@ -12,7 +12,7 @@ std::string GlobalParams::MINIMA_VERSION = GlobalParams::MINIMA_BASE_VERSION + s
 
 // Minima More product/brand version (matches CMake project(minima VERSION 0.5.6)).
 // Update here (single source of truth) and the CMake project() version together.
-std::string GlobalParams::MINIMA_MORE_VERSION = "0.5.7";
+std::string GlobalParams::MINIMA_MORE_VERSION = "0.5.8";
 
 // Micro build
 std::string GlobalParams::MINIMA_MICRO_BUILD = "0";

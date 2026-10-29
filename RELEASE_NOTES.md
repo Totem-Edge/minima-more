@@ -1,3 +1,20 @@
+# Minima More v0.5.8
+
+MMR null-entry hardening.
+
+## Fixed
+
+- A node with an incomplete/corrupt MMR entry crashed with SIGSEGV when the
+  MMR tried to build a parent node from an empty sibling. The C++ port returned
+  a null `MMRData*` and dereferenced it; Java throws a caught
+  `NullPointerException` instead. The MMR now throws a catchable
+  `std::runtime_error`, so the block is rejected and the node continues.
+
+## Compatibility
+
+- No consensus, wire-format, storage or API-shape changes. Safe drop-in for
+  v0.5.7. The MMR code is unchanged since v0.5.0; this only changes the
+  failure mode on inconsistent MMR data from a crash to a rejected block.
 # Minima More v0.5.7
 
 Error-reporting patch.
