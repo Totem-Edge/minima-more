@@ -1,3 +1,27 @@
+# Minima More v0.5.9
+
+Ops rollback tooling and consistency checks.
+
+## Added
+
+- `state action:verify` and `archive action:verify`: a single report covering
+  archive contiguity/range, cascade validity, tree alignment and the archive
+  gap, with `ok:true/false` and an `issues` string.
+- `archive action:replay`: fill a missing archive range from the local cascade
+  and tree window, up to the chain tip, without touching the MMR.
+- `scripts/snapshot.sh` (quiesce + SQLite backup + manifest + optional
+  `-nop2p` validation) and `scripts/state-watch.sh` (probe for timers).
+
+## Fixed
+
+- `checkCascadeRequired` inverted range check; it now reports `ARCHIVE_GAP`
+  instead of silently re-saving a cascade ahead of the archive.
+- Startup `STATE_INVALID` log when coupled stores diverge.
+
+## Compatibility
+
+- No consensus, wire-format, storage or API-shape changes. Safe drop-in for
+  v0.5.8. New commands only.
 # Minima More v0.5.8
 
 MMR null-entry hardening.

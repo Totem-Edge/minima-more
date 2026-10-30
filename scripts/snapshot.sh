@@ -21,7 +21,7 @@
 #   MINIMA_NODE_SERVICE=minima-node
 #   MINIMA_ANALYTICS_SERVICE=minima-analytics
 #   MINIMA_ENV_FILE=/etc/minima-node.env     (RPC_PASS / DB_PASS)
-#   MINIMA_NODE_BINARY=/opt/minima-more-v058/minima-more-v0.5.8-linux-aarch64-static
+#   MINIMA_NODE_BINARY=/opt/minima-more-v058/minima-more-v0.5.9-linux-aarch64-static
 #   MINIMA_RPC_PORT=9005
 #
 set -euo pipefail

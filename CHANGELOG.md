@@ -1,5 +1,32 @@
 # PureMinima C++ — Change Report
 
+## v0.5.9 — Ops rollback tooling and consistency checks
+
+### Added
+
+- `state action:verify` — one read-only report across archive blocks, cascade,
+  TxPoWTree and MegaMMR: `ok`, `issues`, contiguous range, `cascade_tip`,
+  `tree_root`/`tree_tip`, `gap_blocks`, `mmr_coins`, `version`.
+- `archive action:verify` — the same report through the archive command.
+- `archive action:replay` — re-append missing archive blocks from the local
+  cascade **and then the tree window** (`getHeaviestBranch()`), so the archive
+  reaches the chain tip. Clamps to the archive tip and returns a no-op when
+  already current.
+- `scripts/snapshot.sh` — quiesce, `sqlite3 .backup`, coupled-store copy,
+  `SHA256SUMS` + `manifest.json`, optional `-nop2p` validation via
+  `state verify` on ports 19001/19005.
+- `scripts/state-watch.sh` — one-line consistency probe with exit status.
+
+### Fixed
+
+- `ArchiveManager::checkCascadeRequired` compared the cascade tip against an
+  inverted archive range (`archstart` was the last block), so it always
+  re-saved the cascade and never surfaced a block gap. It now checks the real
+  range and logs `ARCHIVE_GAP` with the replay hint.
+- Startup logs `STATE_INVALID: <issues>` when archive/cascade/tree/MMR diverge
+  (never blocks startup).
+- `TOTEM_NODE_VERSION` is defined on `minima_core`, so library code can report
+  the product version.
 ## v0.5.8 — MMR null-entry hardening
 
 ### Fixed
