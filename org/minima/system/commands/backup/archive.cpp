@@ -37,6 +37,8 @@
 
 // Project headers
 #include "org/minima/system/commands/command_exception.hpp"
+#include "org/minima/database/txpowtree/tx_po_w_tree_node.hpp"
+#include "org/minima/database/txpowtree/tx_pow_tree.hpp"
 #include "org/minima/database/state_report.hpp"
 #include "org/minima/database/cascade/cascade_node.hpp"
 #include "org/minima/database/minima_d_b.hpp"
@@ -1077,15 +1079,21 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         if (db == nullptr) throw CommandException("No database available");
         auto& cascade = db->getCascade();
         auto tipnode = cascade.getTip();
-        if (!tipnode) throw CommandException("Cascade is empty - nothing to replay");
-        const long long tipblock = tipnode->getTxPoW().getBlockNumber().getAsLong();
+        auto treeTip = db->getTxPoWTree().getTip();
+        if (!tipnode && !treeTip) throw CommandException("Cascade and tree are empty - nothing to replay");
+
+        const long long cascade_tip_block =
+            tipnode ? tipnode->getTxPoW().getBlockNumber().getAsLong() : -1;
+        const long long chain_tip_block =
+            treeTip ? treeTip->getTxPoW().getBlockNumber().getAsLong() : cascade_tip_block;
+        const long long tipblock = std::max(cascade_tip_block, chain_tip_block);
+
         auto last = db->getArchive().loadLastBlock();
         const long long archive_next =
             last ? last->getTxPoW().getBlockNumber().getAsLong() + 1 : 0;
         long long fromblock = existsParam("from")
             ? getNumberParam("from")->getAsLong()
             : archive_next;
-        // Never replay blocks already in the archive (block is UNIQUE).
         if (fromblock < archive_next) fromblock = archive_next;
         long long toblock = tipblock;
         if (existsParam("to")) {
@@ -1102,28 +1110,50 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             ret->put("response", resp);
             return ret;
         }
-        std::vector<std::shared_ptr<org::minima::database::cascade::CascadeNode>> nodes;
-        auto current = tipnode;
-        while (current) {
-            const long long block = current->getTxPoW().getBlockNumber().getAsLong();
-            if (block < fromblock) break;
-            if (block <= toblock) nodes.push_back(current);
-            current = cascade.getParent(current);
-        }
-        std::reverse(nodes.begin(), nodes.end());
+
         long long saved = 0;
         long long failed = 0;
-        for (auto& node : nodes) {
-            org::minima::objects::TxBlock block(node->getTxPoW());
-            if (db->getArchive().saveBlock(block)) ++saved; else ++failed;
+        long long last_saved = fromblock - 1;
+
+        // Cascade first: oldest -> newest, up to the cascade tip.
+        if (tipnode) {
+            std::vector<std::shared_ptr<org::minima::database::cascade::CascadeNode>> nodes;
+            auto current = tipnode;
+            while (current) {
+                const long long bn = current->getTxPoW().getBlockNumber().getAsLong();
+                if (bn < fromblock) break;
+                if (bn <= toblock) nodes.push_back(current);
+                current = cascade.getParent(current);
+            }
+            std::reverse(nodes.begin(), nodes.end());
+            for (auto& node : nodes) {
+                const long long bn = node->getTxPoW().getBlockNumber().getAsLong();
+                if (bn <= last_saved) continue;
+                org::minima::objects::TxBlock block(node->getTxPoW());
+                if (db->getArchive().saveBlock(block)) { ++saved; last_saved = bn; } else ++failed;
+            }
         }
+
+        // Then the TxPoWTree window: root -> tip reaches the chain tip.
+        auto branch = db->getTxPoWTree().getHeaviestBranch();
+        std::reverse(branch.begin(), branch.end());
+        for (auto& node : branch) {
+            const long long bn = node->getTxPoW().getBlockNumber().getAsLong();
+            if (bn <= last_saved) continue;
+            if (bn > toblock) break;
+            org::minima::objects::TxBlock block(node->getTxPoW());
+            if (db->getArchive().saveBlock(block)) { ++saved; last_saved = bn; } else ++failed;
+        }
+
         db->getArchive().flushPending();
+
         JSONObject resp;
         resp.put("from", fromblock);
         resp.put("to", toblock);
         resp.put("saved", saved);
         resp.put("failed", failed);
-        resp.put("cascade_tip", tipblock);
+        resp.put("cascade_tip", cascade_tip_block);
+        resp.put("chain_tip", chain_tip_block);
         ret->put("response", resp);
         return ret;
     } else if (action == "inspect") {
