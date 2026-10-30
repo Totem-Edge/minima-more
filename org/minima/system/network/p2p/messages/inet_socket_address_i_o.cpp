@@ -1,5 +1,6 @@
 #include "org/minima/system/network/p2p/messages/inet_socket_address_i_o.hpp"
 
+#include <memory>
 #include <stdexcept>
 #include <mutex>
 #include <vector>
@@ -179,18 +180,25 @@ std::vector<InetSocketAddress> InetSocketAddressIO::addressesJSONToList(
         const auto& elems = jsonArray.elements();
         peers.reserve(elems.size());
         for (const auto& a : elems) {
-            const JSONObject& json = std::any_cast<const JSONObject&>(a);
-            // Prefer using JSONObject's convenience getter for string if available
-            std::string host;
-            try {
-                host = json.getString("host");
-            } catch (...) {
-                // Fallback to generic any-based get
-                const std::any& v = json.get("host");
-                host = std::any_cast<std::string>(v);
+            const JSONObject* json = nullptr;
+            if (auto v = std::any_cast<JSONObject>(&a)) {
+                json = v;
+            } else if (auto sp = std::any_cast<std::shared_ptr<JSONObject>>(&a)) {
+                if (*sp) json = sp->get();
             }
-
-            int port = safeReadInt(json, "port");
+            if (!json) {
+                // Legacy host:port string entries
+                if (auto s = std::any_cast<std::string>(&a)) {
+                    auto parts = split_all(*s, ':');
+                    if (parts.size() >= 2) {
+                        peers.emplace_back(parts[0], std::stoi(parts[1]));
+                    }
+                    continue;
+                }
+                throw std::runtime_error("Invalid peer entry in P2P DB");
+            }
+            const std::string host = json->getString("host");
+            const int port = safeReadInt(*json, "port");
             peers.emplace_back(host, port);
         }
     }
