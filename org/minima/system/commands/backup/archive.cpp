@@ -37,6 +37,8 @@
 
 // Project headers
 #include "org/minima/system/commands/command_exception.hpp"
+#include "org/minima/objects/mmr/mega_m_m_r.hpp"
+#include "org/minima/objects/mmr/m_m_r.hpp"
 #include "org/minima/database/txpowtree/tx_po_w_tree_node.hpp"
 #include "org/minima/database/txpowtree/tx_pow_tree.hpp"
 #include "org/minima/database/state_report.hpp"
@@ -247,7 +249,7 @@ archive::archive()
 
 std::vector<std::string> archive::getValidParams() const {
     return std::vector<std::string>{
-        "action","host","phrase","anyphrase","keys","keyuses","file","address","statecheck","logs","maxexport","raw","from","to"
+        "action","host","phrase","anyphrase","keys","keyuses","file","address","statecheck","logs","maxexport","raw","from","to","mmr","mmrfrom"
     };
 }
 
@@ -1100,20 +1102,85 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             const long long requested = getNumberParam("to")->getAsLong();
             if (requested < toblock) toblock = requested;
         }
+
+        long long saved = 0;
+        long long failed = 0;
+        long long last_saved = fromblock - 1;
+
+        // --- Optional MegaMMR catch-up ---------------------------------
+        // The MMR is a cumulative store: call addBlock in chain order from the
+        // first block it is missing (mmrfrom) up to the chain tip.
+        long long mmr_saved = 0;
+        long long mmr_failed = 0;
+        const bool update_mmr = getBooleanParam("mmr", false);
+        long long mmrfrom = existsParam("mmrfrom")
+            ? getNumberParam("mmrfrom")->getAsLong()
+            : -1;
+        if (mmrfrom < 0 && update_mmr &&
+            org::minima::system::params::GeneralParams::IS_MEGAMMR) {
+            // Default to the first block the MMR has not seen yet.
+            mmrfrom = db->getMegaMMR().getMMR().getBlockTime().getAsLong() + 1;
+        }
+        if (update_mmr &&
+            org::minima::system::params::GeneralParams::IS_MEGAMMR &&
+            mmrfrom >= 0) {
+            auto& megammr = db->getMegaMMR();
+            auto addMmr = [&](const org::minima::objects::TxBlock& block) {
+                try {
+                    megammr.addBlock(block);
+                    ++mmr_saved;
+                } catch (const std::exception& exc) {
+                    ++mmr_failed;
+                    org::minima::utils::MinimaLogger::log(
+                        std::string("MMR replay failed at ") +
+                        block.getTxPoW().getBlockNumber().toString() + ": " + exc.what());
+                }
+            };
+
+            long long last_mmr_block = mmrfrom - 1;
+            if (tipnode) {
+                std::vector<std::shared_ptr<org::minima::database::cascade::CascadeNode>> cnodes;
+                auto current = tipnode;
+                while (current) {
+                    const long long bn = current->getTxPoW().getBlockNumber().getAsLong();
+                    if (bn < mmrfrom) break;
+                    cnodes.push_back(current);
+                    current = cascade.getParent(current);
+                }
+                std::reverse(cnodes.begin(), cnodes.end());
+                for (auto& node : cnodes) {
+                    const long long bn = node->getTxPoW().getBlockNumber().getAsLong();
+                    if (bn <= last_mmr_block) continue;
+                    org::minima::objects::TxBlock block(node->getTxPoW());
+                    addMmr(block);
+                    last_mmr_block = bn;
+                }
+            }
+
+            auto mbranch = db->getTxPoWTree().getHeaviestBranch();
+            std::reverse(mbranch.begin(), mbranch.end());
+            for (auto& node : mbranch) {
+                const long long bn = node->getTxPoW().getBlockNumber().getAsLong();
+                if (bn <= last_mmr_block) continue;
+                if (bn > tipblock) break;
+                addMmr(node->getTxBlock());
+                last_mmr_block = bn;
+            }
+        }
+
         if (fromblock > toblock) {
             JSONObject resp;
             resp.put("from", fromblock);
             resp.put("to", toblock);
             resp.put("saved", 0);
             resp.put("failed", 0);
+            resp.put("mmr_saved", mmr_saved);
+            resp.put("mmr_failed", mmr_failed);
+            resp.put("mmr_from", mmrfrom);
             resp.put("message", std::string("archive is current"));
             ret->put("response", resp);
             return ret;
         }
-
-        long long saved = 0;
-        long long failed = 0;
-        long long last_saved = fromblock - 1;
 
         // Cascade first: oldest -> newest, up to the cascade tip.
         if (tipnode) {
@@ -1154,6 +1221,9 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         resp.put("failed", failed);
         resp.put("cascade_tip", cascade_tip_block);
         resp.put("chain_tip", chain_tip_block);
+        resp.put("mmr_saved", mmr_saved);
+        resp.put("mmr_failed", mmr_failed);
+        resp.put("mmr_from", mmrfrom);
         ret->put("response", resp);
         return ret;
     } else if (action == "inspect") {
