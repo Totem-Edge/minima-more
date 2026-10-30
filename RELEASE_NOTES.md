@@ -1,3 +1,22 @@
+# Minima More v0.5.11
+
+Fail-closed deserialization for corrupt proofs and trees.
+
+## Fixed
+
+- `CoinProof::ReadFromStream` throws on truncated/corrupt proof data instead of
+  returning `nullptr`. `TxBlock` and `Witness` previously dereferenced that
+  null, which is the SIGSEGV seen when a partially-written tree was loaded.
+- `TxBlock` and `Witness` reject a null CoinProof with a typed serialization
+  error.
+- `TxPowTree::readDataStream` aborts the load on a node read failure instead of
+  continuing with a partial/corrupt tree.
+
+## Compatibility
+
+- No consensus, wire-format or storage changes for valid data. Valid blocks and
+  proofs serialize identically. A corrupt input now fails cleanly instead of
+  crashing.
 # Minima More v0.5.10
 
 MMR catch-up in archive replay.
