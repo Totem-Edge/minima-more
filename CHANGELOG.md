@@ -1,5 +1,13 @@
 # PureMinima C++ — Change Report
 
+## v0.5.10 — MMR catch-up in replay
+
+### Added
+
+- `archive action:replay mmr:true [mmrfrom:<h>]` calls `MegaMMR::addBlock`
+  in chain order from the MMR block time (default) or the supplied height to
+  the chain tip. Use it when an archive/tree restore left the MegaMMR behind;
+  without this the node rejects new blocks because the MMR is missing entries.
 ## v0.5.9 — Ops rollback tooling and consistency checks
 
 ### Added

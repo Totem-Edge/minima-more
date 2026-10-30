@@ -1,3 +1,17 @@
+# Minima More v0.5.10
+
+MMR catch-up in archive replay.
+
+## Added
+
+- `archive action:replay mmr:true [mmrfrom:<h>]`: replay the local cascade +
+  tree window into the MegaMMR, starting at its own block time (or a supplied
+  height). Fixes the case where the archive/tree were restored but the MMR was
+  left behind, which stalls new block processing.
+
+## Compatibility
+
+- No consensus, wire-format, storage or API-shape changes.
 # Minima More v0.5.9
 
 Ops rollback tooling and consistency checks.
