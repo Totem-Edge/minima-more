@@ -1,3 +1,17 @@
+# Minima More v0.5.12
+
+P2P peer-list load fix.
+
+## Fixed
+
+- The P2P DB reader cast peer entries to `JSONObject`, but the JSON parser
+  returns `std::shared_ptr<JSONObject>` for objects, so P2P init/loop and
+  `peers` failed with `bad any_cast` and the node ran with no peers. Both
+  representations (and legacy `host:port` strings) are now accepted.
+
+## Compatibility
+
+- No consensus, wire-format or storage changes.
 # Minima More v0.5.11
 
 Fail-closed deserialization for corrupt proofs and trees.

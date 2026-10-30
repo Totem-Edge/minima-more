@@ -1,5 +1,15 @@
 # PureMinima C++ — Change Report
 
+## v0.5.12 — P2P peer DB load fix
+
+### Fixed
+
+- **P2P failed to load its peer list (`bad any_cast`).** The P2P DB stores peers
+  as `{"host","port"}` objects; the JSON parser returns
+  `std::shared_ptr<JSONObject>` for objects, but `addressesJSONToList` only
+  accepted `JSONObject`. As a result P2P_INIT/P2P_LOOP and the `peers` command
+  threw `bad any_cast` and the node had no peers. It now accepts both, plus
+  legacy `host:port` string entries.
 ## v0.5.11 — Fail-closed CoinProof deserialization
 
 - `CoinProof::ReadFromStream` now throws on truncated/corrupt proof data instead
