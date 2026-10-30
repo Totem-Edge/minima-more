@@ -1,5 +1,15 @@
 # PureMinima C++ — Change Report
 
+## v0.5.11 — Fail-closed CoinProof deserialization
+
+- `CoinProof::ReadFromStream` now throws on truncated/corrupt proof data instead
+  of returning `nullptr`.
+- `TxBlock` and `Witness` reject a null CoinProof with a typed serialization
+  error.
+- `TxPowTree::readDataStream` aborts the load on a node read failure rather than
+  running with a partial/corrupt tree.
+- A corrupt tree now reaches a clean CoinProof read error instead of dereferencing
+  null and raising `SIGSEGV`.
 ## v0.5.10 — MMR catch-up in replay
 
 ### Added

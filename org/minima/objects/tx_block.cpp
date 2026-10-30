@@ -350,8 +350,11 @@ void TxBlock::readDataStream(std::istream& in) {
         int len = org::minima::objects::base::MiniNumber::ReadFromStream(in).getAsInt();
         mSpentCoins.reserve(len);
         for (int i = 0; i < len; ++i) {
-            org::minima::objects::CoinProof cp = std::move(*org::minima::objects::CoinProof::ReadFromStream(in));
-            mSpentCoins.emplace_back(std::move(cp));
+            auto cp = org::minima::objects::CoinProof::ReadFromStream(in);
+            if (!cp) {
+                throw std::runtime_error("TxBlock::readDataStream - null CoinProof");
+            }
+            mSpentCoins.emplace_back(std::move(*cp));
         }
     }
 

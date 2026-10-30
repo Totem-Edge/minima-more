@@ -243,6 +243,9 @@ void Witness::readDataStream(std::istream& in) {
         mCoinProofs.reserve(len);
         for (int i = 0; i < len; ++i) {
             auto cp = CoinProof::ReadFromStream(in);
+            if (!cp) {
+                throw std::runtime_error("Witness::readDataStream - null CoinProof");
+            }
             mCoinProofs.emplace_back(std::move(cp));
         }
     }

@@ -595,17 +595,9 @@ void TxPowTree::readDataStream(std::istream& in) {
             failed++;
             MinimaLogger::log("ERROR TxPowTree: Failed to load node " + std::to_string(i) + 
                             ": " + std::string(e.what()));
-            
-            // CRITICAL: If we're failing to read nodes, the stream is likely corrupted
-            // We should stop reading to prevent cascading errors
-            if (failed > 5) {
-                MinimaLogger::log("ERROR TxPowTree: Too many consecutive failures (" + 
-                                std::to_string(failed) + "), stopping database load");
-                break;
-            }
-            
-            // Continue to next node
-            continue;
+            // A partial tree is unsafe: abort the whole load and let startup
+            // quarantine/resync instead of running with missing/corrupt nodes.
+            throw;
         }
     }
 

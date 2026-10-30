@@ -119,8 +119,9 @@ std::unique_ptr<CoinProof> CoinProof::ReadFromStream(std::istream& in) {
     try {
         cp->readDataStream(in);
     } catch (const std::exception& e) {
-         org::minima::utils::MinimaLogger::log("Error reading CoinProof from stream: " + std::string(e.what()));
-         return nullptr; // Return nullptr on error
+         const std::string message = "Error reading CoinProof from stream: " + std::string(e.what());
+         org::minima::utils::MinimaLogger::log(message);
+         throw std::runtime_error(message);
     }
     return cp;
 }
