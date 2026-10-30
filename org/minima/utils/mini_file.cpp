@@ -201,6 +201,7 @@ void MiniFile::loadObjectSlow(const fs::path& zFile, org::minima::utils::Streama
         
     } catch (const std::exception& e) {
         logError(std::string("Exception in loadObjectSlow: ") + e.what());
+        throw;
     }
 }
 
