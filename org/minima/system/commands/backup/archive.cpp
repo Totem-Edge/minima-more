@@ -276,6 +276,7 @@ std::string archive::getFullHelp() const {
     << "    export : Export your archive db to a .gzip file. \n"
     << "    exportraw : Export your archive db to a raw .dat file (recommended).\n"
     << "    resync : Use with 'host' to do a chain or seed re-sync from an archive node. \n"
+    << "    backfill : Fill a historical gap from an archive peer without resetting the archive. \n"
     << "    import : Use with 'file' to do a chain or seed re-sync using a .dat or .gzip archive file. \n"
     << "    addresscheck : check your archive db for spent and unspent coins at a specific address.\n"
     << "\n"
@@ -467,6 +468,80 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             resp.put("recommend", "Your ArchiveDB is correct and has no errors.");
         }
 
+        ret->put("response", resp);
+        return ret;
+    } else if (action == "backfill") {
+        // Fill a historical hole directly from an archive peer, without
+        // resetting the archive/cascade/tree. Unlike resync, this bypasses
+        // processSyncBlock (which ignores blocks at/below the tree root).
+        auto* db = MinimaDB::getDB();
+        if (db == nullptr) throw CommandException("No database available");
+
+        const std::string fullhost = getParam("host", "eurobuddha.com:9001");
+        auto connectdata = connect::createConnectMessage(fullhost);
+        if (!connectdata) {
+            throw CommandException("Invalid HOST format for backfill : " + fullhost);
+        }
+        const std::string host = connectdata->getString("host");
+        const int port = connectdata->getInteger("port");
+
+        auto& arch = db->getArchive();
+        long long from = existsParam("from")
+                             ? getNumberParam("from")->getAsLong()
+                             : arch.firstMissingBlock();
+        if (from < 0) {
+            auto last = arch.loadLastBlock();
+            from = last ? last->getTxPoW().getBlockNumber().getAsLong() + 1 : 1;
+        }
+        long long to = existsParam("to") ? getNumberParam("to")->getAsLong() : -1;
+
+        long long saved = 0;
+        long long failed = 0;
+        long long last_saved = from - 1;
+        long long start = from;
+        bool done = false;
+
+        arch.beginSaveBatch();
+        while (!done) {
+            auto ibd = sendArchiveReq(host, port, MiniNumber(start));
+            if (!ibd) break;
+            auto& blocks = ibd->getTxBlocks();
+            if (blocks.empty()) break;
+
+            for (auto& block : blocks) {
+                const long long bn = block->getTxPoW().getBlockNumber().getAsLong();
+                if (bn < from) continue;
+                if (to >= 0 && bn > to) {
+                    done = true;
+                    break;
+                }
+                if (arch.saveBlock(*block)) {
+                    ++saved;
+                    last_saved = bn;
+                } else {
+                    ++failed;
+                }
+                start = bn + 1;
+            }
+
+            arch.endSaveBatch(true);
+            arch.beginSaveBatch();
+            if (done) break;
+            if (blocks.size() < 256) break;
+        }
+        arch.endSaveBatch(true);
+        arch.flushPending();
+        arch.checkpoint();
+
+        const long long missing = arch.firstMissingBlock();
+        JSONObject resp;
+        resp.put("from", from);
+        resp.put("to", to);
+        resp.put("saved", saved);
+        resp.put("failed", failed);
+        resp.put("last_saved", last_saved);
+        resp.put("missing", missing);
+        resp.put("contiguous", missing < 0);
         ret->put("response", resp);
         return ret;
     } else if (action == "resync") {

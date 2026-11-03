@@ -217,11 +217,16 @@ void MegaMMR::addBlock(const TxBlock& zBlock) {
         }
     }
 
-    MiniData mroot = mMMR->getRoot()->getData();
-    MiniData broot = zBlock.getTxPoW().getMMRRoot();
-    if (!mroot.isEqual(broot)) {
-        MinimaLogger::log("[!] MEGAMMR ROOT AND TXBLOCK ROOT DONT MATCH @ " +
-                          zBlock.getTxPoW().getBlockNumber().toString());
+    // An empty/reset MMR has no root. Do not dereference it during an archive
+    // import; the first block simply seeds the MMR.
+    auto root = mMMR->getRoot();
+    if (root) {
+        MiniData mroot = root->getData();
+        MiniData broot = zBlock.getTxPoW().getMMRRoot();
+        if (!mroot.isEqual(broot)) {
+            MinimaLogger::log("[!] MEGAMMR ROOT AND TXBLOCK ROOT DONT MATCH @ " +
+                              zBlock.getTxPoW().getBlockNumber().toString());
+        }
     }
 }
 

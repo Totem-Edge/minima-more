@@ -772,6 +772,54 @@ std::unique_ptr<TxBlock> ArchiveManager::loadLastBlock() {
     }
 }
 
+long long ArchiveManager::firstMissingBlock() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    try {
+        checkOpen();
+        openConnIfNeeded();
+
+        // Empty archive -> block 1 is the first missing block.
+        sqlite3_stmt* stmt = nullptr;
+        int rc = sqlite3_prepare_v2(
+            mConn, "SELECT 1 FROM syncblock WHERE block=1 LIMIT 1;", -1, &stmt, nullptr);
+        if (rc != SQLITE_OK) {
+            MinimaLogger::log(std::string("firstMissingBlock prepare1 failed: ") +
+                              (mConn ? sqlite3_errmsg(mConn) : "no db"));
+            return -1;
+        }
+        rc = sqlite3_step(stmt);
+        const bool hasGenesis = (rc == SQLITE_ROW);
+        sqlite3_finalize(stmt);
+        if (!hasGenesis) return 1;
+
+        // First gap inside 1..MAX(block). The unique block index makes the
+        // self-join cheap even at 2.4M rows.
+        const char* sql =
+            "SELECT MIN(s.block + 1) FROM syncblock s "
+            "LEFT JOIN syncblock n ON n.block = s.block + 1 "
+            "WHERE n.block IS NULL AND s.block < (SELECT MAX(block) FROM syncblock);";
+        rc = sqlite3_prepare_v2(mConn, sql, -1, &stmt, nullptr);
+        if (rc != SQLITE_OK) {
+            MinimaLogger::log(std::string("firstMissingBlock prepare2 failed: ") +
+                              (mConn ? sqlite3_errmsg(mConn) : "no db"));
+            return -1;
+        }
+        long long missing = -1;
+        rc = sqlite3_step(stmt);
+        if (rc == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL) {
+            missing = sqlite3_column_int64(stmt, 0);
+        } else if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+            MinimaLogger::log(std::string("firstMissingBlock step failed: ") +
+                              (mConn ? sqlite3_errmsg(mConn) : "no db"));
+        }
+        sqlite3_finalize(stmt);
+        return missing;
+    } catch (const std::exception& e) {
+        MinimaLogger::log(e);
+        return -1;
+    }
+}
+
 std::vector<std::unique_ptr<TxBlock>>
 ArchiveManager::loadSyncBlockRange(const MiniNumber& zStartBlock) {
     std::lock_guard<std::mutex> lock(m_mutex);

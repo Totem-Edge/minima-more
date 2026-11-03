@@ -40,6 +40,10 @@ public:
     // Size of DB (number of rows in syncblock) - returns -1 on error
     int getSize();
 
+    // First block height missing from the contiguous 1..last range, or -1 if
+    // the archive is contiguous (or empty).
+    long long firstMissingBlock();
+
     // Ensure cascade is stored if required and consistent with stored blocks
     void checkCascadeRequired(const org::minima::database::cascade::Cascade& zCascade);
 

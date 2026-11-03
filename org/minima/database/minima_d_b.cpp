@@ -379,7 +379,10 @@ void MinimaDB::loadAllDB() {
             mMegaMMR->openCoinStore(basedb / "coins.lmdb");
             mMegaMMR->loadMMR(basedb / "megammr.mmr");
         } else {
-            org::minima::utils::MiniFile::deleteFileOrFolder(basedb.string(), basedb / "megammr.mmr");
+            // Preserve an existing MMR file when the node runs without
+            // -megammr. A no-MMR archive import must not destroy it.
+            org::minima::utils::MinimaLogger::log(
+                "MegaMMR disabled - preserving existing megammr.mmr");
         }
 
         // And check tree vs cascade alignment when available
