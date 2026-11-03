@@ -689,6 +689,49 @@ void TxPoWProcessor::recalculateTree() {
             }
         }
 
+        // Reconcile the cascade with the tree root. The tree window can prune
+        // nodes without the cascade update (notably after restoretree or a
+        // large live replay); the archive can always supply the missing range.
+        // Keeping cascade tip == tree root - 1 also satisfies the loadAllDB
+        // consistency check on the next restart.
+        auto treeRoot = txptree->getRoot();
+        auto cascTip = cascdb->getTip();
+        if (treeRoot && cascTip) {
+            const long long rootBlk = treeRoot->getTxPoW().getBlockNumber().getAsLong();
+            const long long tipBlk = cascTip->getTxPoW().getBlockNumber().getAsLong();
+            if (rootBlk > tipBlk + 1) {
+                auto missing = arch->loadBlockRange(MiniNumber(tipBlk), MiniNumber(rootBlk), false);
+                if (!missing.empty()) {
+                    long long added = 0;
+                    arch->beginSaveBatch();
+                    try {
+                        for (auto& block : missing) {
+                            auto& txpow = block->getTxPoW();
+                            txpdb->setInCascade(txpow.getTxPoWID());
+                            for (const auto& txpid : txpow.getTransactions()) {
+                                txpdb->setInCascade(txpid);
+                            }
+                            arch->saveBlock(*block);
+                            cascdb->addToTip(txpow);
+                            ++added;
+                        }
+                        arch->endSaveBatch(true);
+                    } catch (...) {
+                        arch->endSaveBatch(false);
+                        throw;
+                    }
+                    cascdb->cascadeChain();
+                    arch->checkpoint();
+                    if (added > 0) {
+                        MinimaLogger::log(
+                            "Cascade reconciled to tree root: added " +
+                            std::to_string(added) + " blocks, tip " +
+                            cascdb->getTip()->getTxPoW().getBlockNumber().toString());
+                    }
+                }
+            }
+        }
+
         // Set all the onchain txns
         txpdb->clearMainChainTxns();
 
