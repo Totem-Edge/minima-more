@@ -1303,6 +1303,18 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                     last_mmr_block = bn;
                 }
             }
+
+            // The live tree tail may be ahead of the archive tip; cover it
+            // with the heaviest branch so the MMR reaches the live tip.
+            auto mbranch = db->getTxPoWTree().getHeaviestBranch();
+            std::reverse(mbranch.begin(), mbranch.end());
+            for (auto& node : mbranch) {
+                const long long bn = node->getTxPoW().getBlockNumber().getAsLong();
+                if (bn <= last_mmr_block) continue;
+                if (bn > mmr_to) break;
+                addMmr(node->getTxBlock());
+                last_mmr_block = bn;
+            }
         }
 
         if (fromblock > toblock) {
