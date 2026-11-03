@@ -276,6 +276,7 @@ std::string archive::getFullHelp() const {
     << "    export : Export your archive db to a .gzip file. \n"
     << "    exportraw : Export your archive db to a raw .dat file (recommended).\n"
     << "    resync : Use with 'host' to do a chain or seed re-sync from an archive node. \n"
+    << "    restorecascade : Load the cascade snapshot stored in the archive DB. \n"
     << "    backfill : Fill a historical gap from an archive peer without resetting the archive. \n"
     << "    import : Use with 'file' to do a chain or seed re-sync using a .dat or .gzip archive file. \n"
     << "    addresscheck : check your archive db for spent and unspent coins at a specific address.\n"
@@ -468,6 +469,21 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             resp.put("recommend", "Your ArchiveDB is correct and has no errors.");
         }
 
+        ret->put("response", resp);
+        return ret;
+    } else if (action == "restorecascade") {
+        // Adopt the cascade snapshot stored in the archive DB. Useful when
+        // cascade.db is missing/corrupt but the archive (and its cascadedata)
+        // is intact; avoids a destructive resync.
+        auto* db = MinimaDB::getDB();
+        if (db == nullptr) throw CommandException("No database available");
+        auto casc = db->getArchive().loadCascade();
+        if (!casc) throw CommandException("No cascade stored in archive");
+        db->setIBDCascade(*casc);
+        db->getArchive().checkCascadeRequired(*casc);
+        JSONObject resp;
+        resp.put("tip", casc->getTip()->getTxPoW().getBlockNumber().toString());
+        resp.put("length", casc->getLength());
         ret->put("response", resp);
         return ret;
     } else if (action == "backfill") {
