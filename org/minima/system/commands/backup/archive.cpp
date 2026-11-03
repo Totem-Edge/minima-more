@@ -1221,7 +1221,13 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         auto& cascade = db->getCascade();
         auto tipnode = cascade.getTip();
         auto treeTip = db->getTxPoWTree().getTip();
-        if (!tipnode && !treeTip) throw CommandException("Cascade and tree are empty - nothing to replay");
+        const bool update_mmr = getBooleanParam("mmr", false);
+        if (!tipnode && !treeTip) {
+            // MMR catch-up can run from the archive alone.
+            if (!update_mmr || !db->getArchive().loadLastBlock()) {
+                throw CommandException("Cascade and tree are empty - nothing to replay");
+            }
+        }
 
         const long long cascade_tip_block =
             tipnode ? tipnode->getTxPoW().getBlockNumber().getAsLong() : -1;
@@ -1251,7 +1257,6 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         // first block it is missing (mmrfrom) up to the chain tip.
         long long mmr_saved = 0;
         long long mmr_failed = 0;
-        const bool update_mmr = getBooleanParam("mmr", false);
         long long mmrfrom = existsParam("mmrfrom")
             ? getNumberParam("mmrfrom")->getAsLong()
             : -1;
@@ -1276,34 +1281,27 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                 }
             };
 
+            // The archive holds every block; use it for the MMR catch-up
+            // instead of sparse cascade checkpoints. This also works when the
+            // live tree is empty/rebuilding.
+            long long archive_tip = -1;
+            if (last) archive_tip = last->getTxPoW().getBlockNumber().getAsLong();
+            const long long mmr_to = std::max(tipblock, archive_tip);
+            if (mmrfrom < 1) mmrfrom = 1;
+
             long long last_mmr_block = mmrfrom - 1;
-            if (tipnode) {
-                std::vector<std::shared_ptr<org::minima::database::cascade::CascadeNode>> cnodes;
-                auto current = tipnode;
-                while (current) {
-                    const long long bn = current->getTxPoW().getBlockNumber().getAsLong();
-                    if (bn < mmrfrom) break;
-                    cnodes.push_back(current);
-                    current = cascade.getParent(current);
-                }
-                std::reverse(cnodes.begin(), cnodes.end());
-                for (auto& node : cnodes) {
-                    const long long bn = node->getTxPoW().getBlockNumber().getAsLong();
-                    if (bn <= last_mmr_block) continue;
-                    org::minima::objects::TxBlock block(node->getTxPoW());
-                    addMmr(block);
+            for (long long start = mmrfrom; start <= mmr_to; start += 256) {
+                const long long end = std::min(mmr_to, start + 255);
+                // loadBlockRange excludes both bounds.
+                auto blocks = db->getArchive().loadBlockRange(
+                    MiniNumber(start - 1), MiniNumber(end + 1), false);
+                if (blocks.empty()) break;
+                for (auto& block : blocks) {
+                    const long long bn = block->getTxPoW().getBlockNumber().getAsLong();
+                    if (bn < mmrfrom || bn <= last_mmr_block) continue;
+                    addMmr(*block);
                     last_mmr_block = bn;
                 }
-            }
-
-            auto mbranch = db->getTxPoWTree().getHeaviestBranch();
-            std::reverse(mbranch.begin(), mbranch.end());
-            for (auto& node : mbranch) {
-                const long long bn = node->getTxPoW().getBlockNumber().getAsLong();
-                if (bn <= last_mmr_block) continue;
-                if (bn > tipblock) break;
-                addMmr(node->getTxBlock());
-                last_mmr_block = bn;
             }
         }
 
