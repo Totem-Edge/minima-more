@@ -277,6 +277,7 @@ std::string archive::getFullHelp() const {
     << "    exportraw : Export your archive db to a raw .dat file (recommended).\n"
     << "    resync : Use with 'host' to do a chain or seed re-sync from an archive node. \n"
     << "    restorecascade : Load the cascade snapshot stored in the archive DB. \n"
+    << "    restoretree : Rebuild the live TxPoW tree from the archive window. \n"
     << "    backfill : Fill a historical gap from an archive peer without resetting the archive. \n"
     << "    import : Use with 'file' to do a chain or seed re-sync using a .dat or .gzip archive file. \n"
     << "    addresscheck : check your archive db for spent and unspent coins at a specific address.\n"
@@ -469,6 +470,53 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             resp.put("recommend", "Your ArchiveDB is correct and has no errors.");
         }
 
+        ret->put("response", resp);
+        return ret;
+    } else if (action == "restoretree") {
+        // Rebuild the live TxPoW tree from the archive window after the
+        // cascade tip. Symmetric to restorecascade; does not reset anything.
+        auto* db = MinimaDB::getDB();
+        if (db == nullptr) throw CommandException("No database available");
+        auto tip = db->getCascade().getTip();
+        if (!tip) throw CommandException("Cascade is empty - run restorecascade first");
+        auto last = db->getArchive().loadLastBlock();
+        if (!last) throw CommandException("Archive is empty");
+        const long long from = tip->getTxPoW().getBlockNumber().getAsLong() + 1;
+        const long long to = last->getTxPoW().getBlockNumber().getAsLong();
+        if (from > to) throw CommandException("Archive is at or below the cascade tip");
+
+        auto& proc = Main::getInstance()->getTxPoWProcessor();
+        long long posted = 0;
+        for (long long start = from; start <= to; start += 256) {
+            const long long end = std::min(to, start + 255);
+            // loadBlockRange excludes both bounds.
+            auto blocks = db->getArchive().loadBlockRange(
+                MiniNumber(start - 1), MiniNumber(end + 1), false);
+            if (blocks.empty()) break;
+            std::vector<std::shared_ptr<org::minima::objects::TxBlock>> sblocks;
+            sblocks.reserve(blocks.size());
+            for (auto& block : blocks) {
+                sblocks.emplace_back(std::move(block));
+            }
+            posted += static_cast<long long>(sblocks.size());
+            auto ibd = std::make_shared<IBD>();
+            ibd->setTxBlocks(std::move(sblocks));
+            proc.postProcessArchiveIBD(ibd, "0x00");
+            while (proc.getSize() > 4) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }
+
+        // Empty IBD forces the final tree/cascade recalculation.
+        proc.postProcessArchiveIBD(std::make_shared<IBD>(), "0x00");
+        while (proc.getSize() > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        JSONObject resp;
+        resp.put("from", from);
+        resp.put("to", to);
+        resp.put("posted", posted);
         ret->put("response", resp);
         return ret;
     } else if (action == "restorecascade") {
