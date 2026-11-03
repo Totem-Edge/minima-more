@@ -1317,6 +1317,16 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             }
         }
 
+        if (update_mmr &&
+            org::minima::system::params::GeneralParams::IS_MEGAMMR) {
+            try {
+                db->getMegaMMR().saveMMR(db->getDBFile("megammr.mmr"));
+                MinimaLogger::log("MegaMMR saved after replay");
+            } catch (const std::exception& exc) {
+                MinimaLogger::log(std::string("MegaMMR save failed: ") + exc.what());
+            }
+        }
+
         if (fromblock > toblock) {
             JSONObject resp;
             resp.put("from", fromblock);
