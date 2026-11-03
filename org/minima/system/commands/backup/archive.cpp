@@ -485,6 +485,11 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         const long long to = last->getTxPoW().getBlockNumber().getAsLong();
         if (from > to) throw CommandException("Archive is at or below the cascade tip");
 
+        // Rebuild from a clean tree. An existing peer-built tree may have a
+        // root below the cascade tip, in which case processSyncBlock would
+        // ignore the archive window and the tree root would never align.
+        db->getTxPoWTree().setRoot(nullptr);
+
         auto& proc = Main::getInstance()->getTxPoWProcessor();
         long long posted = 0;
         for (long long start = from; start <= to; start += 256) {
