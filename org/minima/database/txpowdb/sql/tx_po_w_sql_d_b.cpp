@@ -53,7 +53,7 @@ TxPoWSqlDB::TxPoWSqlDB()
 }
 
 TxPoWSqlDB::~TxPoWSqlDB() {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     finalizeStatements();
     closeConnection();
 }
@@ -114,13 +114,13 @@ void TxPoWSqlDB::flushBatchLocked() {
 }
 
 void TxPoWSqlDB::flushBatch() {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     commitBatchLocked();
 }
 
 void TxPoWSqlDB::saveDB(bool zCompact) {
     // Commit pending inserts first, then defer to the base (checkpoint/close).
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     commitBatchLocked();
     org::minima::utils::SqlDB::saveDB(zCompact);
 }
@@ -187,7 +187,7 @@ void TxPoWSqlDB::prepareStatements() {
 }
 
 void TxPoWSqlDB::createSQL() {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         openConnectionIfNeeded();
         const std::string create =
@@ -212,7 +212,7 @@ void TxPoWSqlDB::createSQL() {
 }
 
 void TxPoWSqlDB::wipeDB() {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         checkOpen();
         openConnectionIfNeeded();
@@ -259,7 +259,7 @@ std::string TxPoWSqlDB::sanitizeWhere(const std::string& where) {
 }
 
 int TxPoWSqlDB::customSizeQuery(const std::string& zWhereCondition) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         checkOpen();
         openConnectionIfNeeded();
@@ -291,7 +291,7 @@ std::int64_t TxPoWSqlDB::currentTimeMillis() {
 }
 
 bool TxPoWSqlDB::addTxPoW(const org::minima::objects::TxPoW& zTxPoW, bool zIsRelevant) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         if (LOG_ADD_BLOCKS && zTxPoW.isBlock()) {
             org::minima::utils::MinimaLogger::log(std::string("[+] BLOCK ADDED TO TXPOWDB : ") + zTxPoW.getBlockNumber().toString());
@@ -359,7 +359,7 @@ bool TxPoWSqlDB::addTxPoW(const org::minima::objects::TxPoW& zTxPoW, bool zIsRel
 }
 
 std::unique_ptr<org::minima::objects::TxPoW> TxPoWSqlDB::getTxPoW(const std::string& zTxPoWID) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         checkOpen();
         openConnectionIfNeeded();
@@ -388,7 +388,7 @@ std::unique_ptr<org::minima::objects::TxPoW> TxPoWSqlDB::getTxPoW(const std::str
 }
 
 std::vector<std::string> TxPoWSqlDB::getChildBlocks(const std::string& zParentTxPoWID) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     std::vector<std::string> txpows;
     try {
         checkOpen();
@@ -412,7 +412,7 @@ std::vector<std::string> TxPoWSqlDB::getChildBlocks(const std::string& zParentTx
 }
 
 int TxPoWSqlDB::getRelevantSize() {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         checkOpen();
         openConnectionIfNeeded();
@@ -434,7 +434,7 @@ std::vector<std::unique_ptr<org::minima::objects::TxPoW>> TxPoWSqlDB::getAllRele
 }
 
 std::vector<std::unique_ptr<org::minima::objects::TxPoW>> TxPoWSqlDB::getAllRelevant(int zLimit, int zOffset) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     std::vector<std::unique_ptr<org::minima::objects::TxPoW>> txpows;
     try {
         checkOpen();
@@ -466,7 +466,7 @@ std::vector<std::unique_ptr<org::minima::objects::TxPoW>> TxPoWSqlDB::getAllRele
 }
 
 std::vector<std::unique_ptr<org::minima::objects::TxPoW>> TxPoWSqlDB::getLatestTxPoW(int zLimit, int zOffset) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     std::vector<std::unique_ptr<org::minima::objects::TxPoW>> txpows;
     try {
         checkOpen();
@@ -498,7 +498,7 @@ std::vector<std::unique_ptr<org::minima::objects::TxPoW>> TxPoWSqlDB::getLatestT
 }
 
 int TxPoWSqlDB::getLatestTxPoWSize(std::int64_t zMinMilliTime) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         checkOpen();
         openConnectionIfNeeded();
@@ -517,7 +517,7 @@ int TxPoWSqlDB::getLatestTxPoWSize(std::int64_t zMinMilliTime) {
 }
 
 int TxPoWSqlDB::getSize() {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         checkOpen();
         openConnectionIfNeeded();
@@ -535,7 +535,7 @@ int TxPoWSqlDB::getSize() {
 }
 
 bool TxPoWSqlDB::exists(const std::string& zTxPoWID) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         checkOpen();
         openConnectionIfNeeded();
@@ -554,7 +554,7 @@ int TxPoWSqlDB::cleanDB() {
 }
 
 int TxPoWSqlDB::cleanDB(bool zHard) {
-    std::lock_guard<std::mutex> lock(mLocalMutex);
+    std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
     try {
         checkOpen();
         openConnectionIfNeeded();
@@ -587,7 +587,7 @@ int TxPoWSqlDB::cleanDB(bool zHard) {
 void TxPoWSqlDB::closeAndReopen() {
     // Phase 1: commit pending inserts and close (under the lock).
     {
-        std::lock_guard<std::mutex> lock(mLocalMutex);
+        std::lock_guard<std::recursive_mutex> lock(mLocalMutex);
         try {
             commitBatchLocked();
             org::minima::utils::SqlDB::saveDB(false); // close base connection

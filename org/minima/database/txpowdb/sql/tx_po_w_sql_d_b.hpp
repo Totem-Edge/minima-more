@@ -118,8 +118,9 @@ private:
     sqlite3_stmt* mStmtSelectTopTxpow;
     sqlite3_stmt* mStmtSelectTopTxpowSize;
 
-    // Synchronization
-    std::mutex mLocalMutex;
+    // Synchronization. Recursive: some paths (getTxPoW -> checkOpen ->
+    // createSQL) re-enter while already holding the SQL lock.
+    std::recursive_mutex mLocalMutex;
 
     // Write batching. TxPoWs are inserted in bursts (sync / tree load / restore),
     // and each autocommit insert is its own transaction (WAL write + possible
