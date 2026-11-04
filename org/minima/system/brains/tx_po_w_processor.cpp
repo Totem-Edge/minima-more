@@ -1002,24 +1002,35 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
                               + " start:" + blocks.front()->getTxPoW().getBlockNumber().toString());
         }
 
-        for (auto& block : blocks) {
-            try {
-                processSyncBlock(block);
-                additions++;
-            } catch (const std::exception& exc) {
-                MinimaLogger::log(exc.what());
-                Main::getInstance()->getNIOManager().disconnect(uid);
-                break;
+        // The tree is mutated here; hold the DB write lock so the periodic
+        // saveState() read lock cannot snapshot a half-updated tree.
+        // The lock is reentrant, so recalculateTree() can take it again.
+        MinimaDB::getDB()->writeLock(true);
+        try {
+            for (auto& block : blocks) {
+                try {
+                    processSyncBlock(block);
+                    additions++;
+                } catch (const std::exception& exc) {
+                    MinimaLogger::log(exc.what());
+                    Main::getInstance()->getNIOManager().disconnect(uid);
+                    break;
+                }
             }
-        }
 
-        // Recalculate in batches (tree/cascade/archive work is expensive); the
-        // empty end-of-stream IBD forces a final recalculation.
-        mArchiveSinceRecalc += additions;
-        if (mArchiveSinceRecalc >= 2048 || blocks.empty()) {
-            recalculateTree();
-            mArchiveSinceRecalc = 0;
+            // Recalculate in batches (tree/cascade/archive work is expensive); the
+            // empty end-of-stream IBD forces a final recalculation.
+            mArchiveSinceRecalc += additions;
+            if (mArchiveSinceRecalc >= 2048 || blocks.empty()) {
+                recalculateTree();
+                mArchiveSinceRecalc = 0;
+            }
+        } catch (const std::exception& exc) {
+            MinimaLogger::log(std::string("Archive IBD processing failed: ") + exc.what());
+            MinimaDB::getDB()->writeLock(false);
+            throw;
         }
+        MinimaDB::getDB()->writeLock(false);
 
     } else if (zMessage.isMessageType(TXPOWPROCESSOR_CHECKER_CALL)) {
         MinimaLogger::log("TXPOWPROCESSOR Checker Call Recieved..");

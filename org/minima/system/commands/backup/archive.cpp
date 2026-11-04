@@ -488,34 +488,58 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         // Rebuild from a clean tree. An existing peer-built tree may have a
         // root below the cascade tip, in which case processSyncBlock would
         // ignore the archive window and the tree root would never align.
-        db->getTxPoWTree().setRoot(nullptr);
-
-        auto& proc = Main::getInstance()->getTxPoWProcessor();
+        // Quiesce the periodic save while the tree is empty/being rebuilt.
+        db->setAllowSaveState(false);
         long long posted = 0;
-        for (long long start = from; start <= to; start += 256) {
-            const long long end = std::min(to, start + 255);
-            // loadBlockRange excludes both bounds.
-            auto blocks = db->getArchive().loadBlockRange(
-                MiniNumber(start - 1), MiniNumber(end + 1), false);
-            if (blocks.empty()) break;
-            std::vector<std::shared_ptr<org::minima::objects::TxBlock>> sblocks;
-            sblocks.reserve(blocks.size());
-            for (auto& block : blocks) {
-                sblocks.emplace_back(std::move(block));
+        try {
+            db->writeLock(true);
+            try {
+                db->getTxPoWTree().setRoot(nullptr);
+            } catch (...) {
+                db->writeLock(false);
+                throw;
             }
-            posted += static_cast<long long>(sblocks.size());
-            auto ibd = std::make_shared<IBD>();
-            ibd->setTxBlocks(std::move(sblocks));
-            proc.postProcessArchiveIBD(ibd, "0x00");
-            while (proc.getSize() > 4) {
+            db->writeLock(false);
+
+            auto& proc = Main::getInstance()->getTxPoWProcessor();
+            for (long long start = from; start <= to; start += 256) {
+                const long long end = std::min(to, start + 255);
+                // loadBlockRange excludes both bounds.
+                auto blocks = db->getArchive().loadBlockRange(
+                    MiniNumber(start - 1), MiniNumber(end + 1), false);
+                if (blocks.empty()) break;
+                std::vector<std::shared_ptr<org::minima::objects::TxBlock>> sblocks;
+                sblocks.reserve(blocks.size());
+                for (auto& block : blocks) {
+                    sblocks.emplace_back(std::move(block));
+                }
+                posted += static_cast<long long>(sblocks.size());
+                auto ibd = std::make_shared<IBD>();
+                ibd->setTxBlocks(std::move(sblocks));
+                proc.postProcessArchiveIBD(ibd, "0x00");
+                while (proc.getSize() > 4) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
+            }
+
+            // Empty IBD forces the final tree/cascade recalculation.
+            proc.postProcessArchiveIBD(std::make_shared<IBD>(), "0x00");
+            while (proc.getSize() > 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
+        } catch (...) {
+            db->setAllowSaveState(true);
+            throw;
         }
 
-        // Empty IBD forces the final tree/cascade recalculation.
-        proc.postProcessArchiveIBD(std::make_shared<IBD>(), "0x00");
-        while (proc.getSize() > 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        // Give the processor a moment to finish the final recalculation under
+        // the write lock, then persist the rebuilt tree once.
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        db->setAllowSaveState(true);
+        try {
+            db->saveState();
+        } catch (const std::exception& exc) {
+            MinimaLogger::log(std::string("restoretree save failed: ") + exc.what());
         }
 
         JSONObject resp;

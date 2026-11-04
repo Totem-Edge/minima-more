@@ -443,15 +443,12 @@ void TxPowTree::loadDB(const std::filesystem::path& zFile) {
 }
 
 void TxPowTree::saveDB(const std::filesystem::path& zFile) {
-    // Refresh mTotalNodes/mTip/mFastLink so the persisted node count matches
-    // the reachable tree. A stale count persists an empty chaintree.
-    recalculateTree();
     MiniFile::saveObjectDirect(zFile, *this);
 }
 
 void TxPowTree::writeDataStream(std::ostream& out) {
-    // How many nodes..
-    MiniNumber::WriteToStream(out, mTotalNodes);
+    // Persist the reachable node count, not a possibly stale mTotalNodes.
+    MiniNumber::WriteToStream(out, static_cast<int>(mFastLink.size()));
 
     // Cycle through and output the whole tree
     class WriteOutAction final : public TxPoWTreeNodeAction {
