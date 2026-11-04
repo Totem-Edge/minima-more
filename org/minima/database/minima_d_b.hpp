@@ -269,6 +269,7 @@ public:
 
     // Loaders
     void loadAllDB();
+    void loadTreeSafe(const std::filesystem::path& zFile);
     void loadArchiveAndTxPoWDB(bool zResetWallet);
     void loadDBsForRestoreSync();
 

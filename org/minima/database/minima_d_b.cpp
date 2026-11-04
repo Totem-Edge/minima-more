@@ -272,6 +272,18 @@ std::filesystem::path MinimaDB::getBaseDBFolder() {
 }
 
 // Loaders
+void MinimaDB::loadTreeSafe(const fs::path& zFile) {
+    try {
+        mTxPoWTree->loadDB(zFile);
+    } catch (const std::exception& e) {
+        org::minima::utils::MinimaLogger::log(
+            std::string("Corrupt chaintree - starting with an empty tree: ") + e.what());
+        std::error_code ec;
+        fs::rename(zFile, zFile.string() + ".corrupt", ec);
+        mTxPoWTree = std::make_unique<org::minima::database::txpowtree::TxPowTree>();
+    }
+}
+
 void MinimaDB::loadAllDB() {
     writeLock(true);
     try {
@@ -337,7 +349,7 @@ void MinimaDB::loadAllDB() {
                 std::string("Loading TxPowTree size : ")
                 + org::minima::utils::MiniFormat::formatSize(ec ? 0 : static_cast<long long>(size)));
         }
-        mTxPoWTree->loadDB(basedb / "chaintree.db");
+        loadTreeSafe(basedb / "chaintree.db");
 
         // P2P DBs
         mP2PDB->loadDB((basedb / "p2p.db").string());
@@ -506,7 +518,7 @@ void MinimaDB::loadDBsForRestoreSync() {
 
         // TxPoWTree
         mTxPoWTree = std::make_unique<org::minima::database::txpowtree::TxPowTree>();
-        mTxPoWTree->loadDB(basedb / "chaintree.db");
+        loadTreeSafe(basedb / "chaintree.db");
 
     } catch (const std::exception& exc) {
         org::minima::utils::MinimaLogger::log("SERIOUS ERROR loadDBsForRestoreSync");

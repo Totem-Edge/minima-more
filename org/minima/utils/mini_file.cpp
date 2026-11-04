@@ -256,26 +256,31 @@ void MiniFile::saveObjectDirect(const fs::path& zFile, org::minima::utils::Strea
     // Check Parent
     ensureParentExists(zFile);
 
+    // Write to a sibling temp file and rename atomically. Never delete the
+    // previous DB first: a kill mid-write must leave the old file intact.
+    fs::path tmp = zFile;
+    tmp += ".tmp";
+
     try {
         std::error_code ec;
-
-        // Delete the old..
-        if (fs::exists(zFile, ec)) {
-            fs::remove(zFile, ec);
+        if (fs::exists(tmp, ec)) {
+            fs::remove(tmp, ec);
         }
 
-        // Write it out..
-        std::ofstream fos(zFile, std::ios::binary | std::ios::out | std::ios::trunc);
+        std::ofstream fos(tmp, std::ios::binary | std::ios::out | std::ios::trunc);
         if (!fos) {
-            throw std::ios_base::failure("Failed to open file for writing: " + zFile.string());
+            throw std::ios_base::failure("Failed to open file for writing: " + tmp.string());
         }
 
-        // Write data
         zObject.writeDataStream(fos);
-
-        // flush
         fos.flush();
         fos.close();
+
+        fs::rename(tmp, zFile, ec);
+        if (ec) {
+            throw std::ios_base::failure(
+                "Failed to rename " + tmp.string() + " -> " + zFile.string() + ": " + ec.message());
+        }
     } catch (const std::exception& exc) {
         logError(std::string("Exception in saveObjectDirect: ") + exc.what());
     }
