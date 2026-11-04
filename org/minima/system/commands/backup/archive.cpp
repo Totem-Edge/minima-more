@@ -1247,6 +1247,13 @@ std::unique_ptr<JSONObject> archive::runCommand() {
     } else if (action == "replay") {
         auto* db = MinimaDB::getDB();
         if (db == nullptr) throw CommandException("No database available");
+        // Hold the DB write lock for the whole replay: it mutates the MegaMMR
+        // and walks the tree, which must not overlap the periodic saveState().
+        struct DbWriteGuard {
+            MinimaDB* db;
+            explicit DbWriteGuard(MinimaDB* zDb) : db(zDb) { db->writeLock(true); }
+            ~DbWriteGuard() { db->writeLock(false); }
+        } writeguard(db);
         auto& cascade = db->getCascade();
         auto tipnode = cascade.getTip();
         auto treeTip = db->getTxPoWTree().getTip();

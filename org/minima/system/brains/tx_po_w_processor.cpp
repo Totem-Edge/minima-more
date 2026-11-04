@@ -788,7 +788,15 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
         }
         auto anytx = zMessage.getObject("txpow");
         auto txp = std::any_cast<std::shared_ptr<TxPoW>>(anytx);
-        processTxPoW(txp);
+        // Tree mutation: exclude the periodic saveState() snapshot.
+        MinimaDB::getDB()->writeLock(true);
+        try {
+            processTxPoW(txp);
+        } catch (...) {
+            MinimaDB::getDB()->writeLock(false);
+            throw;
+        }
+        MinimaDB::getDB()->writeLock(false);
 
     } else if (zMessage.isMessageType(TXPOWPROCESSOR_PROCESSTXBLOCK)) {
         if (!GeneralParams::TXBLOCK_NODE) {
@@ -796,7 +804,15 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
         }
         auto anyblk = zMessage.getObject("txblock");
         auto txblock = std::any_cast<std::shared_ptr<TxBlock>>(anyblk);
-        processTxBlock(txblock);
+        // Tree mutation: exclude the periodic saveState() snapshot.
+        MinimaDB::getDB()->writeLock(true);
+        try {
+            processTxBlock(txblock);
+        } catch (...) {
+            MinimaDB::getDB()->writeLock(false);
+            throw;
+        }
+        MinimaDB::getDB()->writeLock(false);
 
     } else if (zMessage.isMessageType(TXPOWPROCESSOR_PROCESS_IBD)) {
         std::string uid = zMessage.getString("uid");
