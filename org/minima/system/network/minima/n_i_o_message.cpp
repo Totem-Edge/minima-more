@@ -953,44 +953,21 @@ void NIOMessage::run() {
                     return;
                 }
 
-                // A tip-less / bootstrapping node cannot cross with a peer's recent
-                // pulse (it has no chain yet), so "no crossover" here means WE are
-                // behind - not that the peer is on a different chain. Do NOT
-                // blacklist/disconnect a valid peer (this is what stopped fresh
-                // nodes syncing from mainnet); stay connected and let the
-                // greeting/IBD path sync us.
+                // A PULSE carries only the peer's most recent 512 tree blocks. If
+                // we are more than 512 blocks behind, none of them can be in our
+                // tree even though we are on the same chain. A real fork is
+                // resolved by the GREETING/IBD path, which compares full chain
+                // ancestry. So never blacklist/disconnect here: stay connected
+                // and let the greeting/IBD handshake decide.
                 {
                     auto tip = MinimaDB::getDB()->getTxPoWTree().getTip();
-                    if (tip == nullptr ||
-                        tip->getTxPoW().getBlockNumber().isLessEqual(org::minima::objects::base::MiniNumber::ONE())) {
-                        MinimaLogger::log("[!] No crossover but we have no chain yet - staying connected to "
-                                          + mClientUID + " and awaiting IBD");
-                        return;
-                    }
-                }
-
-                if (!mFullAdrress.empty()) {
-                    P2PFunctions::addInvalidPeer(mFullAdrress);
-                }
-
-                // getClient returns shared_ptr
-                auto nioclient = Main::getInstance()->getNIOManager().getNIOServer()->getClient(mClientUID);
-                if (nioclient == nullptr) {
-                    Main::getInstance()->getNIOManager().disconnect(mClientUID, true);
+                    MinimaLogger::log(
+                        std::string("[!] No pulse overlap with ") + mClientUID +
+                        (tip ? (" (our tip " + tip->getTxPoW().getBlockNumber().toString() + ")") :
+                               std::string(" (no tip)")) +
+                        " - staying connected for greeting/IBD sync");
                     return;
                 }
-
-                int port = nioclient->getPort();
-                if (nioclient->getMinimaPort() == -1) {
-                    port = nioclient->getMinimaPort();
-                }
-
-                MinimaLogger::log("[!] No Crossover found whilst syncing with new node. They are on a different chain. Please check you are on the correct chain.. disconnecting from "
-                                  + nioclient->getHost() + ":" + std::to_string(port));
-
-                P2PFunctions::addInvalidPeer(nioclient->getFullAddress());
-
-                Main::getInstance()->getNIOManager().disconnect(mClientUID, true);
             }
 
         } else if (type.isEqual(MSG_SINGLE_PING())) {
