@@ -49,6 +49,10 @@ public:
     void postProcessSyncIBD(const std::shared_ptr<org::minima::objects::IBD>& zIBD, const std::string& zClientUID);
     void postProcessArchiveIBD(const std::shared_ptr<org::minima::objects::IBD>& zIBD, const std::string& zClientUID);
 
+    // Ask a peer for the next sync-IBD batch (safe to call from the NIO thread;
+    // it just posts a message to the processor/NIO manager).
+    void askToSyncTxBlocks(const std::string& zClientID);
+
     void onStartUpRecalc();
 
     void postCheckCall();
@@ -63,7 +67,6 @@ private:
     bool processSyncBlock(const std::shared_ptr<org::minima::objects::TxBlock>& zTxBlock);
     void recalculateTree();
 
-    void askToSyncTxBlocks(const std::string& zClientID);
     void requestMissingTxns(const std::string& zClientID, const std::shared_ptr<org::minima::objects::TxBlock>& zBlock);
 
 private:

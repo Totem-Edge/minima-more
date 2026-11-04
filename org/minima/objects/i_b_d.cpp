@@ -197,7 +197,33 @@ bool IBD::createIBD(const org::minima::objects::Greeting& zGreeting) {
                     // DEBUG
                     MinimaLogger::log("[!] When creating IBD - No Crossover found whilst syncing with new node. "
                                     "They are on a different chain. Please check you are on the correct chain");
-                    
+
+                    // Compare the peer's greeting entry at our own tip height with
+                    // our tip. This distinguishes a true fork (different hashes at
+                    // the same height) from a pulse/sampling mismatch.
+                    try {
+                        auto& tree = MinimaDB::getDB()->getTxPoWTree();
+                        auto mytip = tree.getTip();
+                        auto myroot = tree.getRoot();
+                        const long long peertop = zGreeting.getTopBlock().getAsLong();
+                        std::string diag = "[IBD-DIAG] peertop=" + std::to_string(peertop)
+                                         + " peerchain=" + std::to_string(greetblocks.size());
+                        if (myroot) {
+                            diag += " myroot=" + myroot->getTxPoW().getBlockNumber().toString()
+                                  + ":" + myroot->getTxPoW().getTxPoWID();
+                        }
+                        if (mytip) {
+                            const long long mytipnum = mytip->getTxPoW().getBlockNumber().getAsLong();
+                            diag += " mytip=" + std::to_string(mytipnum) + ":" + mytip->getTxPoW().getTxPoWID();
+                            const long long idx = peertop - mytipnum;
+                            if (idx >= 0 && idx < static_cast<long long>(greetblocks.size())) {
+                                diag += " peer@" + std::to_string(mytipnum) + "=" + greetblocks[static_cast<std::size_t>(idx)];
+                            }
+                        }
+                        MinimaLogger::log(diag);
+                    } catch (...) {
+                    }
+
                     // DEBUG LINES:
                     // MinimaLogger::log("DEBUG_IBD: Greeting chain size: " + std::to_string(greetblocks.size()));
                     // MinimaLogger::log("DEBUG_IBD: My chain blocks size: " + std::to_string(myblocks.size()));

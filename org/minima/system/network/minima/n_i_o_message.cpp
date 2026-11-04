@@ -465,6 +465,24 @@ void NIOMessage::run() {
             nioclient->setWelcomeMessage("Minima v" + greet.getVersion().toString());
             nioclient->setValidGreeting(true);
 
+            // If the peer's tree tip is ahead of ours, start the sync-IBD
+            // request loop. Nothing else sends the first MSG_IBD_REQ, so a node
+            // that is behind would otherwise sit idle after the handshake.
+            try {
+                auto mytip = MinimaDB::getDB()->getTxPoWTree().getTip();
+                const org::minima::objects::base::MiniNumber mytop =
+                    mytip ? mytip->getTxPoW().getBlockNumber()
+                          : org::minima::objects::base::MiniNumber::MINUSONE();
+                if (greet.getTopBlock().isMore(mytop)) {
+                    MinimaLogger::log("[+] Peer ahead (top=" + greet.getTopBlock().toString()
+                        + ", ours=" + mytop.toString() + ") - requesting sync IBD from "
+                        + nioclient->getUID());
+                    Main::getInstance()->getTxPoWProcessor().askToSyncTxBlocks(nioclient->getUID());
+                }
+            } catch (const std::exception& exc) {
+                MinimaLogger::log(std::string("sync-IBD trigger failed: ") + exc.what());
+            }
+
             {
                 Message newconn(P2PFunctions::P2P_CONNECTED);
                 newconn.addString("uid", nioclient->getUID());
@@ -1054,6 +1072,9 @@ void NIOMessage::run() {
                     MinimaLogger::log("[+] Received Sync IBD. size:" + MiniFormat::formatSize(static_cast<long long>(raw.size()))
                         + " blocks:" + std::to_string(syncibd->getTxBlocks().size())
                         + " top:" + top.toString() + " @ " + std::to_string(timemilli));
+                } else {
+                    MinimaLogger::log("[+] Received Sync IBD blocks:" + std::to_string(syncibd->getTxBlocks().size())
+                        + " top:" + top.toString());
                 }
 
                 // Pass the shared_ptr
