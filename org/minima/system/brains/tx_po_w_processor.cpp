@@ -884,35 +884,45 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
                 }
             }
 
-            int additions = 0;
-            auto& blocks = ibd->getTxBlocks();
-            for (auto& block : blocks) {
-                try {
-                    processSyncBlock(block);
-                    additions++;
+            // Hold the DB write lock while mutating the tree so the periodic
+            // saveState() cannot snapshot a half-updated tree. The lock is
+            // reentrant, so recalculateTree() can take it again.
+            MinimaDB::getDB()->writeLock(true);
+            try {
+                int additions = 0;
+                auto& blocks = ibd->getTxBlocks();
+                for (auto& block : blocks) {
+                    try {
+                        processSyncBlock(block);
+                        additions++;
 
-                    // Request any missing transactions
-                    requestMissingTxns(uid, block);
+                        // Request any missing transactions
+                        requestMissingTxns(uid, block);
 
-                    if (additions > 256) {
-                        recalculateTree();
-                        additions = 0;
+                        if (additions > 256) {
+                            recalculateTree();
+                            additions = 0;
 
-                        if (GeneralParams::IBDSYNC_LOGS) {
-                            MinimaLogger::log(std::string("[!] Processed IBD block @ ")
-                                              + block->getTxPoW().getBlockNumber().toString());
+                            if (GeneralParams::IBDSYNC_LOGS) {
+                                MinimaLogger::log(std::string("[!] Processed IBD block @ ")
+                                                  + block->getTxPoW().getBlockNumber().toString());
+                            }
                         }
+                    } catch (const std::exception& exc) {
+                        MinimaLogger::log(std::string("[IBD-FAIL] block:") + block->getTxPoW().getBlockNumber().toString()
+                                          + " txpowid:" + block->getTxPoW().getTxPoWID()
+                                          + " error:" + exc.what());
+                        Main::getInstance()->getNIOManager().disconnect(uid, true);
+                        break;
                     }
-                } catch (const std::exception& exc) {
-                    MinimaLogger::log(std::string("[IBD-FAIL] block:") + block->getTxPoW().getBlockNumber().toString()
-                                      + " txpowid:" + block->getTxPoW().getTxPoWID()
-                                      + " error:" + exc.what());
-                    Main::getInstance()->getNIOManager().disconnect(uid, true);
-                    break;
                 }
-            }
 
-            recalculateTree();
+                recalculateTree();
+            } catch (const std::exception& exc) {
+                MinimaDB::getDB()->writeLock(false);
+                throw;
+            }
+            MinimaDB::getDB()->writeLock(false);
 
             std::int64_t timediff = now_millis() - timestart;
             if (GeneralParams::IBDSYNC_LOGS) {
