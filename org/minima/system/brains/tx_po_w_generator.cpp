@@ -477,6 +477,16 @@ TxPoWGenerator::generateTxPoW(const org::minima::objects::Transaction& zTransact
     // Get the MMR root data
     auto root = node->getMMR().getRoot();
 
+    // A tree loaded from disk can have a node whose MMR has no peaks (for
+    // example a historical replay window); there is no valid MMR root to put
+    // in a new block. Fail cleanly instead of dereferencing a null root.
+    if (!root) {
+        org::minima::utils::MinimaLogger::log(
+            "TxPoWGenerator: no MMR root at tip " +
+            tip->getTxPoW().getBlockNumber().toString() + " - skipping block generation");
+        return nullptr;
+    }
+
     // We MUST return the TxPoW from the TxBlock, as the TxBlock constructor
     // is responsible for adding the coinbase transaction outputs to it.
     // The original 'txpow' object still has an empty transaction.

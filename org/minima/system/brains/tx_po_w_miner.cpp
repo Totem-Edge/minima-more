@@ -239,10 +239,20 @@ void TxPoWMiner::processMessage(org::minima::utils::messages::Message& zMessage)
         // Check if the tip exists
         if (MinimaDB::getDB()->getTxPoWTree().getTip()) {
 
-            // Create a valid TxPoW that builds on the tip
-            // NOTE: You must ensure TxPoWGenerator::generateTxPoW is correctly implemented
-            std::shared_ptr<TxPoW> txpow =
-                TxPoWGenerator::generateTxPoW(Transaction(), Witness());
+            // Create a valid TxPoW that builds on the tip. A restarted node with
+            // a restored tree may not have a usable tip MMR yet; generateTxPoW
+            // then returns null and we retry later instead of crashing.
+            std::shared_ptr<TxPoW> txpow;
+            try {
+                txpow = TxPoWGenerator::generateTxPoW(Transaction(), Witness());
+            } catch (const std::exception& exc) {
+                MinimaLogger::log(std::string("TxPoWMiner: block generation failed: ") + exc.what());
+                txpow = nullptr;
+            }
+            if (!txpow) {
+                this->PostTimerMessage(std::make_shared<TimerMessage>(30000, TXPOWMINER_MINEPULSE));
+                return;
+            }
 
             // Post async mining with automine=true
             auto msg = std::make_shared<Message>(TXPOWMINER_MINETXPOW);
