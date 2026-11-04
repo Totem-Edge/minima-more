@@ -912,6 +912,13 @@ void NIOMessage::run() {
                 return;
             }
 
+            // Serialize the chain search against saveState()/tree mutation.
+            struct DbReadGuard {
+                org::minima::database::MinimaDB* db;
+                explicit DbReadGuard(org::minima::database::MinimaDB* zDb) : db(zDb) { db->readLock(true); }
+                ~DbReadGuard() { db->readLock(false); }
+            } readguard(org::minima::database::MinimaDB::getDB());
+
             int counter = 0;
             for (const auto& block : pulsemsg) {
                 // search... returns shared_ptr

@@ -645,8 +645,10 @@ void MinimaDB::saveState() {
         return; 
     }
     
-    //We need read lock 
-    readLock(true);
+    // We need an EXCLUSIVE lock: the tree/MMR traversal below must not overlap
+    // any reader that lazily mutates MMR caches (miner block generation, pulse
+    // search) or any peer-driven tree mutation.
+    writeLock(true);
     
     try {
         //Get the base Database folder
@@ -681,7 +683,7 @@ void MinimaDB::saveState() {
     } catch (const std::exception& exc) {
         org::minima::utils::MinimaLogger::log(exc);
     }
-    readLock(false);
+    writeLock(false);
 }
 
 void MinimaDB::saveUserDB() {

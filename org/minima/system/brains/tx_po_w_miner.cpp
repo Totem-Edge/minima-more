@@ -239,6 +239,14 @@ void TxPoWMiner::processMessage(org::minima::utils::messages::Message& zMessage)
         // Check if the tip exists
         if (MinimaDB::getDB()->getTxPoWTree().getTip()) {
 
+            // Serialize against saveState(): block generation reads the tip
+            // tree and lazily computes MMR caches.
+            struct DbReadGuard {
+                MinimaDB* db;
+                explicit DbReadGuard(MinimaDB* zDb) : db(zDb) { db->readLock(true); }
+                ~DbReadGuard() { db->readLock(false); }
+            } readguard(MinimaDB::getDB());
+
             // Create a valid TxPoW that builds on the tip. A restarted node with
             // a restored tree may not have a usable tip MMR yet; generateTxPoW
             // then returns null and we retry later instead of crashing.
