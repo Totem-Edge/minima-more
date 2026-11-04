@@ -146,12 +146,11 @@ void TxBlock::calculateCoins(org::minima::objects::mmr::MMR& zPreviousMMR,
     for (const auto& csp_up : coinspent) { // Iterate over unique_ptr references
         const org::minima::objects::CoinProof& csp = *csp_up; // Dereference unique_ptr
 
-        // Get the Coin shared_ptr
-        auto null_deleter = [](org::minima::objects::Coin*){};
-        std::shared_ptr<org::minima::objects::Coin> coin_sp(
-            &const_cast<org::minima::objects::Coin&>(csp.getCoin()),
-            null_deleter
-        );
+        // Own a deep copy of the coin. A non-owning shared_ptr with a no-op
+        // deleter dangles once the source TxPoW/Witness is released, which
+        // crashed tree saves for locally built blocks.
+        std::shared_ptr<org::minima::objects::Coin> coin_sp =
+            std::make_shared<org::minima::objects::Coin>(csp.getCoin());
         if (!coin_sp) {
              throw std::runtime_error("CoinProof contains null Coin shared_ptr");
         }
