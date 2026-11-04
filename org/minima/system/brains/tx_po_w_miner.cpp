@@ -236,6 +236,13 @@ void TxPoWMiner::processMessage(org::minima::utils::messages::Message& zMessage)
             return;
         }
 
+        // Archive/analytics nodes serve historical data and do not need to
+        // mine. A locally mined TxBlock can also hold transient coin proofs
+        // that are unsafe to serialize with the persisted tree.
+        if (GeneralParams::ARCHIVE) {
+            return;
+        }
+
         // Check if the tip exists
         if (MinimaDB::getDB()->getTxPoWTree().getTip()) {
 
