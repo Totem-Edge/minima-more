@@ -997,7 +997,9 @@ void handleClient(int fd, const ApiOptions& opt) {
         return;
     }
     if (path.rfind("/v1/scripts/", 0) == 0 && requireIndex()) {
-        const std::string hash = path.substr(13);
+        // "/v1/scripts/" is 12 characters; substr(13) dropped the first
+        // character of the hash and made every detail lookup return Unknown.
+        const std::string hash = path.substr(12);
         bool found = false;
         const std::string body = scriptJson(opt.indexPath, hash, found);
         sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
