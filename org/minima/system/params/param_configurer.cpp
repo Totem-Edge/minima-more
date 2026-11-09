@@ -270,6 +270,13 @@ const std::vector<ParamKeyEntry>& getParamKeyEntries() {
                   // keep default
               }
           } },
+        { ParamConfigurer::ParamKeys::ibdwitnesscheck, "ibdwitnesscheck",
+          "Validate transaction witnesses/signatures in IBD blocks when the body is locally available",
+          [](const std::string& args, ParamConfigurer&) {
+              if (args == "true") {
+                  org::minima::system::params::GeneralParams::IBD_WITNESS_CHECK = true;
+              }
+          } },
         { ParamConfigurer::ParamKeys::megammr, "megammr", "Are we running in MEGA MMR mode",
           [](const std::string& args, ParamConfigurer&) {
               if (args == "true") {

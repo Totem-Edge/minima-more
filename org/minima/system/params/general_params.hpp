@@ -73,6 +73,9 @@ public:
     static bool MINING_LOGS;
     static bool NETWORKING_LOGS;
     static bool IBDSYNC_LOGS;
+    // Validate transaction witnesses/signatures in IBD blocks when the body is
+    // already in the local TxPoW DB. Missing bodies are skipped (soft mode).
+    static bool IBD_WITNESS_CHECK;
     static int IBD_LIMIT_MINS;
     static bool BLOCK_LOGS;
 

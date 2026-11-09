@@ -135,6 +135,59 @@ bool peaksMatch(const std::vector<org::minima::objects::mmr::MMREntry>& a,
 }
 
 
+bool witnessesMatch(org::minima::database::txpowtree::TxPoWTreeNode* parentnode,
+                    org::minima::objects::TxBlock& zTxBlock) {
+    // Soft witness gate: validate any transaction body already in the local
+    // TxPoW DB against the parent MMR. A body that has not arrived is skipped,
+    // because rejecting on local availability would make acceptance
+    // non-deterministic across nodes.
+    auto& txpdb = MinimaDB::getDB()->getTxPoWDB();
+    auto blockCopy = zTxBlock.getTxPoW().deepCopy();
+    // The block's own TxPoW is committed by the header and always available.
+    // The live path validates it when it is a transaction (coinbase or spend).
+    if (zTxBlock.getTxPoW().isTransaction()) {
+        auto own = zTxBlock.getTxPoW().deepCopy();
+        if (!TxPoWChecker::checkTxPoWSimple(parentnode->getMMR(), *own,
+                                            *blockCopy, false)) {
+            MinimaLogger::log("[!] SyncBlock invalid block transaction witness/signature @ "
+                              + zTxBlock.getTxPoW().getBlockNumber().toString()
+                              + " " + zTxBlock.getTxPoW().getTxPoWID());
+            return false;
+        }
+    }
+    int present = 0;
+    int missing = 0;
+    for (const auto& txid : zTxBlock.getTxPoW().getBlockTransactions()) {
+        auto txp = txpdb.getTxPoW(txid.to0xString());
+        if (!txp) {
+            ++missing;
+            continue;
+        }
+        ++present;
+        if (txp->isBlock()) {
+            MinimaLogger::log("[!] SyncBlock transaction entry is a block @ "
+                              + zTxBlock.getTxPoW().getBlockNumber().toString()
+                              + " " + txid.to0xString());
+            return false;
+        }
+        auto copy = txp->deepCopy();
+        if (!TxPoWChecker::checkTxPoWSimple(parentnode->getMMR(), *copy,
+                                            *blockCopy, false)) {
+            MinimaLogger::log("[!] SyncBlock invalid transaction witness/signature @ "
+                              + zTxBlock.getTxPoW().getBlockNumber().toString()
+                              + " " + txid.to0xString());
+            return false;
+        }
+    }
+    if (GeneralParams::IBDSYNC_LOGS) {
+        MinimaLogger::log("IBD witness check @ "
+                          + zTxBlock.getTxPoW().getBlockNumber().toString()
+                          + " present=" + std::to_string(present)
+                          + " missing=" + std::to_string(missing));
+    }
+    return true;
+}
+
 bool blockStateMatches(org::minima::database::txpowtree::TxPoWTreeNode* parentnode,
                        org::minima::objects::TxBlock& zTxBlock) {
     // Every input must be an unspent coin at the parent block, and no coin
@@ -673,6 +726,10 @@ bool TxPoWProcessor::processSyncBlock(const std::shared_ptr<TxBlock>& zTxBlock) 
                 return false;
             }
             if (!blockStateMatches(parentnode.get(), *zTxBlock)) {
+                return false;
+            }
+            if (GeneralParams::IBD_WITNESS_CHECK &&
+                !witnessesMatch(parentnode.get(), *zTxBlock)) {
                 return false;
             }
             auto newblock = std::make_shared<TxPoWTreeNode>(*zTxBlock);

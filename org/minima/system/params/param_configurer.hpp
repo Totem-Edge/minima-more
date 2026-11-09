@@ -53,6 +53,7 @@ public:
         nosyncibd,
         syncibdlogs,
         ibdlimit,
+        ibdwitnesscheck,
         megammr,
         megammrurl,
         notifyalltxpow,
