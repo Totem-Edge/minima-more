@@ -37,8 +37,9 @@ the full height.
 
 ## Fixed
 
-- v0.5.13 artifacts reported version `0.5.12`. The project version is bumped
-  with the release again.
+- v0.5.13 artifacts reported `0.5.12` in the startup banner because the product
+  version was duplicated between CMake and `GlobalParams`. The banner now uses
+  the CMake `project()` version, so artifacts cannot drift from their tag.
 
 ## Known gaps
 

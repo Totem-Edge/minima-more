@@ -19,6 +19,7 @@
 #include <string>
 
 #include <sqlite3.h>
+#include <unistd.h>  // getpid()
 
 using org::minima::database::archive::ArchiveManager;
 using org::minima::objects::TxBlock;

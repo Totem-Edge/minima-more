@@ -21,8 +21,11 @@
 
 ### Fixed — release hygiene
 
-- v0.5.13 artifacts reported version `0.5.12`; the project version is bumped
-  for every release again.
+- v0.5.13 artifacts reported `0.5.12` in the startup banner: the product
+  version was duplicated between the CMake `project()` version and
+  `GlobalParams::MINIMA_MORE_VERSION`. The banner now uses the CMake define, so
+  a release cannot drift from its tag. A literal fallback remains for standalone
+  test targets that compile `global_params.cpp` without the core definitions.
 
 ### Added — testing
 

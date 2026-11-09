@@ -10,9 +10,15 @@ std::string GlobalParams::MINIMA_BASE_VERSION = "1.0";
 std::string GlobalParams::MINIMA_BUILD_NUMBER = "100";
 std::string GlobalParams::MINIMA_VERSION = GlobalParams::MINIMA_BASE_VERSION + std::string(".") + GlobalParams::MINIMA_BUILD_NUMBER;
 
-// Minima More product/brand version (matches CMake project(minima VERSION 0.5.6)).
-// Update here (single source of truth) and the CMake project() version together.
-std::string GlobalParams::MINIMA_MORE_VERSION = "0.5.12";
+// Minima More product/brand version. Single-sourced from the CMake project()
+// version, which is what release artifacts are tagged from; the literal fallback
+// only covers standalone test targets that compile this file without the
+// minima_core compile definitions.
+#ifdef TOTEM_NODE_VERSION
+std::string GlobalParams::MINIMA_MORE_VERSION = TOTEM_NODE_VERSION;
+#else
+std::string GlobalParams::MINIMA_MORE_VERSION = "0.5.14";
+#endif
 
 // Micro build
 std::string GlobalParams::MINIMA_MICRO_BUILD = "0";

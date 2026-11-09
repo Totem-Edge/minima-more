@@ -13,6 +13,7 @@ Usage:
 """
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -61,6 +62,64 @@ def rpc(port, command, timeout=8):
         return json.loads(r.read().decode())
 
 
+def state_fields(port):
+    """Canonical state summary used to compare two nodes after replay.
+
+    Every field is best-effort: the Java oracle and the C++ nodes expose
+    slightly different RPC surfaces, so a missing field is omitted rather than
+    guessed. Only fields present on both sides are compared.
+    """
+    fields = {}
+    status = rpc(port, "status")["response"]
+    chain = status.get("chain") or {}
+    fields["height"] = int(chain.get("block", 0))
+    if "coins" in status:
+        fields["coins"] = str(status["coins"])
+    height = fields["height"]
+    if height > 0:
+        # Consensus state is the tip header, which is what every node must
+        # agree on. status chain/cascade "weight" is deliberately NOT used: it
+        # is the tree node's *subtree* total, so it includes orphaned side
+        # branches that differ legitimately between a miner and an IBD peer.
+        tip = rpc(port, f"txpow block:{height}")["response"]
+        fields["tip"] = tip["txpowid"].lower()
+        header = tip.get("header") or {}
+        for key in ("block", "mmr", "total", "blkdiff", "nonce", "timemilli",
+                    "customhash", "chainid"):
+            if key in header:
+                fields[f"tip_{key}"] = str(header[key])
+    try:
+        verify = rpc(port, "state action:verify")["response"]
+        if "ok" in verify:
+            fields["verify_ok"] = bool(verify["ok"])
+        if verify.get("issues"):
+            fields["verify_issues"] = str(verify["issues"])
+    except Exception:
+        pass
+    return fields
+
+
+def digest_of(fields):
+    canonical = json.dumps(fields, sort_keys=True).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def compare_state(producer, consumer):
+    """Compare every state field both nodes expose. Returns a list of diffs."""
+    pfields = state_fields(producer.rpc_port)
+    cfields = state_fields(consumer.rpc_port)
+    shared = sorted(set(pfields) & set(cfields))
+    diffs = [
+        (key, pfields[key], cfields[key])
+        for key in shared
+        if pfields[key] != cfields[key]
+    ]
+    print(f"  state digest {producer.name}={digest_of(pfields)} "
+          f"{consumer.name}={digest_of(cfields)}")
+    print(f"  compared fields: {', '.join(shared)}")
+    return diffs
+
+
 def wait_for(fn, timeout, what, interval=0.5):
     end = time.time() + timeout
     last = None
@@ -83,6 +142,19 @@ class Proc:
         self.port = port
         self.rpc_port = port + 4
         self.log = None
+        # Test-only mining pause (honoured only under -test). Needed so a state
+        # comparison is not a race between two miners.
+        self.pause_file = os.path.join(data, "pause")
+        self.env = dict(os.environ, MINIMA_TEST_PAUSE_FILE=self.pause_file)
+
+    def pause(self):
+        open(self.pause_file, "w").close()
+
+    def resume(self):
+        try:
+            os.unlink(self.pause_file)
+        except FileNotFoundError:
+            pass
 
     def _pids(self):
         try:
@@ -94,7 +166,8 @@ class Proc:
 
     def start(self):
         self.log = open(os.path.join(self.data, "node.log"), "ab")
-        subprocess.Popen(self.argv, stdout=self.log, stderr=subprocess.STDOUT)
+        subprocess.Popen(self.argv, stdout=self.log, stderr=subprocess.STDOUT,
+                         env=self.env)
         wait_for(lambda: rpc(self.rpc_port, "status", timeout=3).get("status"),
                  180, f"{self.name} rpc")
         return self
@@ -137,6 +210,11 @@ def main():
     ap.add_argument("--spend-every", type=int, default=0,
                     help="mine a spend every N blocks on the producer (0 = never)")
     ap.add_argument("--timeout", type=int, default=240)
+    ap.add_argument("--state-settle", type=int, default=30,
+                    help="seconds to wait for state fields to converge")
+    ap.add_argument("--no-state-digest", dest="state_digest",
+                    action="store_false",
+                    help="skip the post-replay state comparison")
     ap.add_argument("--keep-work", action="store_true")
     args = ap.parse_args()
 
@@ -287,6 +365,39 @@ def main():
         else:
             print(f"  ok   {consumer.name} accepted blocks 1..{args.height} "
                   f"with identical IDs")
+
+        if args.state_digest:
+            # Freeze both miners so the comparison is not a race, and let the
+            # consumer finish any block already in flight.
+            producer.pause()
+            consumer.pause()
+            try:
+                wait_for(lambda: consumer.height() >= producer.height(), 120,
+                         "consumer catch-up before state comparison")
+            except RuntimeError as exc:
+                print(f"  note: {exc}", file=sys.stderr)
+            # Pause is honoured before the next mining round, so wait for any
+            # in-flight round to land before sampling state.
+            time.sleep(4)
+            # Weight converges only once any cascade state has propagated, so
+            # give both nodes the budget instead of sampling a transient.
+            deadline = time.time() + args.state_settle
+            while time.time() < deadline:
+                pf = state_fields(producer.rpc_port)
+                cf = state_fields(consumer.rpc_port)
+                if all(pf.get(k) == cf.get(k) for k in set(pf) & set(cf)):
+                    break
+                time.sleep(2)
+            diffs = compare_state(producer, consumer)
+            producer.resume()
+            consumer.resume()
+            if diffs:
+                for key, want, got in diffs[:8]:
+                    print(f"  FAIL state {key}: {consumer.name}={got} "
+                          f"{producer.name}={want}", file=sys.stderr)
+                rc = 1
+            else:
+                print("  ok   replayed state matches on every shared field")
 
         print(f"  {consumer.name} height={consumer.height()}", flush=True)
         print("PASS" if rc == 0 else "FAILED")
