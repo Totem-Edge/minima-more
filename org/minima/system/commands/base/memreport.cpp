@@ -27,9 +27,11 @@
 
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#include <libproc.h>
 #elif !defined(_WIN32)
 #include <unistd.h>
 #include <dlfcn.h>
+#include <dirent.h>
 #endif
 
 #if defined(__linux__) && defined(__GLIBC__)
@@ -83,6 +85,43 @@ void readProcessMemory(long long& rss, long long& anon, long long& file) {
     }
 #else
     (void)rss; (void)anon; (void)file;
+#endif
+}
+
+void readProcessHandles(long long& fds, long long& threads) {
+    fds = threads = 0;
+#if defined(__linux__)
+    DIR* dir = opendir("/proc/self/fd");
+    if (dir != nullptr) {
+        while (dirent* entry = readdir(dir)) {
+            if (entry->d_name[0] != '.') ++fds;
+        }
+        closedir(dir);
+    }
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.rfind("Threads:", 0) == 0) {
+            std::istringstream in(line.substr(8));
+            in >> threads;
+            break;
+        }
+    }
+#elif defined(__APPLE__)
+    const int bytes = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, nullptr, 0);
+    if (bytes > 0) {
+        fds = bytes / static_cast<int>(sizeof(struct proc_fdinfo));
+    }
+    thread_act_array_t list = nullptr;
+    mach_msg_type_number_t count = 0;
+    if (task_threads(mach_task_self(), &list, &count) == KERN_SUCCESS) {
+        threads = count;
+        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(list),
+                      count * sizeof(thread_act_t));
+    }
+#else
+    (void)fds;
+    (void)threads;
 #endif
 }
 
@@ -253,10 +292,14 @@ std::unique_ptr<org::minima::utils::json::JSONObject> memreport::runCommand() {
 
     long long rss = 0, anon = 0, file = 0;
     readProcessMemory(rss, anon, file);
+    long long fds = 0, threads = 0;
+    readProcessHandles(fds, threads);
     JSONObject proc;
     proc.put("rss_kb", rss);
     proc.put("anon_kb", anon);
     proc.put("file_kb", file);
+    proc.put("fds", fds);
+    proc.put("threads", threads);
     ret->put("process", proc);
 
     // Database files (kB, WAL included).
