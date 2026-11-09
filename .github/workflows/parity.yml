@@ -23,7 +23,13 @@ jobs:
             name: macos-clang
             cc: clang
             cxx: clang++
+            # Standard macOS runners are not available on this account
+            # ("configuration 'macos-14-arm64-us-default' is not supported"),
+            # which failed the whole run. Opt in with the ENABLE_MACOS_CI
+            # repository variable once a runner exists.
+            optional: true
     runs-on: ${{ matrix.os }}
+    if: ${{ !matrix.optional || vars.ENABLE_MACOS_CI == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +70,8 @@ jobs:
           path: artifacts
       - name: All platforms must agree
         run: |
+          files=$(ls artifacts/*/*.txt 2>/dev/null | wc -l)
+          test "$files" -ge 2 || { echo "need at least two platform digests, got $files"; exit 1; }
           grep -h '^payload_digest:' artifacts/*/*.txt | awk '{print $2}' | sort -u > digests.txt
           cat digests.txt
           test "$(wc -l < digests.txt)" -eq 1
