@@ -329,6 +329,14 @@ void NIOMessage::run() {
                 return;
             }
 
+            // One greeting per connection. A duplicate greeting would otherwise
+            // repeat peer-list work, P2P_CONNECTED and an IBD send.
+            if (!nioclient->claimGreeting()) {
+                MinimaLogger::log("[!] Duplicate greeting from "
+                                  + nioclient->getFullAddress() + " - ignoring");
+                return;
+            }
+
             auto greet_ptr = Greeting::ReadFromStream(dis);
             if (!greet_ptr) return;
             Greeting& greet = *greet_ptr;

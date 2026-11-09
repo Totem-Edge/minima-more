@@ -262,6 +262,7 @@ NIOClient::NIOClient(NIOClient&& other) noexcept
     , mValidGreeting(other.mValidGreeting)
     , mSentGreeting(other.mSentGreeting)
     , mP2PGreeting(other.mP2PGreeting)
+    , mGreetingClaimed(other.mGreetingClaimed.load())
     , mExtraData(std::move(other.mExtraData))
 {
     // Leave mutex default-constructed in this, reset other to safe state
@@ -278,6 +279,7 @@ NIOClient::NIOClient(NIOClient&& other) noexcept
     other.mValidGreeting = false;
     other.mSentGreeting = false;
     other.mP2PGreeting = false;
+    other.mGreetingClaimed.store(false);
     other.mTimeConnected = 0;
     other.mLastMessageRead = 0;
 }
@@ -334,6 +336,8 @@ NIOClient& NIOClient::operator=(NIOClient&& other) noexcept {
         mValidGreeting = other.mValidGreeting;   other.mValidGreeting = false;
         mSentGreeting = other.mSentGreeting;     other.mSentGreeting = false;
         mP2PGreeting = other.mP2PGreeting;       other.mP2PGreeting = false;
+        mGreetingClaimed.store(other.mGreetingClaimed.load());
+        other.mGreetingClaimed.store(false);
 
         mExtraData = std::move(other.mExtraData);
     }
@@ -383,6 +387,11 @@ std::string NIOClient::getFullAddress() const {
 std::string NIOClient::getFullMinimaAddress() const { return getFullAddress(); }
 bool NIOClient::isValidGreeting() const { return mValidGreeting; }
 void NIOClient::setValidGreeting(bool zValid) { mValidGreeting = zValid; }
+
+bool NIOClient::claimGreeting() {
+    bool expected = false;
+    return mGreetingClaimed.compare_exchange_strong(expected, true);
+}
 bool NIOClient::haveSentGreeting() const { return mSentGreeting; }
 void NIOClient::setReceivedP2PGreeting() { mP2PGreeting = true; }
 bool NIOClient::hasReceivedP2PGreeting() const { return mP2PGreeting; }

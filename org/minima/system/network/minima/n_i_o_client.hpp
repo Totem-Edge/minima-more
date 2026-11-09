@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <any>
+#include <atomic>
 #include <functional>
 
 namespace org { namespace minima { namespace objects { namespace base { class MiniData; } } } }
@@ -72,6 +73,10 @@ public:
 
     bool isValidGreeting() const;
     void setValidGreeting(bool zValid);
+
+    // Claim the single greeting slot for this connection. Returns true only
+    // for the first caller; later greetings are duplicates.
+    bool claimGreeting();
 
     bool haveSentGreeting() const;
     void setReceivedP2PGreeting();
@@ -172,6 +177,7 @@ private:
     bool mValidGreeting {false};
     bool mSentGreeting {false};
     bool mP2PGreeting {false};
+    std::atomic<bool> mGreetingClaimed {false};
 
     std::any mExtraData;
 };
