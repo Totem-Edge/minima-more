@@ -878,20 +878,56 @@ void TxPoWProcessor::recalculateTree() {
             const long long rootBlk = treeRoot->getTxPoW().getBlockNumber().getAsLong();
             const long long tipBlk = cascTip->getTxPoW().getBlockNumber().getAsLong();
             if (rootBlk > tipBlk + 1) {
-                auto missing = arch->loadBlockRange(MiniNumber(tipBlk), MiniNumber(rootBlk), false);
-                if (!missing.empty()) {
+                // Prefer the live heaviest branch. The archive can be behind,
+                // or can hold a competing branch; the tree is the chain the
+                // node is actually following. Fall back to the archive for a
+                // historical window that is no longer in RAM.
+                const long long expected = rootBlk - tipBlk - 1;
+                std::vector<std::shared_ptr<org::minima::database::txpowtree::TxPoWTreeNode>> treeMissing;
+                if (expected > 0) {
+                    auto branch = txptree->getHeaviestBranch();
+                    treeMissing.reserve(branch.size());
+                    for (auto& node : branch) {
+                        if (!node) continue;
+                        const long long bn = node->getTxPoW().getBlockNumber().getAsLong();
+                        if (bn > tipBlk && bn < rootBlk) treeMissing.push_back(node);
+                    }
+                    std::sort(treeMissing.begin(), treeMissing.end(),
+                              [](const auto& a, const auto& b) {
+                                  return a->getTxPoW().getBlockNumber().getAsLong() <
+                                         b->getTxPoW().getBlockNumber().getAsLong();
+                              });
+                }
+
+                std::vector<std::shared_ptr<TxBlock>> missing;
+                const bool useTree = expected > 0 &&
+                    static_cast<long long>(treeMissing.size()) == expected;
+                if (!useTree) {
+                    missing = arch->loadBlockRange(MiniNumber(tipBlk), MiniNumber(rootBlk), false);
+                }
+
+                if (useTree || !missing.empty()) {
                     long long added = 0;
                     arch->beginSaveBatch();
                     try {
-                        for (auto& block : missing) {
-                            auto& txpow = block->getTxPoW();
+                        auto addBlock = [&](TxBlock& block) {
+                            const auto& txpow = block.getTxPoW();
                             txpdb->setInCascade(txpow.getTxPoWID());
                             for (const auto& txpid : txpow.getTransactions()) {
                                 txpdb->setInCascade(txpid);
                             }
-                            arch->saveBlock(*block);
+                            arch->saveBlock(block);
                             cascdb->addToTip(txpow);
                             ++added;
+                        };
+                        if (useTree) {
+                            for (auto& node : treeMissing) {
+                                addBlock(node->getTxBlock());
+                            }
+                        } else {
+                            for (auto& block : missing) {
+                                addBlock(*block);
+                            }
                         }
                         arch->endSaveBatch(true);
                     } catch (...) {
@@ -902,8 +938,9 @@ void TxPoWProcessor::recalculateTree() {
                     arch->checkpoint();
                     if (added > 0) {
                         MinimaLogger::log(
-                            "Cascade reconciled to tree root: added " +
-                            std::to_string(added) + " blocks, tip " +
+                            "Cascade reconciled to tree root (" +
+                            std::string(useTree ? "tree" : "archive") +
+                            "): added " + std::to_string(added) + " blocks, tip " +
                             cascdb->getTip()->getTxPoW().getBlockNumber().toString());
                     }
                 }
