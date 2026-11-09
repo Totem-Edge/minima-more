@@ -209,6 +209,8 @@ def main():
     ap.add_argument("--height", type=int, default=5)
     ap.add_argument("--spend-every", type=int, default=0,
                     help="mine a spend every N blocks on the producer (0 = never)")
+    ap.add_argument("--cpp-extra", default="",
+                    help="extra arguments passed to each C++ node")
     ap.add_argument("--timeout", type=int, default=240)
     ap.add_argument("--state-settle", type=int, default=30,
                     help="seconds to wait for state fields to converge")
@@ -255,9 +257,12 @@ def main():
     os.makedirs(cpp2_data, exist_ok=True)
     cpp2_port = free_port()
 
+    cpp_extra = args.cpp_extra.split() if args.cpp_extra else []
+
     def cpp_argv(mode, connect=None):
-        argv = [args.cpp, "-daemon", "-data", cpp_data, "-port", str(cpp_port),
-                "-rpcenable", "true", "-rpcpassword", PASSWORD]
+        argv = [args.cpp] + cpp_extra + ["-daemon", "-data", cpp_data,
+                "-port", str(cpp_port), "-rpcenable", "true",
+                "-rpcpassword", PASSWORD]
         if mode == "solo":
             return [args.cpp, "-solo"] + argv[1:]
         argv = [args.cpp, "-test", "-allowallip", "true", "-testchainlength", "512",
@@ -293,7 +298,7 @@ def main():
 
     def consumer_test_argv():
         if consumer is cpp2:
-            return [args.cpp, "-test", "-allowallip", "true",
+            return [args.cpp] + cpp_extra + ["-test", "-allowallip", "true",
                     "-testchainlength", "512", "-ibdlimit", "0", "-daemon",
                     "-data", cpp2_data, "-port", str(cpp2_port),
                     "-rpcenable", "true", "-rpcpassword", PASSWORD,
