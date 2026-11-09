@@ -201,6 +201,34 @@ void atexit_shutdown_hook() {
 }
 
 
+namespace {
+
+// SIGTERM/SIGINT (systemd, Kubernetes, Ctrl-C) must run the same graceful
+// shutdown as the `quit` command: checkpoint the tree, flush the mempool and
+// stop the threads. Without a handler the default action kills the process
+// mid-write and everything since the last periodic save is lost.
+void minima_signal_handler(int signum) {
+    const char* name = (signum == SIGTERM) ? "SIGTERM"
+                     : (signum == SIGINT)  ? "SIGINT" : "SIGNAL";
+    org::minima::utils::MinimaLogger::log(
+        std::string("[!] Received ") + name + " - initiating graceful shutdown..");
+    auto* instance = org::minima::system::Main::getInstance();
+    if (instance && !instance->isShuttingDown()) {
+        instance->shutdown();
+    }
+}
+
+void install_minima_signal_handlers() {
+    struct sigaction sa{};
+    sa.sa_handler = minima_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGTERM, &sa, nullptr);
+    sigaction(SIGINT, &sa, nullptr);
+}
+
+} // namespace
+
 namespace org {
 namespace minima {
 
@@ -365,14 +393,29 @@ void Minima::main(const std::vector<std::string>& zArgs) {
         // interactive console loop; the node runs on its own threads.
         if (GeneralParams::MCP_STDIO) {
             org::minima::system::commands::mcp::McpServer::runStdio();
+            // stdin closed: shut the node down before returning rather than
+            // tearing Main down while its threads are still running.
+            if (auto* mo = org::minima::system::Main::getInstance()) {
+                mo->shutdown();
+                while (true) {
+                    auto* current = org::minima::system::Main::getInstance();
+                    if (!current || current->isShutdownComplete()) { break; }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                }
+            }
             return;
         }
+
+        install_minima_signal_handlers();
 
         if (daemon) {
             org::minima::utils::MinimaLogger::log("Daemon mode started..");
             while (true) {
                 org::minima::system::Main* mo = org::minima::system::Main::getInstance();
-                if (mo && mo->isShutdownComplete()) { break; }
+                // Shutdown clears the singleton before it finishes, so a null
+                // instance means shutdown is complete; requiring a live one
+                // would spin forever after a signal.
+                if (!mo || mo->isShutdownComplete()) { break; }
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
             }
             return;
