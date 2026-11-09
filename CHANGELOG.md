@@ -1,55 +1,124 @@
 # PureMinima C++ — Change Report
 
-## v0.5.14 — IBD consensus hardening and a real test gate
+## v0.5.14 — IBD consensus hardening, parity harness and a real test gate
 
-### Fixed — consensus (D14)
+### Consensus and correctness
 
-- **IBD insertion trusted the peer.** `processSyncBlock` now runs
+- **D14: IBD insertion trusted the peer.** `processSyncBlock` now requires
   `checkTxBlockOnly`, a block-PoW (`isBlock`) gate, a previous-peaks match
-  against the parent MMR, per-input coin-proof verification against that MMR,
-  duplicate-input rejection, a rebuilt-MMR root/total match against the header,
-  and a PoW gate for the first block on an empty tree. Before this, a crafted
-  weight-0 next-height block became the chain tip on both C++ nodes and on the
-  Java oracle. This is a deliberate divergence from Java for invalid blocks;
-  valid replay and reorg still pass.
-- **TxPowTree weight accumulation truncated cumulative weight** and `setLength`
-  kept non-ancestor branches. Both now match Java, with fork-choice,
-  weight-conservation and ancestry tests.
-- **Graceful shutdown could hang** in `NIOManager::ThreadPool::awaitTermination()`
-  (unconditional join), so `saveAllDB()` never ran and a restart lost the tree.
-  Stuck workers are detached after the drain deadline.
+  against the parent MMR, per-input coin-proof verification against that MMR
+  (leaf nodes built one block ahead of the parent), duplicate-input rejection, a
+  rebuilt MMR root/total match against the PoW-committed header, and a PoW gate
+  for the first block on an empty tree. A crafted weight-0 next-height block
+  previously became the chain tip on both C++ nodes *and* on the pinned Java
+  oracle.
+- **Fork weight was truncated.** `TxPowTree::recalculateTree()` sorted nodes
+  with an inverted comparator, so a parent summed its children's subtree
+  weights before those children were finished. The sort is now descending by
+  block number, so every child is complete before its parent is summed.
+  Cumulative weight matches Java and is pinned by `test_txpowtree_weight`.
+- **`setLength` kept fork blocks.** It appended non-ancestor blocks below the
+  new root to the returned list, so they were treated as cascade candidates. It
+  now returns exactly the new root's ancestors, matching Java; orphaned forks
+  are dropped from the tree instead of migrated.
+- **Graceful shutdown hung (D12).** `NIOManager::ThreadPool` joined workers
+  unconditionally, so `saveAllDB()` never ran and a restart lost everything
+  since the last periodic save. Stuck workers are detached after the drain
+  deadline and shutdown proceeds.
+- Test-only `MINIMA_TEST_PAUSE_FILE` mining pause in the generator, honoured
+  only under `-test`, so fork-choice tests can freeze the tip without killing a
+  node.
 
-### Fixed — release hygiene
+### Added — parity and test infrastructure
 
-- v0.5.13 artifacts reported `0.5.12` in the startup banner: the product
-  version was duplicated between the CMake `project()` version and
-  `GlobalParams::MINIMA_MORE_VERSION`. The banner now uses the CMake define, so
-  a release cannot drift from its tag. A literal fallback remains for standalone
-  test targets that compile `global_params.cpp` without the core definitions.
+- **Level A (Java kernel differential):** `tests/parity/kernel` — C++
+  `kernel_digest` plus `KernelOracle.java`, pinned to minima-core `c2a54a2`.
+  Digest `7ac470fb…b739ac`, identical on minima-more, hawk-node and the oracle.
+- **Level B (cross-node):** `replay_cross_node.py` (cpp2java, java2cpp, cpp2cpp,
+  `--spend-every`), `reorg_cross_node.py`, `reject_corpus.py` (41 wire
+  corruptions), `validate_corpus.py` (semantic checker cases), `java_node_smoke.py`.
+- **Level D (restart):** `restart_equality.py` — graceful and SIGKILL, per-height
+  block-hash comparison.
+- **Level E (fork choice):** `fork_choice.py` — deterministic divergent-branch
+  convergence without iptables.
+- **Level F (platform):** `platform_digest.sh` and the digest matrix in
+  `.github/workflows/parity.yml`.
+- **Levels H/I:** `security_smoke.py` (RPC auth, oversized body, JSON bomb) and
+  `soak.py` (progress, RSS ceiling, restart checkpoint).
+- **Level C (fuzz):** four targets (`MiniData`, JSON, `MiniNumber`, `TxPoW`), a
+  portable deterministic driver and `tests/fuzz/run_fuzz.sh`, built with
+  ASan+UBSan.
+- **Property tests:** `test_tree_properties.cpp` (weight conservation, heaviest
+  child, idempotence, ancestry/pruning) and `test_txpowtree_weight.cpp`.
+- `tests/parity/README.md` documents every level, its parameters and its limits.
 
-### Added — testing
+### Added — release gate
 
-- The full CTest suite is the CI gate: `minima-tests` builds every `test_*`
-  target and `ctest` runs all of them with no path filter. 11 test executables
-  that existed but were never registered are now registered, and a guard fails
-  the build if a test binary has no `add_test`.
+- `minima-tests` builds every `test_*` target and `ctest` runs all of them with
+  no path filter; `tests/check_ctest_registration.py` fails the build when a
+  test executable has no `add_test`.
+- 11 test executables that existed but were never registered are now registered
+  (`winternitz`, `serialization`, `serialization_standalone`, `mmr`,
+  `consensus_vectors`, `mempool_index`, `sql_batch`, `script_conformance`,
+  `archive_roundtrip`, `archive_records`, `archive_tail`) and the missing
+  `test_serialization_standalone` target was added.
 - `test_archive_roundtrip` covers the archive writer/reader (schema, chunk
   flush, reopen, duplicate idempotence, batch commit, gap detection) without a
-  fixture; the two real-archive validators report `SKIP` instead of failing.
-- The parity harness gains a cross-node replay state digest and `cpp2cpp` /
-  `--spend-every` legs. RFC-0004 records the behavioural-parity programme.
+  fixture; the two real-archive validators report `SKIP` (77) when run without
+  one.
+- Parity runs on hosted runners and no longer fails on the unavailable
+  `macos-14` runner; the digest comparison requires at least two platforms and
+  asserts they agree.
+
+### Fixed
+
+- `COMMAND_REFERENCE.md` was stale: the `state` command and four `archive`
+  parameters were missing, and `balance`/`coins` had the wrong access level.
+- v0.5.13 artifacts announced `0.5.12`: the product version was hardcoded in
+  `GlobalParams::MINIMA_MORE_VERSION` while `status` used the CMake define. It is
+  single-sourced from `project()` (with a literal fallback for standalone test
+  builds), so an artifact cannot drift from its tag.
 
 ### Known gaps (documented, not fixed)
 
-- IBD carries no transaction bodies, so witness/ownership signatures are not
+- IBD carries no transaction bodies, so witness/ownership signatures cannot be
   verified at insertion (coin proofs and the committed MMR are).
 - Unsolicited IBDs are accepted without an outstanding sync request.
 - The empty-tree root is PoW-gated but there is no trusted genesis/checkpoint.
 
 ### Compatibility
 
-- Consensus behaviour changes only for invalid blocks. Valid blocks, wire
-  format, storage and archive files are unchanged.
+- Behaviour changes only for invalid blocks. Valid blocks, wire format, storage
+  and archive files are unchanged.
+
+## v0.5.13 — Operations rollback tooling and persistence fixes
+
+### Added
+
+- restorecascade action to adopt the cascade stored in the archive DB
+- restoretree action to rebuild the live tree from the archive
+
+### Fixed
+
+- rethrow corrupt database load errors
+- gap-aware peer backfill; preserve MMR; guard null MMR root
+- catch up the MegaMMR from archive blocks in replay mmr:true
+- cover the live tree tail in archive-block MMR catch-up
+- reconcile cascade to the tree root from the archive after recalc
+- persist the MegaMMR immediately after replay catch-up
+- reset the tree root before rebuilding from the archive
+- atomic chaintree save, refresh node count, recover corrupt tree on load
+- serialize archive IBD vs save, persist reachable count, safe restoretree
+- skip block generation when the tip has no MMR root
+- serialize live peer IBD against periodic save
+- lock all live tree mutation and replay against state save
+- make the txpow SQL lock recursive to avoid re-open self-deadlock
+- do not blacklist a peer when our tip is outside its 512-block pulse window
+- request sync-IBD when a peer is ahead so catch-up actually starts
+- make state save exclusive and serialize miner/pulse tree reads
+- do not auto-mine on archive nodes
+- own a deep copy of witness coins instead of a non-owning shared_ptr
+- correct /v1/scripts/{hash} offset
 
 ## v0.5.12 — P2P peer DB load fix
 
