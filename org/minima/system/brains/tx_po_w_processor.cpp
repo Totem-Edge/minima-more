@@ -1,5 +1,6 @@
 #include "org/minima/system/brains/tx_po_w_processor.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 
@@ -20,6 +21,10 @@
 #include "org/minima/objects/base/mini_number.hpp"
 #include "org/minima/objects/mmr/mega_m_m_r.hpp"
 #include "org/minima/objects/mmr/m_m_r.hpp"
+#include "org/minima/objects/mmr/m_m_r_data.hpp"
+#include "org/minima/objects/mmr/m_m_r_proof.hpp"
+#include "org/minima/objects/coin_proof.hpp"
+#include "org/minima/objects/coin.hpp"
 
 #include "org/minima/system/main.hpp"
 #include "org/minima/system/network/minima/n_i_o_manager.hpp"
@@ -108,6 +113,81 @@ namespace org {
 namespace minima {
 namespace system {
 namespace brains {
+
+namespace {
+
+bool peaksMatch(const std::vector<org::minima::objects::mmr::MMREntry>& a,
+                const std::vector<org::minima::objects::mmr::MMREntry>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i].getRow() != b[i].getRow()) return false;
+        if (!a[i].getEntryNumber().isEqual(b[i].getEntryNumber())) return false;
+        const auto* da = a[i].getMMRData();
+        const auto* db = b[i].getMMRData();
+        if ((da == nullptr) != (db == nullptr)) return false;
+        if (da != nullptr &&
+            (!da->getData().isEqual(db->getData()) ||
+             !da->getValue().isEqual(db->getValue()))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+bool blockStateMatches(org::minima::database::txpowtree::TxPoWTreeNode* parentnode,
+                       org::minima::objects::TxBlock& zTxBlock) {
+    // Every input must be an unspent coin at the parent block, and no coin
+    // may be spent twice inside one block. The live path does this per
+    // transaction; an IBD block only carries the resulting coin proofs.
+    std::vector<std::string> coinids;
+    const auto& parentMMR = parentnode->getMMR();
+    for (const auto& cp : zTxBlock.getInputCoinProofs()) {
+        org::minima::objects::Coin coin = cp.getCoin();
+        coinids.push_back(coin.getCoinID().to0xString());
+        auto mmrdata = org::minima::objects::mmr::MMRData::CreateMMRDataLeafNode(
+            coin, coin.getAmount());
+        // Block coin proofs are created one block ahead of the parent MMR
+        // (the TxBlock child-MMR constructor advances the block time), so
+        // verify the proof against the parent's current peaks rather than
+        // checkProofTimeValid, which would look for a future parent.
+        if (!parentMMR.checkProof(*mmrdata, cp.getMMRProof())) {
+            MinimaLogger::log("[!] SyncBlock invalid coin proof @ "
+                              + zTxBlock.getTxPoW().getBlockNumber().toString()
+                              + " " + zTxBlock.getTxPoW().getTxPoWID());
+            return false;
+        }
+    }
+    std::sort(coinids.begin(), coinids.end());
+    if (std::adjacent_find(coinids.begin(), coinids.end()) != coinids.end()) {
+        MinimaLogger::log("[!] SyncBlock duplicate input coin @ "
+                          + zTxBlock.getTxPoW().getBlockNumber().toString()
+                          + " " + zTxBlock.getTxPoW().getTxPoWID());
+        return false;
+    }
+
+    // Rebuild the block MMR from the previous peaks and the block's coins and
+    // require it to match the PoW-committed MMR root/total in the header.
+    org::minima::database::txpowtree::TxPoWTreeNode rebuilt(zTxBlock, false);
+    auto root = rebuilt.getMMR().getRoot();
+    if (!root) {
+        MinimaLogger::log("[!] SyncBlock could not rebuild MMR @ "
+                          + zTxBlock.getTxPoW().getBlockNumber().toString()
+                          + " " + zTxBlock.getTxPoW().getTxPoWID());
+        return false;
+    }
+    const auto& txpow = zTxBlock.getTxPoW();
+    if (!root->getData().isEqual(txpow.getMMRRoot()) ||
+        !root->getValue().isEqual(txpow.getMMRTotal())) {
+        MinimaLogger::log("[!] SyncBlock MMR root mismatch @ "
+                          + txpow.getBlockNumber().toString()
+                          + " " + txpow.getTxPoWID());
+        return false;
+    }
+    return true;
+}
+
+} // namespace
 
 TxPoWProcessor::TxPoWProcessor()
     : org::minima::utils::messages::MessageProcessor("TXPOWPROCESSOR")
@@ -528,6 +608,12 @@ bool TxPoWProcessor::processSyncBlock(const std::shared_ptr<TxBlock>& zTxBlock) 
             const MiniNumber txblknum = zTxBlock->getTxPoW().getBlockNumber();
             const MiniNumber cascblk  = cascdb->getTip()->getTxPoW().getBlockNumber();
 
+            if (!zTxBlock->getTxPoW().isBlock()) {
+                MinimaLogger::log("[!] SyncBlock root has invalid block PoW @ "
+                                  + zTxBlock->getTxPoW().getBlockNumber().toString()
+                                  + " " + zTxBlock->getTxPoW().getTxPoWID());
+                return false;
+            }
             if (cascblk.isEqual(txblknum.sub(MiniNumber::ONE()))) {
                 // Create a node and set as root; cascade tip is parent by construction.
                 auto newnode = std::make_shared<TxPoWTreeNode>(*zTxBlock);
@@ -541,7 +627,14 @@ bool TxPoWProcessor::processSyncBlock(const std::shared_ptr<TxBlock>& zTxBlock) 
             }
         }
 
-        // No cascade tip: just bootstrap with this block as root.
+        // No cascade tip: just bootstrap with this block as root, but never
+        // accept a root whose own PoW is invalid.
+        if (!zTxBlock->getTxPoW().isBlock()) {
+            MinimaLogger::log("[!] SyncBlock root has invalid block PoW @ "
+                              + zTxBlock->getTxPoW().getBlockNumber().toString()
+                              + " " + zTxBlock->getTxPoW().getTxPoWID());
+            return false;
+        }
         auto newnode = std::make_shared<TxPoWTreeNode>(*zTxBlock);
         txptree->setRoot(newnode);
         return true;
@@ -554,6 +647,34 @@ bool TxPoWProcessor::processSyncBlock(const std::shared_ptr<TxBlock>& zTxBlock) 
         // FIX: Store returned shared_ptr in 'auto'
         auto parentnode = txptree->findNode(zTxBlock->getTxPoW().getParentID().to0xString());
         if (parentnode != nullptr) { // FIX: Check shared_ptr
+            // Hardening (RFC-0004 D14): the IBD path used to insert a block
+            // with only its parent checked, so a crafted weight-0 block could
+            // become the chain tip. Apply the same block checks as the live
+            // path before touching the tree.
+            // The block's previous peaks must be the parent's current MMR
+            // peaks; otherwise the block's MMR/state is forged.
+            if (!peaksMatch(zTxBlock->getPreviousPeaks(),
+                            parentnode->getMMR().getPeaksRef())) {
+                MinimaLogger::log("[!] SyncBlock previous peaks mismatch @ "
+                                  + zTxBlock->getTxPoW().getBlockNumber().toString()
+                                  + " " + zTxBlock->getTxPoW().getTxPoWID());
+                return false;
+            }
+            if (!zTxBlock->getTxPoW().isBlock()) {
+                MinimaLogger::log("[!] SyncBlock has invalid block PoW @ "
+                                  + zTxBlock->getTxPoW().getBlockNumber().toString()
+                                  + " " + zTxBlock->getTxPoW().getTxPoWID());
+                return false;
+            }
+            if (!TxPoWChecker::checkTxBlockOnly(parentnode.get(), *zTxBlock)) {
+                MinimaLogger::log("[!] SyncBlock failed block validation @ "
+                                  + zTxBlock->getTxPoW().getBlockNumber().toString()
+                                  + " " + zTxBlock->getTxPoW().getTxPoWID());
+                return false;
+            }
+            if (!blockStateMatches(parentnode.get(), *zTxBlock)) {
+                return false;
+            }
             auto newblock = std::make_shared<TxPoWTreeNode>(*zTxBlock);
             parentnode->addChildNode(newblock);
             // FIX: Pass the shared_ptr `newblock` directly

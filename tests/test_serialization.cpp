@@ -150,6 +150,33 @@ int main() {
 
 
     // =====================================================================
+    // 6. Token descriptor (RFC-005 token creation) — tokenid parity input
+    // =====================================================================
+    std::cout << "--- 6. Token writeDataStream ---" << std::endl;
+    {
+        MiniData tcoinid("0x00");
+        MiniString tscript("RETURN TRUE");
+        MiniNumber tscale(MiniNumber::MAX_DECIMAL_PLACES); // decimals 0 -> scale 44
+        MiniNumber tminima(std::string("1E-44"));
+        MiniString tname(std::string("{\"name\":\"mynft\"}"));
+        MiniNumber tcreated(0LL);
+        std::ostringstream oss(std::ios::binary);
+        tcoinid.writeHashToStream(oss);
+        tscript.writeDataStream(oss);
+        tscale.writeDataStream(oss);
+        tminima.writeDataStream(oss);
+        tname.writeDataStream(oss);
+        tcreated.writeDataStream(oss);
+        std::ostringstream hex;
+        for (char c : oss.str()) {
+            hex << std::hex << std::setfill('0') << std::setw(2)
+                << (static_cast<unsigned int>(static_cast<unsigned char>(c)));
+        }
+        std::cout << "  Token(mynft) = " << hex.str() << std::endl;
+    }
+    std::cout << std::endl;
+
+    // =====================================================================
     // 6. MiniNumber wire-scale preservation (Java parity)
     // =====================================================================
     std::cout << "--- 6. MiniNumber wire-scale preservation ---" << std::endl;

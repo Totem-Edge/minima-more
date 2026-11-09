@@ -1,8 +1,11 @@
 #include "org/minima/system/brains/tx_po_w_miner.hpp"
 
+#include <filesystem>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -119,6 +122,20 @@ void TxPoWMiner::processMessage(org::minima::utils::messages::Message& zMessage)
     using org::minima::system::params::GeneralParams;
 
     if (zMessage.isMessageType(TXPOWMINER_MINETXPOW)) {
+        // Test-only mining pause for the parity harnesses (RFC-0004 Level E).
+        // A file path from MINIMA_TEST_PAUSE_FILE; while it exists the miner
+        // sleeps here, so the tip is frozen without stopping or killing the
+        // node. Never active outside -test params.
+        if (GeneralParams::TEST_PARAMS) {
+            const char* pauseFile = std::getenv("MINIMA_TEST_PAUSE_FILE");
+            if (pauseFile && *pauseFile) {
+                while (std::filesystem::exists(pauseFile) &&
+                       !org::minima::system::Main::getInstance()->isShuttingDown()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            }
+        }
+
         // Start time
         long long timenow = currentTimeMillis();
 

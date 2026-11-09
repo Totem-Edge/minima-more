@@ -1,0 +1,160 @@
+name: parity
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  digest:
+    name: digest/${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux-gcc
+            cc: gcc
+            cxx: g++
+          - os: ubuntu-24.04
+            name: linux-clang
+            cc: clang
+            cxx: clang++
+          - os: macos-14
+            name: macos-clang
+            cc: clang
+            cxx: clang++
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libboost-all-dev libcurl4-openssl-dev \
+            libsqlite3-dev libssl-dev liblmdb-dev zlib1g-dev
+
+      - name: Configure and build consensus tests
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX"
+          cmake --build build -j "$(getconf _NPROCESSORS_ONLN)" \
+            --target test_consensus_vectors test_serialization \
+                     test_script_conformance test_txpowtree_weight
+
+      - name: Platform digest
+        run: |
+          tests/parity/platform_digest.sh build | tee "digest-${{ matrix.name }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.name }}
+          path: digest-${{ matrix.name }}.txt
+
+  compare:
+    name: compare digests
+    needs: digest
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: All platforms must agree
+        run: |
+          grep -h '^payload_digest:' artifacts/*/*.txt | awk '{print $2}' | sort -u > digests.txt
+          cat digests.txt
+          test "$(wc -l < digests.txt)" -eq 1
+
+  unit:
+    name: unit + robustness
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libboost-all-dev libcurl4-openssl-dev \
+            libsqlite3-dev libssl-dev liblmdb-dev zlib1g-dev
+      - name: Build and run tree tests
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(getconf _NPROCESSORS_ONLN)" \
+            --target test_txpowtree_weight test_consensus_vectors
+          ctest --test-dir build -R txpowtree_weight --output-on-failure
+      - name: Build and run fuzz corpus (ASan+UBSan)
+        run: |
+          cmake -S . -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_SANITIZERS=ON -DMINIMA_BUILD_FUZZERS=ON
+          cmake --build build-fuzz -j "$(getconf _NPROCESSORS_ONLN)" \
+            --target fuzz_mini_data fuzz_json_parser fuzz_mini_number fuzz_txpow
+          ASAN_OPTIONS=detect_leaks=0 tests/fuzz/run_fuzz.sh build-fuzz 500
+
+  kernel:
+    name: java kernel parity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openjdk-17-jdk libboost-all-dev \
+            libcurl4-openssl-dev libsqlite3-dev libssl-dev liblmdb-dev zlib1g-dev
+      - name: Pinned Java oracle
+        run: |
+          git clone https://github.com/spartacusrex-minima/minima-core.git "$RUNNER_TEMP/minima-core"
+          git -C "$RUNNER_TEMP/minima-core" checkout c2a54a2e46b2c3a4fd541b80e7d7f5e7afe7d4da
+      - name: Build kernel digest
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(getconf _NPROCESSORS_ONLN)" --target kernel_digest
+      - name: Run kernel differential
+        env:
+          MINIMA_CORE: ${{ runner.temp }}/minima-core
+        run: tests/parity/kernel/run_kernel.sh build
+      - name: Malformed-input rejection corpus
+        env:
+          MINIMA_CORE: ${{ runner.temp }}/minima-core
+        run: python3 tests/parity/reject_corpus.py --cpp build/kernel_digest
+      - name: Semantic checker corpus
+        env:
+          MINIMA_CORE: ${{ runner.temp }}/minima-core
+        run: python3 tests/parity/validate_corpus.py --cpp build/kernel_digest
+
+  levelb:
+    name: cross-node replay
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openjdk-17-jdk libboost-all-dev \
+            libcurl4-openssl-dev libsqlite3-dev libssl-dev liblmdb-dev zlib1g-dev
+      - name: Pinned Java oracle
+        run: |
+          git clone https://github.com/spartacusrex-minima/minima-core.git "$RUNNER_TEMP/minima-core"
+          git -C "$RUNNER_TEMP/minima-core" checkout c2a54a2e46b2c3a4fd541b80e7d7f5e7afe7d4da
+      - name: Build C++ node and kernel digest
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(getconf _NPROCESSORS_ONLN)" --target minima kernel_digest
+      - name: Build Java classes
+        env:
+          MINIMA_CORE: ${{ runner.temp }}/minima-core
+          FORCE_JAVA_BUILD: "1"
+        run: tests/parity/kernel/run_kernel.sh build
+      - name: Cross-node replay (C++ -> Java)
+        env:
+          MINIMA_CORE: ${{ runner.temp }}/minima-core
+        run: python3 tests/parity/replay_cross_node.py --cpp build/minima --direction cpp2java --height 3
+      - name: Cross-node replay (Java -> C++)
+        env:
+          MINIMA_CORE: ${{ runner.temp }}/minima-core
+        run: python3 tests/parity/replay_cross_node.py --cpp build/minima --direction java2cpp --height 3
+      - name: Cross-node reorg
+        env:
+          MINIMA_CORE: ${{ runner.temp }}/minima-core
+        run: python3 tests/parity/reorg_cross_node.py --cpp build/minima --common-height 3 --lead 4

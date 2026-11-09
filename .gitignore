@@ -72,3 +72,7 @@ reference-bench/results/**/*.archive
 reference-bench/results/**/*.coins
 reference-bench/results/**/*.coins.snap
 reference-bench/results/**/*.archive.snap
+
+# Python caches from the parity harnesses
+__pycache__/
+*.pyc

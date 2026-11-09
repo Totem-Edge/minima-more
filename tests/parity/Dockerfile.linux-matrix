@@ -1,0 +1,19 @@
+# Level F matrix image: same source, Linux + GCC (default) and Clang.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    clang \
+    git \
+    libboost-all-dev \
+    libcurl4-openssl-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    liblmdb-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+CMD ["/bin/bash"]

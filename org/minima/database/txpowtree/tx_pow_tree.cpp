@@ -5,7 +5,6 @@
 #include <iomanip>
 #include <chrono>
 #include <ctime>
-#include <unordered_set>
 
 #include "org/minima/database/minima_d_b.hpp"
 #include "org/minima/database/txpowdb/tx_po_w_d_b.hpp"
@@ -142,15 +141,17 @@ void TxPowTree::recalculateTree() {
     // Reset total nodes
     mTotalNodes = static_cast<int>(mFastLink.size());
 
-    // Now organise all nodes into descending order of block number
+    // Now organise all nodes into descending order of block number, so that
+    // every child (deeper block) is visited before its parent. The weight
+    // accumulation below relies on that: a parent can only pick up its
+    // children's *finished* subtree totals if they have already been summed.
     std::sort(allnodes.begin(), allnodes.end(),
               [](const std::shared_ptr<TxPoWTreeNode>& a, const std::shared_ptr<TxPoWTreeNode>& b) {
                   if (!a || !b) return false;
                   auto& atxp = a->getTxPoW();
                   auto& btxp = b->getTxPoW();
-                //   if (!atxp || !btxp) return false;
-                  // return b.blockNumber > a.blockNumber
-                  return btxp.getBlockNumber().compareTo(atxp.getBlockNumber()) > 0;
+                  // "a before b when a.blockNumber > b.blockNumber" (descending)
+                  return atxp.getBlockNumber().compareTo(btxp.getBlockNumber()) > 0;
               });
 
     // Now cycle through and add the weight of the children to the parents
@@ -281,30 +282,18 @@ std::vector<std::shared_ptr<TxPoWTreeNode>> TxPowTree::setLength(int zMaxLength)
         cascade = cascade->getParent();
     }
 
-    // Get the new root's block number for side branch collection
-    MiniNumber newRootBlockNum = newroot->getBlockNumber();
-
-    // Now collect any side branches (blocks not on main chain)
-    // These are blocks with block number < newroot that aren't in removed already
-    std::unordered_set<std::string> mainChainIDs;
-    for (const auto& node : removed) {
-        mainChainIDs.insert(node->getTxPoW().getTxPoWID());
-    }
-
-    for (const auto& pair : mFastLink) {
-        const std::shared_ptr<TxPoWTreeNode>& node = pair.second;
-        if (node->getBlockNumber().isLess(newRootBlockNum)) {
-            // Only add if not already in main chain
-            if (mainChainIDs.find(node->getTxPoW().getTxPoWID()) == mainChainIDs.end()) {
-                removed.push_back(node);  // Side branches go at the end
-            }
-        }
-    }
+    // Match Java exactly: only the new root's ancestors are returned. They are
+    // the canonical blocks that move into the cascade. Non-ancestor fork blocks
+    // below the new root are dropped from the tree; they must NOT be appended
+    // to the cascade, because the caller links each entry onto the previous tip
+    // and that would leave the cascade tip on a non-canonical block in
+    // hash-map order. Preserving such orphans belongs to the archive and is a
+    // separate, explicit concern (RFC-0004 open question 4).
 
     // Set the new root (will prune everything below and recalculate)
     setRoot(newroot);
 
-    // Return ALL removed blocks (so they can be added to cascade)
+    // Return the removed main-chain blocks (oldest → newest)
     return removed;
 }
 

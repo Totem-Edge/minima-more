@@ -9,6 +9,14 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(MINIMA_STATIC "Fully static link (requires static deps)" OFF)
 option(MINIMA_BUILD_ANALYTICS "Build the optional minima-analytics sidecar" OFF)
 option(MINIMA_STATIC_NO_LMDB "Disable LMDB for fully static builds" OFF)
+option(ENABLE_SANITIZERS "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+option(MINIMA_BUILD_FUZZERS "Build fuzz targets (libFuzzer if available, portable driver otherwise)" OFF)
+
+if((ENABLE_SANITIZERS OR MINIMA_BUILD_FUZZERS) AND NOT MSVC)
+    message(STATUS "Sanitizers: -fsanitize=address,undefined")
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
 
 set(MINIMA_SOURCES
     org/minima/database/minima_d_b.cpp
@@ -1005,7 +1013,7 @@ if(LMDB_LIBRARY)
     list(APPEND MINIMA_TEST_LIBS ${LMDB_LIBRARY})
 endif()
 
-foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import test_archive_records test_archive_tail test_script_conformance gen_command_reference)
+foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import test_archive_records test_archive_tail test_script_conformance test_txpowtree_weight test_tree_properties gen_command_reference)
     add_executable(${tgt} EXCLUDE_FROM_ALL
         tests/${tgt}.cpp
         $<TARGET_OBJECTS:minima_core>)
@@ -1017,11 +1025,53 @@ foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_im
     target_link_libraries(${tgt} PRIVATE ${MINIMA_TEST_LIBS})
 endforeach()
 
+# Level A kernel digest (parity with the Java oracle)
+add_executable(kernel_digest EXCLUDE_FROM_ALL
+    tests/parity/kernel/kernel_digest.cpp
+    $<TARGET_OBJECTS:minima_core>)
+target_compile_features(kernel_digest PRIVATE cxx_std_17)
+target_include_directories(kernel_digest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(kernel_digest PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(kernel_digest PRIVATE ${MINIMA_TEST_LIBS})
+
 add_test(NAME capabilities COMMAND test_capabilities)
 add_test(NAME mcp_server COMMAND test_mcp_server)
 add_test(NAME docs_manifest COMMAND test_docs_manifest ${CMAKE_CURRENT_SOURCE_DIR}/COMMAND_REFERENCE.md)
 add_test(NAME megammr_import COMMAND test_megammr_import)
 add_test(NAME h2_import COMMAND test_h2_import)
+add_test(NAME txpowtree_weight COMMAND test_txpowtree_weight)
+add_test(NAME tree_properties COMMAND test_tree_properties)
+
+# ---------------------------------------------------------------------------
+# Fuzz targets (Level C robustness). Uses libFuzzer when the toolchain ships the
+# runtime, otherwise the portable deterministic driver in tests/fuzz.
+# Builds with ASan+UBSan automatically (see the options block at the top).
+# ---------------------------------------------------------------------------
+if(MINIMA_BUILD_FUZZERS)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-fsanitize=fuzzer" MINIMA_HAVE_LIBFUZZER)
+
+    foreach(tgt fuzz_mini_data fuzz_json_parser fuzz_mini_number fuzz_txpow)
+        add_executable(${tgt} EXCLUDE_FROM_ALL tests/fuzz/${tgt}.cpp)
+        target_compile_features(${tgt} PRIVATE cxx_std_17)
+        target_include_directories(${tgt} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        if(APPLE)
+            target_include_directories(${tgt} PRIVATE /opt/homebrew/include)
+        endif()
+        if(MINIMA_HAVE_LIBFUZZER)
+            target_compile_options(${tgt} PRIVATE -fsanitize=fuzzer)
+            target_link_options(${tgt} PRIVATE -fsanitize=fuzzer)
+        else()
+            target_sources(${tgt} PRIVATE tests/fuzz/fuzz_driver.cpp)
+        endif()
+        target_link_libraries(${tgt} PRIVATE
+            $<TARGET_OBJECTS:minima_core> ${MINIMA_TEST_LIBS})
+    endforeach()
+
+    message(STATUS "MINIMA_BUILD_FUZZERS: libFuzzer=${MINIMA_HAVE_LIBFUZZER}")
+endif()
 
 if(MINIMA_BUILD_ANALYTICS AND UNIX)
     add_subdirectory(analytics)

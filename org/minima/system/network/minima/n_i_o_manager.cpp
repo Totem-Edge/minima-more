@@ -123,11 +123,24 @@ public:
         while ((std::chrono::steady_clock::now() < deadline) && (getQueueSize() > 0 || mActive.load() > 0)) {
             mDoneCond.wait_for(lock, std::chrono::milliseconds(50));
         }
-        // Join threads
+        // Join threads, but never block shutdown forever on a handler that is
+        // stuck in socket/IO. After the deadline, detach: the process is
+        // exiting, and an indefinite join here prevents saveAllDB() from ever
+        // running (RFC-0004 D12).
+        const bool timed_out =
+            (std::chrono::steady_clock::now() >= deadline) &&
+            (getQueueSize() > 0 || mActive.load() > 0);
         for (auto& t : mWorkers) {
-            if (t.joinable()) {
+            if (!t.joinable()) continue;
+            if (timed_out) {
+                t.detach();
+            } else {
                 t.join();
             }
+        }
+        if (timed_out) {
+            org::minima::utils::MinimaLogger::log(
+                "WARNING NIOManager: thread pool did not drain in time; detached workers");
         }
     }
 
