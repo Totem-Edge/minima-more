@@ -1,3 +1,57 @@
+# Minima More v0.5.14
+
+IBD consensus hardening, the fork-choice and shutdown fixes found by the
+parity programme, and a full CTest gate.
+
+## Consensus (D14)
+
+IBD insertion no longer trusts the peer. `processSyncBlock` now validates:
+
+- `checkTxBlockOnly` on every block;
+- block PoW (`isBlock`) and a valid parent previous-peaks match against the
+  parent MMR;
+- every input coin proof against that MMR, with duplicate inputs rejected;
+- the rebuilt MMR root/total against the PoW-committed header;
+- a PoW gate for the first block on an empty tree.
+
+Before this, a crafted weight-0 next-height block became the chain tip on both
+C++ nodes and on the Java oracle. Invalid blocks are now rejected by both C++
+nodes as a deliberate divergence from Java. Valid replay and reorg still pass.
+
+`TxPowTree` cumulative weight no longer truncates and `setLength` keeps
+main-chain ancestors only, both matching Java. Graceful shutdown no longer
+hangs joining stuck NIO workers, so `quit` checkpoints and a restart recovers
+the full height.
+
+## Testing
+
+- The full CTest suite is the CI gate: `minima-tests` builds every `test_*`
+  target and `ctest` runs all of them with no path filter. 19 tests: 17 pass,
+  2 explicit skips (they need a real archive DB; the writer/reader path is
+  covered by the new `test_archive_roundtrip`).
+- Java kernel parity: digest `7ac470fb…b739ac`, identical to oracle commit
+  `c2a54a2`.
+- Parity harness: cross-node replay now compares a post-replay state digest and
+  supports two C++ nodes with spend blocks; fuzz targets, RPC security smoke,
+  a 60 s soak and the platform digest all pass.
+
+## Fixed
+
+- v0.5.13 artifacts reported version `0.5.12`. The project version is bumped
+  with the release again.
+
+## Known gaps
+
+- IBD carries no transaction bodies, so witness/ownership signatures cannot be
+  checked at insertion (coin proofs and the committed MMR are checked).
+- Unsolicited IBDs are accepted without an outstanding sync request.
+- The empty-tree root is PoW-gated but there is no trusted genesis/checkpoint.
+
+## Compatibility
+
+- Consensus behaviour changes only for invalid blocks. Valid blocks, wire
+  format, storage and archive files are unchanged.
+
 # Minima More v0.5.12
 
 P2P peer-list load fix.

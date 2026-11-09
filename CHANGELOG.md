@@ -1,5 +1,53 @@
 # PureMinima C++ — Change Report
 
+## v0.5.14 — IBD consensus hardening and a real test gate
+
+### Fixed — consensus (D14)
+
+- **IBD insertion trusted the peer.** `processSyncBlock` now runs
+  `checkTxBlockOnly`, a block-PoW (`isBlock`) gate, a previous-peaks match
+  against the parent MMR, per-input coin-proof verification against that MMR,
+  duplicate-input rejection, a rebuilt-MMR root/total match against the header,
+  and a PoW gate for the first block on an empty tree. Before this, a crafted
+  weight-0 next-height block became the chain tip on both C++ nodes and on the
+  Java oracle. This is a deliberate divergence from Java for invalid blocks;
+  valid replay and reorg still pass.
+- **TxPowTree weight accumulation truncated cumulative weight** and `setLength`
+  kept non-ancestor branches. Both now match Java, with fork-choice,
+  weight-conservation and ancestry tests.
+- **Graceful shutdown could hang** in `NIOManager::ThreadPool::awaitTermination()`
+  (unconditional join), so `saveAllDB()` never ran and a restart lost the tree.
+  Stuck workers are detached after the drain deadline.
+
+### Fixed — release hygiene
+
+- v0.5.13 artifacts reported version `0.5.12`; the project version is bumped
+  for every release again.
+
+### Added — testing
+
+- The full CTest suite is the CI gate: `minima-tests` builds every `test_*`
+  target and `ctest` runs all of them with no path filter. 11 test executables
+  that existed but were never registered are now registered, and a guard fails
+  the build if a test binary has no `add_test`.
+- `test_archive_roundtrip` covers the archive writer/reader (schema, chunk
+  flush, reopen, duplicate idempotence, batch commit, gap detection) without a
+  fixture; the two real-archive validators report `SKIP` instead of failing.
+- The parity harness gains a cross-node replay state digest and `cpp2cpp` /
+  `--spend-every` legs. RFC-0004 records the behavioural-parity programme.
+
+### Known gaps (documented, not fixed)
+
+- IBD carries no transaction bodies, so witness/ownership signatures are not
+  verified at insertion (coin proofs and the committed MMR are).
+- Unsolicited IBDs are accepted without an outstanding sync request.
+- The empty-tree root is PoW-gated but there is no trusted genesis/checkpoint.
+
+### Compatibility
+
+- Consensus behaviour changes only for invalid blocks. Valid blocks, wire
+  format, storage and archive files are unchanged.
+
 ## v0.5.12 — P2P peer DB load fix
 
 ### Fixed
