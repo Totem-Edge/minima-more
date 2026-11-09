@@ -899,7 +899,7 @@ void TxPoWProcessor::recalculateTree() {
                               });
                 }
 
-                std::vector<std::shared_ptr<TxBlock>> missing;
+                std::vector<std::unique_ptr<TxBlock>> missing;
                 const bool useTree = expected > 0 &&
                     static_cast<long long>(treeMissing.size()) == expected;
                 if (!useTree) {
