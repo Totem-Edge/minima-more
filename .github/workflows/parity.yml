@@ -19,17 +19,16 @@ jobs:
             name: linux-clang
             cc: clang
             cxx: clang++
-          - os: macos-14
-            name: macos-clang
-            cc: clang
-            cxx: clang++
-            # Standard macOS runners are not available on this account
-            # ("configuration 'macos-14-arm64-us-default' is not supported"),
-            # which failed the whole run. Opt in with the ENABLE_MACOS_CI
-            # repository variable once a runner exists.
-            optional: true
+          # macOS is verified locally (see the digest table in
+          # tests/parity/README.md) but cannot run on this account's runners:
+          # digest/macos-clang fails in 1s with "configuration
+          # 'macos-14-arm64-us-default' is not supported". Re-add this leg when
+          # a macOS runner is available:
+          #   - os: macos-14
+          #     name: macos-clang
+          #     cc: clang
+          #     cxx: clang++
     runs-on: ${{ matrix.os }}
-    if: ${{ !matrix.optional || vars.ENABLE_MACOS_CI == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
