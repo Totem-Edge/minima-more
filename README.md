@@ -615,10 +615,15 @@ Override with `-megammrurl <url>` / `-archiveurl <url>` or
 ## Verify
 
 ```sh
-ctest --test-dir build            # or build the targets below directly
-# consensus goldens, MMR cache/proofs, WOTS, mempool index, SQLite batching
-#   test_consensus_vectors · test_mmr · test_winternitz · test_mempool_index · test_sql_batch
+cmake --build build --target minima-tests -j"$(nproc)"
+ctest --test-dir build --output-on-failure
 ```
+
+`minima-tests` builds every `test_*` target and `ctest` runs all of them; a new
+test cannot be silently skipped. Tests that need external data (a real archive DB
+or `archive.raw.dat`) return `77`, registered as `SKIP_RETURN_CODE`, so they are
+reported as skipped rather than counted as passing. Archive writer/reader
+coverage without fixtures is `test_archive_roundtrip`.
 
 All targets build warning-clean on both Clang and GCC (`-Wall -Wextra -Wpedantic`).
 

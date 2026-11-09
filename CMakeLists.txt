@@ -1013,7 +1013,7 @@ if(LMDB_LIBRARY)
     list(APPEND MINIMA_TEST_LIBS ${LMDB_LIBRARY})
 endif()
 
-foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import test_archive_records test_archive_tail test_script_conformance test_txpowtree_weight test_tree_properties gen_command_reference)
+foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import test_archive_roundtrip test_archive_records test_archive_tail test_script_conformance test_txpowtree_weight test_tree_properties gen_command_reference)
     add_executable(${tgt} EXCLUDE_FROM_ALL
         tests/${tgt}.cpp
         $<TARGET_OBJECTS:minima_core>)
@@ -1041,8 +1041,29 @@ add_test(NAME mcp_server COMMAND test_mcp_server)
 add_test(NAME docs_manifest COMMAND test_docs_manifest ${CMAKE_CURRENT_SOURCE_DIR}/COMMAND_REFERENCE.md)
 add_test(NAME megammr_import COMMAND test_megammr_import)
 add_test(NAME h2_import COMMAND test_h2_import)
+add_test(NAME archive_roundtrip COMMAND test_archive_roundtrip)
+add_test(NAME archive_records COMMAND test_archive_records)
+add_test(NAME archive_tail COMMAND test_archive_tail)
+add_test(NAME script_conformance COMMAND test_script_conformance)
 add_test(NAME txpowtree_weight COMMAND test_txpowtree_weight)
 add_test(NAME tree_properties COMMAND test_tree_properties)
+add_test(NAME winternitz COMMAND test_winternitz)
+add_test(NAME serialization COMMAND test_serialization)
+# Self-contained serialization parity test: duplicates the wire logic from
+# first principles and links nothing, so it also proves the encodings can be
+# reproduced outside the node.
+add_executable(test_serialization_standalone EXCLUDE_FROM_ALL tests/test_serialization_standalone.cpp)
+target_compile_features(test_serialization_standalone PRIVATE cxx_std_17)
+add_test(NAME serialization_standalone COMMAND test_serialization_standalone)
+add_test(NAME mmr COMMAND test_mmr)
+add_test(NAME consensus_vectors COMMAND test_consensus_vectors)
+add_test(NAME mempool_index COMMAND test_mempool_index)
+add_test(NAME sql_batch COMMAND test_sql_batch)
+
+# test_archive_records and test_archive_tail need a real archive (a DB and a raw
+# archive file). Under ctest they run without fixtures and report SKIP (77); the
+# synthetic writer/reader path is covered by archive_roundtrip.
+set_tests_properties(archive_records archive_tail PROPERTIES SKIP_RETURN_CODE 77)
 
 # ---------------------------------------------------------------------------
 # Fuzz targets (Level C robustness). Uses libFuzzer when the toolchain ships the
@@ -1075,4 +1096,29 @@ endif()
 
 if(MINIMA_BUILD_ANALYTICS AND UNIX)
     add_subdirectory(analytics)
+endif()
+
+# ---------------------------------------------------------------------------
+# Full-suite CTest gate.
+#
+# Test executables are EXCLUDE_FROM_ALL so a normal build stays fast. CI (and
+# anyone validating a release) builds every registered test through this target
+# and then runs `ctest --output-on-failure`, so "the suite is green" means the
+# suite actually ran.
+#
+#   cmake --build build --target minima-tests
+#   ctest --test-dir build --output-on-failure
+# ---------------------------------------------------------------------------
+get_property(MINIMA_DIR_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+set(MINIMA_TEST_TARGETS "")
+foreach(tgt ${MINIMA_DIR_TARGETS})
+    if(tgt MATCHES "^test_")
+        list(APPEND MINIMA_TEST_TARGETS ${tgt})
+    endif()
+endforeach()
+if(MINIMA_TEST_TARGETS)
+    list(REMOVE_DUPLICATES MINIMA_TEST_TARGETS)
+    add_custom_target(minima-tests DEPENDS ${MINIMA_TEST_TARGETS})
+    list(LENGTH MINIMA_TEST_TARGETS MINIMA_TEST_COUNT)
+    message(STATUS "minima-tests: ${MINIMA_TEST_COUNT} test targets")
 endif()

@@ -5,13 +5,13 @@
 
 Node: version `1.0.100.0`, network `0x00`, mode `full`.
 
-Commands: 111.
+Commands: 112.
 
 ## backup
 
 | Command | Access | Parameters | Summary |
 |---|---|---|---|
-| `archive` | destructive | `action`, `host`, `phrase`, `anyphrase`, `keys`, `keyuses`, `file`, `address`, `statecheck`, `logs`, `maxexport`, `raw` | [action:] (host:) (phrase:) (keys:) (keyuses:) - Resync your chain with seed phrase if necessary (otherwise wallet remains the same) |
+| `archive` | destructive | `action`, `host`, `phrase`, `anyphrase`, `keys`, `keyuses`, `file`, `address`, `statecheck`, `logs`, `maxexport`, `raw`, `from`, `to`, `mmr`, `mmrfrom` | [action:] (host:) (phrase:) (keys:) (keyuses:) - Resync your chain with seed phrase if necessary (otherwise wallet remains the same) |
 | `backup` | destructive | `debug`, `password`, `file`, `auto`, `confirm`, `maxhistory` | (password:) (file:) (auto:) (maxhistory:) - Backup the system. Uses a timestamped name by default |
 | `coinexport` | destructive | `coinid` | [coinid:] - Export a coin |
 | `coinimport` | destructive | `data`, `track` | [data:] (track:true\|false) - Import a coin, and keep tracking it |
@@ -75,6 +75,7 @@ Commands: 111.
 | `sign` | destructive | `publickey`, `data` | [publickey:] [data:] - Sign the data with the publickey |
 | `signfrom` | destructive | `id`, `data`, `privatekey`, `keyuses` | [data:] [privatekey:] [keyuses:] - Sign a creatfrom txn |
 | `slavenode` | destructive | `host`, `enable` | Run in slavenode mode. Requires a master node to connect to. |
+| `state` | destructive | `action` | (action:verify) - Verify archive, cascade, tree and MMR consistency |
 | `status` | read | `clean`, `debug`, `complete` | (clean:true) - Show general status for Minima and clean RAM |
 | `systemcheck` | read | `processor`, `action` | Check system processors.. |
 | `test` | destructive | `show`, `action` | test Funxtion |

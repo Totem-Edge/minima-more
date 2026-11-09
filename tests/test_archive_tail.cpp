@@ -20,8 +20,10 @@ using org::minima::objects::base::MiniNumber;
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::printf("usage: %s <archive-db> <archive.raw.dat>\n", argv[0]);
-        return 2;
+        // ctest registers this without arguments: replay needs a real
+        // archive.raw.dat produced from a Mainnet archive.
+        std::printf("SKIP: usage: %s <archive-db> <archive.raw.dat>\n", argv[0]);
+        return 77;
     }
     sqlite3_initialize();
 

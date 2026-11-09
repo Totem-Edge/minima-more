@@ -49,19 +49,14 @@ jobs:
       - name: Build node
         run: cmake --build build --target minima -j"$(nproc)"
 
-      - name: Build tests
-        run: |
-          cmake --build build --target \
-            test_consensus_vectors test_mmr test_winternitz \
-            test_mempool_index test_sql_batch -j"$(nproc)"
+      - name: Build all test targets
+        run: cmake --build build --target minima-tests -j"$(nproc)"
 
-      - name: Run tests
+      - name: Run the full CTest suite
         run: |
-          ./build/test_consensus_vectors
-          ./build/test_mmr
-          ./build/test_winternitz
-          ./build/test_mempool_index
-          ./build/test_sql_batch
+          # No path filter: every registered test runs. Skips are explicit
+          # (SKIP_RETURN_CODE) and reported as skipped, not as passing.
+          ctest --test-dir build --output-on-failure -j"$(nproc)" --no-tests=error
 
       - name: Smoke test (genesis)
         run: |
