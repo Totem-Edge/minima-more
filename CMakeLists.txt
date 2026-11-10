@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(minima VERSION 0.5.14 LANGUAGES CXX)
+project(minima VERSION 0.6.0 LANGUAGES CXX)
 
 include(CTest)
 

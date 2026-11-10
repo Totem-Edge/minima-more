@@ -1,5 +1,63 @@
 # PureMinima C++ — Change Report
 
+## v0.6.0 — Consensus boundary and graceful termination
+
+This is a minor release because of a **consensus rule change, not an API
+change**. v0.5.14 already shipped it as a patch; 0.6.0 is the first release whose
+version says so. Nodes on 0.5.14+ reject invalid IBD blocks that the pinned Java
+oracle accepts. **Upgrade every node on a network together**: a mixed
+0.5.x/0.6.x network can disagree about a block that only one side accepts.
+
+### Consensus boundary (present since v0.5.14, now signalled by the version)
+
+- IBD insertion validates `checkTxBlockOnly`, block PoW, a previous-peaks match
+  against the parent MMR, every input coin proof, duplicate inputs, the rebuilt
+  MMR root/total against the committed header, and PoW for the first block on an
+  empty tree.
+- `TxPowTree` cumulative weight is no longer truncated and `setLength` returns
+  main-chain ancestors only, both matching Java.
+
+### Durability (new in 0.6.0)
+
+- **SIGTERM/SIGINT now shut down gracefully.** Previously there was no handler:
+  the default action killed the process mid-write, so nothing since the last
+  periodic save reached disk. The handlers now run the same `Main::shutdown()`
+  as the `quit` command — checkpoint, mempool flush, thread stop.
+- The daemon and MCP loops treated a cleared `Main` instance as "not finished"
+  and could never observe completion. They now treat a null instance as
+  shutdown complete, so the process exits in ~2 s instead of needing SIGKILL.
+
+This matters for `systemctl stop`, Kubernetes termination and any
+`hawk-update`-style restart, all of which stop a node with SIGTERM.
+
+### Changed since v0.5.14
+
+- One greeting per connection: duplicate greetings are no longer answered with
+  repeated IBD work.
+- Cascade reconciliation uses the live heaviest tree branch first and falls back
+  to the archive only for windows no longer in RAM.
+- `memreport` reports file descriptors and thread counts.
+- Opt-in IBD witness gate (`IBD_WITNESS_CHECK`, default **off**): validates
+  transaction bodies that are already available locally and skips bodies that
+  have not arrived, so acceptance stays deterministic across nodes.
+
+### Fixed
+
+- `loadBlockRange` returns `unique_ptr<TxBlock>`; callers now use `auto` instead
+  of assigning to a `shared_ptr` vector (build break on current main).
+
+### Known gaps
+
+- IBD carries no transaction bodies, so witness/ownership signatures cannot be
+  verified at insertion (coin proofs and the committed MMR are).
+- Unsolicited IBDs are accepted without an outstanding sync request.
+- The empty-tree root is PoW-gated but there is no trusted genesis/checkpoint.
+
+### Compatibility
+
+- Behaviour changes only for invalid blocks. Valid blocks, wire format, storage
+  and archive files are unchanged. `MINIMA_VERSION` stays `1.0.100`.
+
 ## v0.5.14 — IBD consensus hardening, parity harness and a real test gate
 
 ### Consensus and correctness
@@ -11,7 +69,8 @@
   rebuilt MMR root/total match against the PoW-committed header, and a PoW gate
   for the first block on an empty tree. A crafted weight-0 next-height block
   previously became the chain tip on both C++ nodes *and* on the pinned Java
-  oracle.
+  oracle. Both C++ nodes now reject it: this is a
+  **deliberate divergence from Java for invalid blocks**.
 - **Fork weight was truncated.** `TxPowTree::recalculateTree()` sorted nodes
   with an inverted comparator, so a parent summed its children's subtree
   weights before those children were finished. The sort is now descending by
