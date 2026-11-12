@@ -1,12 +1,22 @@
-# Minima More v0.6.0 — Consensus boundary and graceful termination
+# Minima More v0.6.0 — IBD validation fix and graceful termination
 
-This is a minor release because of a **consensus rule change, not an API
-change**. v0.5.14 already shipped it as a patch; 0.6.0 is the first release whose
-version says so. Nodes on 0.5.14+ reject invalid IBD blocks that the pinned Java
-oracle accepts. **Upgrade every node on a network together**: a mixed
-0.5.x/0.6.x network can disagree about a block that only one side accepts.
+This release fixes a block-validation bug on the IBD path. It is **not a
+consensus rule change**: the rules a block must satisfy are unchanged, and no
+valid block is affected. The node now applies those rules when inserting a block
+received from a peer, instead of only on the live path.
 
-### Consensus boundary (present since v0.5.14, now signalled by the version)
+Verified in both directions on this tree: a Java-mined chain, including a spend
+block, is accepted by this node over real P2P/IBD; its own blocks are accepted by
+the Java node; both sides report identical block IDs, and the kernel digest is
+unchanged (`7ac470fb…b739ac` against oracle `c2a54a2`).
+
+Upgrade together if you can: an unhardened node — earlier C++ releases, and the
+Java implementation's IBD path — can still be tricked into accepting an invalid
+block. Mixing hardened and unhardened nodes leaves that attack open on the
+unhardened ones. Upgrading together removes the attack surface; it does not
+introduce a new rule.
+
+### IBD validation (present since v0.5.14)
 
 - IBD insertion validates `checkTxBlockOnly`, block PoW, a previous-peaks match
   against the parent MMR, every input coin proof, duplicate inputs, the rebuilt
@@ -68,7 +78,8 @@ This matters for `systemctl stop`, Kubernetes termination and any
   for the first block on an empty tree. A crafted weight-0 next-height block
   previously became the chain tip on both C++ nodes *and* on the pinned Java
   oracle. Both C++ nodes now reject it: this is a
-  **deliberate divergence from Java for invalid blocks**.
+  **deliberate divergence from Java for invalid blocks only** — no valid
+  block is affected, verified in both directions against the Java node.
 - **Fork weight was truncated.** `TxPowTree::recalculateTree()` sorted nodes
   with an inverted comparator, so a parent summed its children's subtree
   weights before those children were finished. The sort is now descending by
