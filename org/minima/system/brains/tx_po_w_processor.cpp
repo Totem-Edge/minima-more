@@ -1051,7 +1051,13 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
             // Handle cascade if present
             if (ibd->hasCascade()) {
                 // FIX: Use . (dot operator)
-                if (MinimaDB::getDB()->getCascade().getTip() == nullptr) {
+                const auto incomingCascade = ibd->getCascade();
+                if (!incomingCascade || !incomingCascade->getTip()) {
+                    // An IBD can carry a cascade object with no tip (seen from a
+                    // peer with an empty chain). Dereferencing it crashed the
+                    // processor.
+                    MinimaLogger::log("[!] IGNORE IBD - cascade without a tip");
+                } else if (MinimaDB::getDB()->getCascade().getTip() == nullptr) {
                     bool ignore = false;
                     // FIX: Use . (dot operator) and store shared_ptr in 'auto'
                     auto root = MinimaDB::getDB()->getTxPoWTree().getRoot();
