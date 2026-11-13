@@ -1,3 +1,26 @@
+# Minima More v0.6.1 — Null cascade tip crash on a crafted IBD
+
+### Fixed
+
+- **Remote crash on a crafted IBD (T16).** An IBD can set the cascade flag and
+  still carry a cascade with no tip; `readDataStream` allocates the object
+  regardless, so `getTip()` is null. `processMessage` checked `hasCascade()` and
+  the *local* cascade tip, then dereferenced the incoming one, killing the
+  process: `SIGSEGV`, `KERN_INVALID_ADDRESS 0x8` in
+  `CascadeNode::getTxPoW`. Any peer could send the frame — remote and
+  unauthenticated. It is now ignored and logged
+  (`IGNORE IBD - cascade without a tip`).
+
+  Found with the T16 vector in `hawk-attack` while syncing two nodes through
+  `hawk-ble-bridge`. The same guard is in hawk-node (`c54d814`, and `455d48b`
+  on the public line).
+
+### Compatibility
+
+- No rule, wire or storage change. Valid IBDs are unaffected; only a malformed
+  frame that previously crashed the node is ignored.
+
+
 # Minima More v0.6.0 — IBD validation fix and graceful termination
 
 This release fixes a block-validation bug on the IBD path. It is **not a
