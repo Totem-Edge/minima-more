@@ -1,5 +1,39 @@
 # PureMinima C++ — Change Report
 
+## v0.6.2 — Exact balances, Mx lookups and MMR-backed holder data
+
+### Fixed
+
+- **Sub-1 MIN balances indexed as 0.** Coin amounts are 44-decimal
+  `MiniNumber`s, but the index stored `getAsLong()`, which returns only the
+  integer part: a 0.8 MIN coin became `0`, and every token balance below one
+  whole token became `0`. The address endpoint now reads `mmr_coins.amount_atoms`
+  (the exact 10^-44 value) and returns `balance` as a decimal string,
+  `balance_raw` as exact atoms, and a `tokens[]` list with name, decimals,
+  `is_nft` and media, from the authoritative MegaMMR unspent set.
+- **Mx address lookups returned not_found.** The index stores the `0x` form;
+  `/v1/addresses/<Mx…>` now decodes the checksummed base32 address with the
+  node's own `Address::convertMinimaAddress`.
+- **The rich list and holder cohorts included phantom coins.** They were built
+  from `tx_outputs`, where a spend is only visible when the block archived its
+  coin proofs (193,551 phantom unspent coins on the live index). Enrichment now
+  builds `mmr_address_balances`, `/v1/cohorts/holder` prefers it, and the
+  holders read model uses it.
+
+### Added
+
+- `-mmrcoins` refreshes `mmr_coins`/`mmr_address_balances` from the MegaMMR
+  without replaying the archive, so an amount/index fix does not require a
+  multi-hour re-index.
+- `test_amount_atoms` pins the 44-decimal conversion and the 0.8 MIN case.
+
+### Compatibility
+
+- Derived-index change only: no consensus rule, wire format or archive change.
+- An existing index gains `mmr_coins.amount_atoms` and `mmr_address_balances` on
+  the next `-mmrcoins` or MMR-enriched `-index` run. Until then the address
+  endpoint falls back to the previous snapshot response.
+
 ## v0.6.1 — Null cascade tip crash on a crafted IBD
 
 ### Fixed
