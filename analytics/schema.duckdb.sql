@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS tx_inputs (
     token_id       VARCHAR,
     amount_raw     HUGEINT NOT NULL,
     created_height BIGINT,
+    amount_atoms   VARCHAR,
     PRIMARY KEY (txpowid, input_index)
 );
 
@@ -129,6 +130,7 @@ CREATE TABLE IF NOT EXISTS tx_outputs (
     created_height  BIGINT NOT NULL,
     spent_height    BIGINT,
     spent_txid      VARCHAR,
+    amount_atoms    VARCHAR,
     PRIMARY KEY (txpowid, output_index)
 );
 

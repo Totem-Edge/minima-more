@@ -29,23 +29,32 @@ inline std::string amountAtomsString(
     return amountAtoms(value).convert_to<std::string>();
 }
 
-// Render raw atoms as a plain decimal with trailing zeros removed.
-inline std::string formatAtoms(boost::multiprecision::cpp_int atoms) {
+// Render raw atoms as a plain decimal with `places` fractional digits and
+// trailing zeros removed. Native MIN uses 44; a token uses its metadata
+// decimals (e.g. 8 -> 100000000 atoms displays as 1).
+inline std::string formatAtoms(boost::multiprecision::cpp_int atoms, int places) {
+    if (places < 0 || places > kAmountDecimals) places = kAmountDecimals;
     std::string digits = atoms.convert_to<std::string>();
-    bool negative = !digits.empty() && digits.front() == '-';
+    const bool negative = !digits.empty() && digits.front() == '-';
     if (negative) digits.erase(digits.begin());
-    if (digits.size() <= static_cast<std::size_t>(kAmountDecimals)) {
-        digits.insert(0, static_cast<std::size_t>(kAmountDecimals) + 1 - digits.size(), '0');
+    if (digits.size() <= static_cast<std::size_t>(places)) {
+        digits.insert(0, static_cast<std::size_t>(places) + 1 - digits.size(), '0');
     }
-    digits.insert(digits.size() - static_cast<std::size_t>(kAmountDecimals), 1, '.');
-    const std::size_t last = digits.find_last_not_of('0');
-    if (last != std::string::npos && digits[last] == '.') {
-        digits.erase(last);
-    } else if (last != std::string::npos) {
-        digits.erase(last + 1);
+    if (places > 0) {
+        digits.insert(digits.size() - static_cast<std::size_t>(places), 1, '.');
+        const std::size_t last = digits.find_last_not_of('0');
+        if (last != std::string::npos && digits[last] == '.') {
+            digits.erase(last);
+        } else if (last != std::string::npos) {
+            digits.erase(last + 1);
+        }
     }
     if (negative && digits != "0") digits.insert(digits.begin(), '-');
     return digits;
+}
+
+inline std::string formatAtoms(boost::multiprecision::cpp_int atoms) {
+    return formatAtoms(std::move(atoms), kAmountDecimals);
 }
 
 } // namespace minima::analytics

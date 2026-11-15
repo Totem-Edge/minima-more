@@ -691,6 +691,21 @@ IndexResult buildIndex(const IndexOptions& options) {
               << " storage=" << (archiveStats.legacyStorage ? "legacy" : "chunked")
               << " complete=" << (archiveStats.complete ? "yes" : "no") << "\n";
 
+    // Exact amounts + complete spends. Blocks routinely omit coin proofs, so
+    // the transaction body is the authoritative input list; amount_atoms keeps
+    // the 44-decimal value that amount_raw (getAsLong) cannot.
+    if (!exec(con,
+              "ALTER TABLE analytics.tx_inputs "
+              "ADD COLUMN IF NOT EXISTS amount_atoms VARCHAR;",
+              error) ||
+        !exec(con,
+              "ALTER TABLE analytics.tx_outputs "
+              "ADD COLUMN IF NOT EXISTS amount_atoms VARCHAR;",
+              error)) {
+        result.error = error;
+        return result;
+    }
+
     duckdb::Appender blocks(con, "analytics", "chain_blocks");
     duckdb::Appender txs(con, "analytics", "txs");
     duckdb::Appender inputs(con, "analytics", "tx_inputs");
@@ -721,18 +736,21 @@ IndexResult buildIndex(const IndexOptions& options) {
 
             int txCount = 0;
             std::string txid = hash;
-            int inCount = static_cast<int>(block->getInputCoinProofs().size());
             int outCount = static_cast<int>(block->getOutputCoins().size());
+            std::vector<std::shared_ptr<org::minima::objects::Coin>> txInputs;
             try {
                 const auto& tx = pow.getTransaction();
                 if (!tx.isEmpty()) {
                     txCount = 1;
                     const std::string id = tx.getTransactionID().to0xString();
                     if (!id.empty()) txid = id;
+                    txInputs = tx.getAllInputs();
                 }
             } catch (...) {
                 txCount = 0;
             }
+            int inCount = static_cast<int>(txInputs.empty()
+                ? block->getInputCoinProofs().size() : txInputs.size());
 
             blocks.AppendRow(
                 static_cast<std::int64_t>(height), hash.c_str(), prev.c_str(), static_cast<std::int64_t>(timeMs),
@@ -744,15 +762,26 @@ IndexResult buildIndex(const IndexOptions& options) {
                           static_cast<std::int64_t>(raw.size()), duckdb::Value(), duckdb::Value());
 
             int inputIndex = 0;
-            for (const auto& proof : block->getInputCoinProofs()) {
-                const auto& coin = proof.getCoin();
+            std::unordered_set<std::string> seenInputs;
+            auto appendInput = [&](const org::minima::objects::Coin& coin) {
                 const std::string cid = coin.getCoinID().to0xString();
+                if (!seenInputs.insert(cid).second) return;
                 const std::string cad = addr(coin);
                 const std::string ctk = token(coin);
                 inputs.AppendRow(txid.c_str(), inputIndex++, cid.c_str(),
                                  cad.c_str(), ctk.c_str(),
                                  static_cast<std::int64_t>(coin.getAmount().getAsLong()),
-                                 static_cast<std::int64_t>(createdHeight(coin, height)));
+                                 static_cast<std::int64_t>(createdHeight(coin, height)),
+                                 amountAtomsString(coin.getAmount()).c_str());
+            };
+            if (!txInputs.empty()) {
+                for (const auto& coin : txInputs) {
+                    if (coin) appendInput(*coin);
+                }
+            } else {
+                for (const auto& proof : block->getInputCoinProofs()) {
+                    appendInput(proof.getCoin());
+                }
             }
 
             int outputIndex = 0;
@@ -764,7 +793,8 @@ IndexResult buildIndex(const IndexOptions& options) {
                 outputs.AppendRow(txid.c_str(), outputIndex++, coinId.c_str(), cad.c_str(), ctk.c_str(),
                                   static_cast<std::int64_t>(coin.getAmount().getAsLong()),
                                   duckdb::Value(), duckdb::Value(), static_cast<std::int64_t>(created),
-                                  duckdb::Value(), duckdb::Value());
+                                  duckdb::Value(), duckdb::Value(),
+                                  amountAtomsString(coin.getAmount()).c_str());
                 coins.AppendRow(coinId.c_str(), cad.c_str(), ctk.c_str(),
                                 static_cast<std::int64_t>(coin.getAmount().getAsLong()),
                                 static_cast<std::int64_t>(created), static_cast<std::int64_t>(timeMs), duckdb::Value(), duckdb::Value(),

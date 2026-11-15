@@ -290,52 +290,73 @@ std::string addressJson(const std::string& indexPath, const std::string& address
     const std::string tipHeight =
         "(SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks)";
 
-    // The MegaMMR is the authoritative unspent set, and amount_atoms is the
-    // exact 10^-44 value. tx_outputs cannot be used for balances: it only sees
-    // an input when the block archived the coin proofs (it reports ~193k
-    // phantom unspent coins), and its amount_raw is the whole-coin integer
-    // part, so 0.8 MIN becomes 0 and every sub-1 token balance becomes 0.
-    auto mmr = con.Query(
-        "SELECT m.token_id,m.amount_atoms,t.name,t.decimals,t.is_nft,t.image_url "
-        "FROM analytics.mmr_coins m "
-        "LEFT JOIN analytics.token_metadata t ON t.token_id=m.token_id "
-        "WHERE m.address=" + sqlLit(address) +
-        (token.empty() ? std::string() : " AND m.token_id=" + sqlLit(token)) + ";");
-
+    // The archive index is the current source: tx_outputs carries every
+    // output, tx_inputs now records the transaction-body spends, and
+    // amount_atoms keeps the exact 44-decimal value. The MegaMMR tables are a
+    // fallback for indexes built before that change (or a corrupt MMR).
     std::map<std::string, AddressHolding> holdings;
     bool haveAtoms = false;
-    if (mmr && !mmr->HasError()) {
-        for (std::size_t i = 0; i < mmr->RowCount(); ++i) {
-            if (mmr->GetValue(1, i).IsNull()) continue; // pre-refresh row
-            const std::string id = mmr->GetValue(0, i).IsNull()
-                ? std::string("0x00") : mmr->GetValue(0, i).ToString();
+    auto collect = [&](duckdb::MaterializedQueryResult& res) {
+        for (std::size_t i = 0; i < res.RowCount(); ++i) {
+            if (res.GetValue(1, i).IsNull()) continue;
+            const std::string id = res.GetValue(0, i).IsNull()
+                ? std::string("0x00") : res.GetValue(0, i).ToString();
             AddressHolding& h = holdings[id];
             h.token_id = id;
-            h.atoms += boost::multiprecision::cpp_int(mmr->GetValue(1, i).ToString());
+            h.atoms += boost::multiprecision::cpp_int(res.GetValue(1, i).ToString());
             ++h.coin_count;
-            if (!h.has_name && !mmr->GetValue(2, i).IsNull()) {
-                h.name = mmr->GetValue(2, i).ToString();
+            if (!h.has_name && !res.GetValue(2, i).IsNull()) {
+                h.name = res.GetValue(2, i).ToString();
                 h.has_name = true;
             }
-            if (!h.has_decimals && !mmr->GetValue(3, i).IsNull()) {
-                h.decimals = mmr->GetValue(3, i).ToString();
+            if (!h.has_decimals && !res.GetValue(3, i).IsNull()) {
+                h.decimals = res.GetValue(3, i).ToString();
                 h.has_decimals = true;
             }
-            if (!h.has_nft && !mmr->GetValue(4, i).IsNull()) {
-                h.is_nft = mmr->GetValue(4, i).ToString();
+            if (!h.has_nft && !res.GetValue(4, i).IsNull()) {
+                h.is_nft = res.GetValue(4, i).ToString();
                 h.has_nft = true;
             }
-            if (!h.has_image && !mmr->GetValue(5, i).IsNull()) {
-                h.image_url = mmr->GetValue(5, i).ToString();
+            if (!h.has_image && !res.GetValue(5, i).IsNull()) {
+                h.image_url = res.GetValue(5, i).ToString();
                 h.has_image = true;
             }
             haveAtoms = true;
         }
+    };
+
+    auto archive = con.Query(
+        "SELECT o.token_id,o.amount_atoms,t.name,t.decimals,t.is_nft,t.image_url "
+        "FROM analytics.tx_outputs o "
+        "LEFT JOIN analytics.token_metadata t ON t.token_id=o.token_id "
+        "WHERE o.address=" + sqlLit(address) +
+        (token.empty() ? std::string() : " AND o.token_id=" + sqlLit(token)) +
+        " AND NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id);");
+    if (archive && !archive->HasError()) collect(*archive);
+
+    if (!haveAtoms) {
+        auto mmr = con.Query(
+            "SELECT m.token_id,m.amount_atoms,t.name,t.decimals,t.is_nft,t.image_url "
+            "FROM analytics.mmr_coins m "
+            "LEFT JOIN analytics.token_metadata t ON t.token_id=m.token_id "
+            "WHERE m.address=" + sqlLit(address) +
+            (token.empty() ? std::string() : " AND m.token_id=" + sqlLit(token)) + ";");
+        if (mmr && !mmr->HasError()) collect(*mmr);
     }
 
     auto tip = con.Query(tipHeight);
     const std::string height = (tip && !tip->HasError() && tip->RowCount() > 0)
         ? tip->GetValue(0, 0).ToString() : std::string("0");
+
+    // Native MIN is 44-decimal; a token displays in its metadata decimals.
+    auto placesFor = [](const AddressHolding& h) {
+        int places = kAmountDecimals;
+        if (h.token_id != "0x00" && h.has_decimals) {
+            try { places = std::stoi(h.decimals); }
+            catch (...) { places = kAmountDecimals; }
+        }
+        return (places >= 0 && places <= kAmountDecimals) ? places : kAmountDecimals;
+    };
 
     if (!token.empty() && haveAtoms) {
         const AddressHolding& h = holdings.begin()->second;
@@ -343,7 +364,7 @@ std::string addressJson(const std::string& indexPath, const std::string& address
         out << "{\"address\":" << quote(address)
             << ",\"token_id\":" << quote(h.token_id)
             << ",\"balance_raw\":" << quote(h.atoms.convert_to<std::string>())
-            << ",\"balance\":" << quote(formatAtoms(h.atoms))
+            << ",\"balance\":" << quote(formatAtoms(h.atoms, placesFor(h)))
             << ",\"coin_count\":" << h.coin_count
             << ",\"snapshot_height\":" << height
             << ",\"source\":\"megammr\"}";
@@ -379,7 +400,7 @@ std::string addressJson(const std::string& indexPath, const std::string& address
             if (i) out << ",";
             out << "{\"token_id\":" << quote(h.token_id)
                 << ",\"balance_raw\":" << quote(h.atoms.convert_to<std::string>())
-                << ",\"balance\":" << quote(formatAtoms(h.atoms))
+                << ",\"balance\":" << quote(formatAtoms(h.atoms, placesFor(h)))
                 << ",\"coin_count\":" << h.coin_count
                 << ",\"name\":" << (h.has_name ? quote(h.name) : "null")
                 << ",\"decimals\":" << (h.has_decimals ? h.decimals : "null")
@@ -540,36 +561,51 @@ std::string cohortsJson(const std::string& indexPath, bool& found) {
     duckdb::DuckDB db(indexPath);
     duckdb::Connection con(db);
 
-    // Prefer the MegaMMR set: it is the authoritative unspent set, while
-    // holder_cohorts is derived from tx_outputs and includes phantom coins.
-    auto mmr = con.Query(
-        "SELECT CASE "
-        "WHEN balance_raw < 1 THEN '0-1' "
-        "WHEN balance_raw < 10 THEN '1-10' "
-        "WHEN balance_raw < 100 THEN '10-100' "
-        "WHEN balance_raw < 1000 THEN '100-1k' "
-        "WHEN balance_raw < 10000 THEN '1k-10k' "
-        "WHEN balance_raw < 100000 THEN '10k-100k' "
-        "WHEN balance_raw < 1000000 THEN '100k-1m' "
-        "WHEN balance_raw < 10000000 THEN '1m-10m' "
-        "WHEN balance_raw < 100000000 THEN '10m-100m' ELSE '100m+' END AS cohort,"
-        "COUNT(*),SUM(balance_raw) FROM analytics.mmr_address_balances "
-        "GROUP BY 1 ORDER BY MIN(balance_raw);");
-    if (mmr && !mmr->HasError() && mmr->RowCount() > 0) {
-        auto tip = con.Query("SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks;");
-        const std::string height = (tip && !tip->HasError() && tip->RowCount() > 0)
-            ? tip->GetValue(0, 0).ToString() : std::string("0");
+    auto bandCase = [](const std::string& col) {
+        return std::string("CASE WHEN ") + col + " < 1 THEN '0-1' "
+            "WHEN " + col + " < 10 THEN '1-10' "
+            "WHEN " + col + " < 100 THEN '10-100' "
+            "WHEN " + col + " < 1000 THEN '100-1k' "
+            "WHEN " + col + " < 10000 THEN '1k-10k' "
+            "WHEN " + col + " < 100000 THEN '10k-100k' "
+            "WHEN " + col + " < 1000000 THEN '100k-1m' "
+            "WHEN " + col + " < 10000000 THEN '1m-10m' "
+            "WHEN " + col + " < 100000000 THEN '10m-100m' ELSE '100m+' END";
+    };
+    auto emit = [&](duckdb::MaterializedQueryResult& res, const std::string& height,
+                    const char* source) {
         found = true;
         std::ostringstream out;
-        out << "{\"as_of_height\":" << height << ",\"source\":\"megammr\",\"cohorts\":[";
-        for (std::size_t i = 0; i < mmr->RowCount(); ++i) {
+        out << "{\"as_of_height\":" << height << ",\"source\":\"" << source << "\",\"cohorts\":[";
+        for (std::size_t i = 0; i < res.RowCount(); ++i) {
             if (i) out << ",";
-            out << "{\"cohort\":" << quote(mmr->GetValue(0,i).ToString())
-                << ",\"address_count\":" << mmr->GetValue(1,i).ToString()
-                << ",\"balance_raw\":" << mmr->GetValue(2,i).ToString() << "}";
+            out << "{\"cohort\":" << quote(res.GetValue(0,i).ToString())
+                << ",\"address_count\":" << res.GetValue(1,i).ToString()
+                << ",\"balance_raw\":" << res.GetValue(2,i).ToString() << "}";
         }
         out << "]}";
         return out.str();
+    };
+
+    // The archive set is now the current source: tx_inputs records the
+    // transaction-body spends, so address_balances no longer has phantom coins.
+    auto arch = con.Query(
+        "SELECT " + bandCase("balance_raw") + " AS cohort,COUNT(*),SUM(balance_raw) "
+        "FROM analytics.address_balances WHERE snapshot_height="
+        "(SELECT MAX(snapshot_height) FROM analytics.address_balances) "
+        "GROUP BY 1 ORDER BY MIN(balance_raw);");
+    if (arch && !arch->HasError() && arch->RowCount() > 0) {
+        auto tip = con.Query("SELECT MAX(snapshot_height) FROM analytics.address_balances;");
+        return emit(*arch, tip->GetValue(0,0).ToString(), "archive");
+    }
+
+    // Fallback for indexes whose archive pass predates the input fix.
+    auto mmr = con.Query(
+        "SELECT " + bandCase("balance_raw") + " AS cohort,COUNT(*),SUM(balance_raw) "
+        "FROM analytics.mmr_address_balances GROUP BY 1 ORDER BY MIN(balance_raw);");
+    if (mmr && !mmr->HasError() && mmr->RowCount() > 0) {
+        auto tip = con.Query("SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks;");
+        return emit(*mmr, tip->GetValue(0, 0).ToString(), "megammr");
     }
 
     auto res = con.Query("SELECT snapshot_height,cohort,address_count,balance_raw "
