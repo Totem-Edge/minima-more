@@ -187,6 +187,27 @@ bool enrichMmr(duckdb::Connection& con, const IndexOptions& options, std::string
         });
         coins.Close();
 
+        // The rich list and holder cohorts must use the authoritative unspent
+        // set. tx_outputs over-counts (a spend is only visible when the block
+        // archived its coin proofs), which left ~193k phantom coins on the
+        // live host. Keyed by address so the read model can use it directly.
+        if (!exec(con,
+                  "CREATE TABLE IF NOT EXISTS analytics.mmr_address_balances "
+                  "(address VARCHAR PRIMARY KEY, balance_raw HUGEINT NOT NULL, "
+                  "coin_count BIGINT NOT NULL);",
+                  error)) {
+            return false;
+        }
+        if (!exec(con, "DELETE FROM analytics.mmr_address_balances;", error)) return false;
+        if (!exec(con,
+                  "INSERT INTO analytics.mmr_address_balances (address,balance_raw,coin_count) "
+                  "SELECT address, SUM(amount_raw), COUNT(*) FROM analytics.mmr_coins "
+                  "WHERE token_id='0x00' AND address IS NOT NULL AND address <> '' "
+                  "GROUP BY address;",
+                  error)) {
+            return false;
+        }
+
         const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
                               std::chrono::system_clock::now().time_since_epoch()).count();
         std::ostringstream snap;

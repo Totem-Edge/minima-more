@@ -130,6 +130,14 @@ node or run it against a snapshot/clone. Archive-only `-index` passes skip
 `-mmr-enrich` for the same reason, so `mmr_coins` is only as fresh as the last
 quiesced enrichment.
 
+The same enrichment builds `mmr_address_balances`, the per-address native
+balance from the authoritative unspent set. `/v1/cohorts/holder` and the
+holders read model (`server/cluster.py`) use it, so coins the archive index
+never saw spent no longer inflate the rich list or the holder cohorts.
+
+Rich-list and cohort amounts remain in whole MIN (the labels are whole-coin
+bands); the address endpoint is the exact 10^-44 view.
+
 Overrides: `-archivepath`, `-mmrpath`, `-archive`, `-megammr`, `-rebuild`,
 `-indexonly`, `-mmrcoins`.
 

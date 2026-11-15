@@ -539,6 +539,39 @@ std::string cohortsJson(const std::string& indexPath, bool& found) {
     found = false;
     duckdb::DuckDB db(indexPath);
     duckdb::Connection con(db);
+
+    // Prefer the MegaMMR set: it is the authoritative unspent set, while
+    // holder_cohorts is derived from tx_outputs and includes phantom coins.
+    auto mmr = con.Query(
+        "SELECT CASE "
+        "WHEN balance_raw < 1 THEN '0-1' "
+        "WHEN balance_raw < 10 THEN '1-10' "
+        "WHEN balance_raw < 100 THEN '10-100' "
+        "WHEN balance_raw < 1000 THEN '100-1k' "
+        "WHEN balance_raw < 10000 THEN '1k-10k' "
+        "WHEN balance_raw < 100000 THEN '10k-100k' "
+        "WHEN balance_raw < 1000000 THEN '100k-1m' "
+        "WHEN balance_raw < 10000000 THEN '1m-10m' "
+        "WHEN balance_raw < 100000000 THEN '10m-100m' ELSE '100m+' END AS cohort,"
+        "COUNT(*),SUM(balance_raw) FROM analytics.mmr_address_balances "
+        "GROUP BY 1 ORDER BY MIN(balance_raw);");
+    if (mmr && !mmr->HasError() && mmr->RowCount() > 0) {
+        auto tip = con.Query("SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks;");
+        const std::string height = (tip && !tip->HasError() && tip->RowCount() > 0)
+            ? tip->GetValue(0, 0).ToString() : std::string("0");
+        found = true;
+        std::ostringstream out;
+        out << "{\"as_of_height\":" << height << ",\"source\":\"megammr\",\"cohorts\":[";
+        for (std::size_t i = 0; i < mmr->RowCount(); ++i) {
+            if (i) out << ",";
+            out << "{\"cohort\":" << quote(mmr->GetValue(0,i).ToString())
+                << ",\"address_count\":" << mmr->GetValue(1,i).ToString()
+                << ",\"balance_raw\":" << mmr->GetValue(2,i).ToString() << "}";
+        }
+        out << "]}";
+        return out.str();
+    }
+
     auto res = con.Query("SELECT snapshot_height,cohort,address_count,balance_raw "
                          "FROM analytics.holder_cohorts WHERE snapshot_height="
                          "(SELECT MAX(snapshot_height) FROM analytics.holder_cohorts) ORDER BY cohort;");
