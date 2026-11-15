@@ -678,14 +678,19 @@ bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW) {
 
 // Overload 2: FIX: zTxPoW is NON-CONST
 bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW, bool zLog) {
-    if (!checkMMR_impl(zTipMMR, zTxPoW.getWitness(), zLog)) {
+    // A block's own coin proofs are created one block ahead of the parent MMR
+    // (the TxBlock child-MMR constructor advances the block time), so a block
+    // may prove against the parent's current peaks rather than a time-valid
+    // parent entry. Transactions stay strict: their coins live in the parent.
+    const bool blockOffset = zTxPoW.isBlock();
+    if (!checkMMR_impl(zTipMMR, zTxPoW.getWitness(), zLog, blockOffset)) {
         return false;
     }
-    return checkMMR_impl(zTipMMR, zTxPoW.getBurnWitness(), zLog);
+    return checkMMR_impl(zTipMMR, zTxPoW.getBurnWitness(), zLog, blockOffset);
 }
 
 // FIX: zWitness is NON-CONST
-bool TxPoWChecker::checkMMR_impl(MMR& zTipMMR, Witness& zWitness, bool zLog) {
+bool TxPoWChecker::checkMMR_impl(MMR& zTipMMR, Witness& zWitness, bool zLog, bool zAllowBlockProofOffset) {
     auto& mmrproofs = zWitness.getAllCoinProofs();
     int proofs = static_cast<int>(mmrproofs.size());
 
@@ -699,6 +704,11 @@ bool TxPoWChecker::checkMMR_impl(MMR& zTipMMR, Witness& zWitness, bool zLog) {
             cproof.getCoin().getMMREntryNumber(),
             *mmrcoin,
             cproof.getMMRProof());
+        if (!validmmr && zAllowBlockProofOffset) {
+            // Same rule blockStateMatches applies on the IBD path: verify the
+            // proof against the parent's peaks when it is one block ahead.
+            validmmr = zTipMMR.checkProof(*mmrcoin, cproof.getMMRProof());
+        }
 
         if (!validmmr) {
             if (zLog) {
