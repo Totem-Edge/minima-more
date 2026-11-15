@@ -107,8 +107,31 @@ Use `-mmrstore none` to load coins into memory; otherwise point at
 the archive tip, `matched=false` means “not comparable at this height,” not
 corruption.
 
+Exact amounts and address balances:
+
+`MiniNumber::getAsLong()` returns only the integer part of a 44-decimal value,
+so it cannot represent 0.8 MIN. `mmr_coins.amount_atoms` stores the exact
+10^-44 value; `/v1/addresses/<0x|Mx>` reads the MegaMMR unspent set and returns
+`balance` (decimal), `balance_raw` (exact atoms), `coin_count` and a `tokens[]`
+list with name/decimals/is_nft/image_url.
+
+Refresh those tables without replaying the archive:
+
+```bash
+systemctl stop minima-node minima-analytics
+./build-analytics/analytics/minima-analytics -data ~/.minima \
+  -indexdb ~/.minima/analytics.duckdb -mmrcoins
+systemctl start minima-node minima-analytics
+```
+
+`-mmrcoins` rewrites `mmr_coins`/`mmr_snapshots`/`consistency_checks` and exits.
+It must not race the node for `megammr.mmr`/`coins.lmdb` (LMDB), so quiesce the
+node or run it against a snapshot/clone. Archive-only `-index` passes skip
+`-mmr-enrich` for the same reason, so `mmr_coins` is only as fresh as the last
+quiesced enrichment.
+
 Overrides: `-archivepath`, `-mmrpath`, `-archive`, `-megammr`, `-rebuild`,
-`-indexonly`.
+`-indexonly`, `-mmrcoins`.
 
 BI templates: `integrations/evidence/` (history, MIT) and
 `integrations/rill/` (live/ops, Apache-2.0), sharing
