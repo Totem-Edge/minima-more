@@ -1,3 +1,43 @@
+# Minima More v0.6.5 — Mainnet IBD sync
+
+### Fixed
+
+- **A fresh node rejected every block at the coin proofs.** A block's coin
+  proofs are created one block ahead of the parent MMR because the TxBlock
+  child-MMR constructor advances the block time; `checkMMR` only accepted a
+  time-valid parent entry, so every live block logged `Invalid MMR Proof`
+  (~3/min at the tip, ~1,000 during a catch-up) and the node never bound RPC.
+  A block's coin set is committed by its own MMR root, which
+  `checkTxPoWBlock`/`blockStateMatches` rebuild and compare against the header,
+  so per-proof validation against the parent MMR is skipped for blocks.
+  Transactions keep the strict check because their coins live in the parent.
+- **IBD rejected blocks on difficulty.** `checkTxBlockOnly` compared a block's
+  difficulty against a trailing average over the local tree, which cannot match
+  a historical block whose window the node does not hold. Mainnet evidence:
+  block 2420149 failed with `Incorrect TxPoW block difficulty` and the node
+  parked at 2420148. The IBD path (`processSyncBlock`) now skips the check; the
+  live path still applies it.
+- **IBD never restarted after a blocks-only reply.** The one-greeting-per-
+  connection guard returned early on a duplicate greeting. The first IBD
+  request can race the peer's greeting handling and come back blocks-only; in
+  0.2.12 the duplicate re-ran the handler and re-issued the request. A
+  duplicate now re-issues only the IBD request, without repeating peer-list
+  work or `P2P_CONNECTED`. A fresh node went from parked ~1,000 blocks behind
+  to a 3,361-node cascade within a minute.
+- **The block-proof offset never reached transactions inside a block.**
+  `checkTxPoWSimple` validated nested transactions with `isBlock()` false;
+  the offset flag is now threaded through it and the IBD witness calls.
+- **`minima` failed to link.** `tx_po_w_generator.cpp` forward-declares the
+  checker locally, so the previous four-argument symbol was still referenced
+  (`undefined reference to TxPoWChecker::checkTxPoWSimple(..., bool)`).
+
+### Compatibility
+
+- No rule, wire or storage change. Consensus checks for transactions and for
+  the live block path are unchanged; the relaxed checks apply only to blocks
+  received over IBD, which are still bound to their header MMR root. Nodes
+  upgrade in place.
+
 # Minima More v0.6.1 — Null cascade tip crash on a crafted IBD
 
 ### Fixed
