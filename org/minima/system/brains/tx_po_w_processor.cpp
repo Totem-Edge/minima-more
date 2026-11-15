@@ -719,7 +719,7 @@ bool TxPoWProcessor::processSyncBlock(const std::shared_ptr<TxBlock>& zTxBlock) 
                                   + " " + zTxBlock->getTxPoW().getTxPoWID());
                 return false;
             }
-            if (!TxPoWChecker::checkTxBlockOnly(parentnode.get(), *zTxBlock)) {
+            if (!TxPoWChecker::checkTxBlockOnly(parentnode.get(), *zTxBlock, false)) {
                 MinimaLogger::log("[!] SyncBlock failed block validation @ "
                                   + zTxBlock->getTxPoW().getBlockNumber().toString()
                                   + " " + zTxBlock->getTxPoW().getTxPoWID());

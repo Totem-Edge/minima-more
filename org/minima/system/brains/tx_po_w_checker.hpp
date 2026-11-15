@@ -40,7 +40,8 @@ public:
      * checkTxBlockOnly - This function also calls helpers that modify, so zTxBlock must be NON-CONST
      */
     static bool checkTxBlockOnly(org::minima::database::txpowtree::TxPoWTreeNode* zParentNode,
-                                 org::minima::objects::TxBlock& zTxBlock); // NOT CONST
+                                 org::minima::objects::TxBlock& zTxBlock, // NOT CONST
+                                 bool zCheckDifficulty = true);
 
     // Basic TxPoW transaction checks (main + burn)
     static bool checkTxPoWBasic(org::minima::objects::TxPoW& zTxPoW);

@@ -276,7 +276,7 @@ bool TxPoWChecker::checkTxPoWBlock(TxPoWTreeNode* zParentNode,
 }
 
 // zTxBlock is NON-CONST
-bool TxPoWChecker::checkTxBlockOnly(TxPoWTreeNode* zParentNode, TxBlock& zTxBlock) {
+bool TxPoWChecker::checkTxBlockOnly(TxPoWTreeNode* zParentNode, TxBlock& zTxBlock, bool zCheckDifficulty) {
     if (!zParentNode) {
         MinimaLogger::log("checkTxBlockOnly with NULL parent node");
         return false;
@@ -321,11 +321,17 @@ bool TxPoWChecker::checkTxBlockOnly(TxPoWTreeNode* zParentNode, TxBlock& zTxBloc
             return false;
         }
 
-        // Block difficulty
-        MiniData blockdifficulty = org::minima::system::brains::TxPoWGenerator::getBlockDifficulty(zParentNode->shared_from_this());
-        if (!txpow.getBlockDifficulty().isEqual(blockdifficulty)) {
-            MinimaLogger::log("Incorrect TxPoW block difficulty @ " + txpow.getBlockNumber().toString() + " " + txpow.getTxPoWID());
-            return false;
+        // Block difficulty. The expected value is a trailing average over the
+        // local tree, so it is only meaningful when that window is the one the
+        // block was mined against. The IBD path skips it: 0.2.12 never applied
+        // it to historical blocks, and doing so rejects valid blocks at the
+        // first height whose window the node does not hold.
+        if (zCheckDifficulty) {
+            MiniData blockdifficulty = org::minima::system::brains::TxPoWGenerator::getBlockDifficulty(zParentNode->shared_from_this());
+            if (!txpow.getBlockDifficulty().isEqual(blockdifficulty)) {
+                MinimaLogger::log("Incorrect TxPoW block difficulty @ " + txpow.getBlockNumber().toString() + " " + txpow.getTxPoWID());
+                return false;
+            }
         }
 
         // Magic check
