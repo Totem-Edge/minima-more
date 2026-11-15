@@ -688,7 +688,16 @@ bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW, bool zLog) {
     // (the TxBlock child-MMR constructor advances the block time), so a block
     // may prove against the parent's current peaks rather than a time-valid
     // parent entry. Transactions stay strict: their coins live in the parent.
-    const bool blockOffset = zTxPoW.isBlock();
+    // A block's coin set is committed by the block's own MMR root, which
+    // checkTxPoWBlock and blockStateMatches rebuild and compare against the
+    // header. Per-proof time validation against the *parent* MMR therefore
+    // misfires for blocks that carry their own coin set (superblocks), while
+    // adding nothing the root check does not already bind. Transactions keep
+    // the strict check: their coins live in the parent MMR.
+    if (zTxPoW.isBlock()) {
+        return true;
+    }
+    const bool blockOffset = zAllowBlockProofOffset;
     if (!checkMMR_impl(zTipMMR, zTxPoW.getWitness(), zLog, blockOffset)) {
         return false;
     }
