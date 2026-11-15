@@ -91,7 +91,8 @@ private:
     // FIX: Must be NON-CONST
     static bool checkMMR_impl(org::minima::objects::mmr::MMR& zTipMMR,
                               org::minima::objects::Witness& zWitness, // NOT CONST
-                              bool zLog);
+                              bool zLog,
+                              bool zAllowBlockProofOffset = false);
 };
 
 } // namespace brains
