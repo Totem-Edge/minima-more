@@ -138,6 +138,14 @@ never saw spent no longer inflate the rich list or the holder cohorts.
 Rich-list and cohort amounts remain in whole MIN (the labels are whole-coin
 bands); the address endpoint is the exact 10^-44 view.
 
+Multi-transaction blocks (`txnlist`) carry transaction IDs only; the bodies live
+in the node's TxPoW DB (`txpowsql/txpow`), not the archive. The indexer reads the
+retained bodies (`-txpowdb`, default `<data>/1.0/databases/txpowsql/txpow`) and
+indexes their inputs, so new multi-transaction spends are visible without the
+MMR. The node prunes old bodies; the index logs
+`txpowdb: txn bodies=… missing=…` and skips missing ones rather than guessing.
+For pruned history the MegaMMR/coin store remains the complete spent-set source.
+
 Overrides: `-archivepath`, `-mmrpath`, `-archive`, `-megammr`, `-rebuild`,
 `-indexonly`, `-mmrcoins`.
 

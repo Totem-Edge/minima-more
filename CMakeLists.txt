@@ -642,6 +642,20 @@ if(APPLE)
 endif()
 add_test(NAME test_amount_atoms COMMAND test_amount_atoms)
 
+# TxPoW DB bodies: decode a retained txnlist transaction body into its inputs.
+add_executable(test_txpow_body
+    EXCLUDE_FROM_ALL
+    tests/test_txpow_body.cpp
+)
+target_compile_features(test_txpow_body PRIVATE cxx_std_17)
+target_include_directories(test_txpow_body PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(test_txpow_body PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(test_txpow_body PRIVATE minima_core OpenSSL::Crypto Threads::Threads)
+add_test(NAME test_txpow_body
+         COMMAND test_txpow_body ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/txpow_txn.hex)
+
 # signtoken verification: tokencreate signs the create-output coin ID, not the
 # token descriptor's 0x00 placeholder.
 add_executable(test_signtoken_coinid

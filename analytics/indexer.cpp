@@ -6,7 +6,10 @@
 
 #include <duckdb.hpp>
 
+#include <sqlite3.h>
+
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -136,6 +139,71 @@ long long createdHeight(const org::minima::objects::Coin& coin, long long fallba
     const long long v = coin.getBlockCreated().getAsLong();
     return v > 0 ? v : fallback;
 }
+
+// The archive stores a block's txnlist as transaction IDs only. The bodies
+// live in the node's TxPoW DB (txpowsql/txpow), which the node prunes; this
+// reader returns each retained body so txnlist inputs can be indexed. Missing
+// bodies are counted, not invented.
+class TxPoWBodyStore {
+public:
+    ~TxPoWBodyStore() { close(); }
+
+    bool open(const std::string& path) {
+        close();
+        if (path.empty()) return false;
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec)) return false;
+        if (sqlite3_open_v2(path.c_str(), &mDb, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+            close();
+            return false;
+        }
+        sqlite3_busy_timeout(mDb, 2000);
+        if (sqlite3_prepare_v2(mDb, "SELECT txpowdata FROM txpow WHERE txpowid=? LIMIT 1;",
+                               -1, &mStmt, nullptr) != SQLITE_OK) {
+            close();
+            return false;
+        }
+        return true;
+    }
+
+    bool ok() const { return mStmt != nullptr; }
+
+    std::vector<std::uint8_t> get(const std::string& txid) {
+        std::vector<std::uint8_t> out;
+        if (!mStmt) return out;
+        sqlite3_reset(mStmt);
+        sqlite3_clear_bindings(mStmt);
+        sqlite3_bind_text(mStmt, 1, txid.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(mStmt) == SQLITE_ROW) {
+            const void* blob = sqlite3_column_blob(mStmt, 0);
+            const int n = sqlite3_column_bytes(mStmt, 0);
+            if (blob && n > 0) {
+                const auto* p = static_cast<const std::uint8_t*>(blob);
+                out.assign(p, p + n);
+            }
+        }
+        sqlite3_reset(mStmt);
+        return out;
+    }
+
+    long long hits = 0;
+    long long misses = 0;
+
+private:
+    void close() {
+        if (mStmt) {
+            sqlite3_finalize(mStmt);
+            mStmt = nullptr;
+        }
+        if (mDb) {
+            sqlite3_close(mDb);
+            mDb = nullptr;
+        }
+    }
+
+    sqlite3* mDb = nullptr;
+    sqlite3_stmt* mStmt = nullptr;
+};
 
 } // namespace
 
@@ -714,6 +782,16 @@ IndexResult buildIndex(const IndexOptions& options) {
     duckdb::Appender magicChanges(con, "analytics", "magic_changes");
     MagicState magicState;
 
+    TxPoWBodyStore txstore;
+    if (!options.txpowDbPath.empty()) {
+        if (txstore.open(options.txpowDbPath)) {
+            std::cerr << "txpowdb: " << options.txpowDbPath << "\n";
+        } else {
+            std::cerr << "txpowdb: unavailable (" << options.txpowDbPath
+                      << "); txnlist transaction bodies skipped\n";
+        }
+    }
+
     long long processed = 0;
     long long lastIndexedHeight = lastHeight;
     std::string lastHash;
@@ -765,12 +843,13 @@ IndexResult buildIndex(const IndexOptions& options) {
 
             int inputIndex = 0;
             std::unordered_set<std::string> seenInputs;
-            auto appendInput = [&](const org::minima::objects::Coin& coin) {
+            auto appendInput = [&](const std::string& sourceTxid, int index,
+                                   const org::minima::objects::Coin& coin) {
                 const std::string cid = coin.getCoinID().to0xString();
                 if (!seenInputs.insert(cid).second) return;
                 const std::string cad = addr(coin);
                 const std::string ctk = token(coin);
-                inputs.AppendRow(txid.c_str(), inputIndex++, cid.c_str(),
+                inputs.AppendRow(sourceTxid.c_str(), index, cid.c_str(),
                                  cad.c_str(), ctk.c_str(),
                                  static_cast<std::int64_t>(coin.getAmount().getAsLong()),
                                  static_cast<std::int64_t>(createdHeight(coin, height)),
@@ -778,11 +857,37 @@ IndexResult buildIndex(const IndexOptions& options) {
             };
             if (!txInputs.empty()) {
                 for (const auto& coin : txInputs) {
-                    if (coin) appendInput(*coin);
+                    if (coin) appendInput(txid, inputIndex++, *coin);
                 }
             } else {
                 for (const auto& proof : block->getInputCoinProofs()) {
-                    appendInput(proof.getCoin());
+                    appendInput(txid, inputIndex++, proof.getCoin());
+                }
+            }
+
+            // A block's txnlist is transaction IDs only; the bodies live in
+            // the node's TxPoW DB. Index the retained ones so multi-transaction
+            // spends are not invisible to the UTXO/address tables. Bodies the
+            // node has pruned are counted as missing, never guessed.
+            for (const auto& rawTxid : pow.getTransactions()) {
+                std::string listTxid = rawTxid;
+                for (char& c : listTxid) {
+                    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                }
+                std::vector<std::uint8_t> blob = txstore.get(listTxid);
+                if (blob.empty() && listTxid != rawTxid) blob = txstore.get(rawTxid);
+                if (blob.empty()) {
+                    ++txstore.misses;
+                    continue;
+                }
+                ++txstore.hits;
+                auto listPow = org::minima::objects::TxPoW::convertMiniDataVersion(
+                    org::minima::objects::base::MiniData(blob));
+                if (!listPow) continue;
+                const auto& listTx = listPow->getTransaction();
+                int listIndex = 0;
+                for (const auto& coin : listTx.getAllInputs()) {
+                    if (coin) appendInput(listTxid, listIndex++, *coin);
                 }
             }
 
@@ -818,6 +923,11 @@ IndexResult buildIndex(const IndexOptions& options) {
     coins.Close();
     magicSnapshots.Close();
     magicChanges.Close();
+
+    if (txstore.ok()) {
+        std::cerr << "txpowdb: txn bodies=" << txstore.hits
+                  << " missing=" << txstore.misses << "\n";
+    }
 
     if (!ok) {
         result.error = error;

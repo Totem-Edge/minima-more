@@ -48,6 +48,7 @@ void printHelp() {
         << "  -mmr-enrich      Load MegaMMR and write root/consistency snapshots\n"
         << "  -mmrcoins        Refresh MegaMMR coins (exact amounts) and exit\n"
         << "  -mmrstore DIR    Coin LMDB store (default <data>/1.0/databases/coins.lmdb)\n"
+        << "  -txpowdb FILE    TxPoW DB for txnlist bodies (default <data>/1.0/databases/txpowsql/txpow)\n"
         << "  -knownscripts F  CSV of known script labels (default analytics/known_scripts.csv)\n"
         << "  -backup DIR      Export a portable Parquet backup and exit\n"
         << "  -restore DIR     Import a backup into a new -indexdb, then continue\n"
@@ -76,6 +77,7 @@ int main(int argc, char** argv) {
     bool mmrCoinsOnly = false;
     bool mmrStoreSpecified = false;
     std::string mmrStorePath;
+    std::string txpowDbPath;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -162,6 +164,11 @@ int main(int argc, char** argv) {
                 return 2;
             }
             if (mmrStorePath == "none") mmrStorePath.clear();
+        } else if (arg == "-txpowdb") {
+            if (!next(txpowDbPath)) {
+                std::cerr << "-txpowdb requires a value\n";
+                return 2;
+            }
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
             printHelp();
@@ -188,6 +195,12 @@ int main(int argc, char** argv) {
         std::error_code ec;
         mmrStorePath = std::filesystem::exists(a, ec) ? a :
                        (std::filesystem::exists(b, ec) ? b : "");
+    }
+    if (txpowDbPath.empty()) {
+        txpowDbPath = firstExisting(opt.dataDir, {
+            "/1.0/databases/txpowsql/txpow",
+            "/databases/txpowsql/txpow"
+        });
     }
     if (mmrCoinsOnly) {
         minima::analytics::IndexOptions iopt;
@@ -244,6 +257,7 @@ int main(int argc, char** argv) {
         iopt.schemaPath = MINIMA_ANALYTICS_SCHEMA;
         iopt.mmrPath = opt.mmrPath;
         iopt.mmrStorePath = mmrStorePath;
+        iopt.txpowDbPath = txpowDbPath;
         iopt.knownScriptsPath = knownScriptsPath;
         iopt.rawPath = rawPath;
         iopt.enrichMmr = enrichMmr || opt.forceMmr;
