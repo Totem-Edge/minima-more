@@ -347,7 +347,8 @@ CREATE TABLE IF NOT EXISTS mmr_coins (
     address        VARCHAR,
     token_id       VARCHAR,
     amount_raw     HUGEINT NOT NULL,
-    created_height BIGINT
+    created_height BIGINT,
+    amount_atoms   VARCHAR
 );
 
 CREATE TABLE IF NOT EXISTS consistency_checks (
@@ -424,6 +425,7 @@ CREATE INDEX IF NOT EXISTS idx_outputs_spent     ON tx_outputs(spent_height);
 CREATE INDEX IF NOT EXISTS idx_coins_address     ON coins(address);
 CREATE INDEX IF NOT EXISTS idx_coins_token       ON coins(token_id);
 CREATE INDEX IF NOT EXISTS idx_coins_spent       ON coins(spent_height);
+CREATE INDEX IF NOT EXISTS idx_mmr_coins_address ON mmr_coins(address);
 CREATE INDEX IF NOT EXISTS idx_metric_series     ON metric_series(metric, granularity, bucket_start_ms);
 
 -- ---------------------------------------------------------------------------

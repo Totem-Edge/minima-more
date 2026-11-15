@@ -1,5 +1,6 @@
 #include "indexer.hpp"
 
+#include "amount.hpp"
 #include "archive_reader.hpp"
 #include "org/minima/database/archive/raw_archive_input.hpp"
 
@@ -158,6 +159,15 @@ bool enrichMmr(duckdb::Connection& con, const IndexOptions& options, std::string
         long long nativeCount = 0;
         long long totalRaw = 0;
 
+        // amount_raw is the whole-coin integer part (getAsLong), kept for the
+        // long-standing metrics. amount_atoms is the exact 10^-44 value and is
+        // what balances must use: a 0.8 MIN coin has amount_raw 0.
+        if (!exec(con,
+                  "ALTER TABLE analytics.mmr_coins "
+                  "ADD COLUMN IF NOT EXISTS amount_atoms VARCHAR;",
+                  error)) {
+            return false;
+        }
         if (!exec(con, "DELETE FROM analytics.mmr_coins;", error)) return false;
         duckdb::Appender coins(con, "analytics", "mmr_coins");
         mega.forEachCoin([&](const obj::Coin& coin) {
@@ -165,13 +175,15 @@ bool enrichMmr(duckdb::Connection& con, const IndexOptions& options, std::string
             const std::string addr = coin.getAddress().to0xString();
             const std::string token = coin.getTokenID().to0xString();
             const long long amount = coin.getAmount().getAsLong();
+            const std::string atoms = amountAtomsString(coin.getAmount());
             if (token == "0x00") {
                 ++nativeCount;
                 totalRaw += amount;
             }
             coins.AppendRow(cid.c_str(), addr.c_str(), token.c_str(),
                             static_cast<std::int64_t>(amount),
-                            static_cast<std::int64_t>(coin.getBlockCreated().getAsLong()));
+                            static_cast<std::int64_t>(coin.getBlockCreated().getAsLong()),
+                            atoms.c_str());
         });
         coins.Close();
 
@@ -228,6 +240,38 @@ bool enrichMmr(duckdb::Connection& con, const IndexOptions& options, std::string
         return false;
     }
 }
+
+// Refresh only the MegaMMR coin tables (root, exact coin set, consistency
+// snapshot) without replaying the archive. The MMR is the authoritative UTXO
+// set, so this is enough to repair address balances and token holdings after
+// an amount-precision fix, without a multi-hour re-index.
+bool refreshMmrCoins(const IndexOptions& options, std::string& error) {
+    std::error_code ec;
+    if (options.indexPath.empty() || !std::filesystem::exists(options.indexPath, ec) || ec) {
+        error = "index not found: " + options.indexPath;
+        return false;
+    }
+    if (options.mmrPath.empty() || !std::filesystem::exists(options.mmrPath, ec) || ec) {
+        error = "megammr not found: " + options.mmrPath;
+        return false;
+    }
+    duckdb::DuckDB db(options.indexPath);
+    duckdb::Connection con(db);
+    auto table = con.Query(
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_schema='analytics' AND table_name='mmr_coins';");
+    if (!table || table->HasError() || table->RowCount() == 0 ||
+        table->GetValue(0, 0).GetValue<std::int64_t>() == 0) {
+        error = "analytics.mmr_coins is missing; run a full -index first";
+        return false;
+    }
+    if (!enrichMmr(con, options, error)) return false;
+    return exec(con,
+                "CREATE INDEX IF NOT EXISTS idx_mmr_coins_address "
+                "ON analytics.mmr_coins(address);",
+                error);
+}
+
 
 bool forEachBlock(const IndexOptions& options,
                    const std::function<bool(long long, org::minima::objects::TxBlock&)>& fn,

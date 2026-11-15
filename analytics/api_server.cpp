@@ -1,5 +1,6 @@
 #include "api_server.hpp"
 
+#include "amount.hpp"
 #include "archive_reader.hpp"
 #include "metric_catalog.hpp"
 
@@ -15,6 +16,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <algorithm>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -22,6 +24,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -260,11 +263,137 @@ std::string txJson(const std::string& indexPath, const std::string& txid, bool& 
     return full.str();
 }
 
+namespace {
+
+struct AddressHolding {
+    std::string token_id;
+    boost::multiprecision::cpp_int atoms{0};
+    long long coin_count = 0;
+    bool has_name = false;
+    std::string name;
+    bool has_decimals = false;
+    std::string decimals;
+    bool has_nft = false;
+    std::string is_nft;
+    bool has_image = false;
+    std::string image_url;
+};
+
+} // namespace
+
 std::string addressJson(const std::string& indexPath, const std::string& address,
                         const std::string& token, const std::string& day, bool& found) {
     found = false;
     duckdb::DuckDB db(indexPath);
     duckdb::Connection con(db);
+
+    const std::string tipHeight =
+        "(SELECT COALESCE(MAX(height),0) FROM analytics.chain_blocks)";
+
+    // The MegaMMR is the authoritative unspent set, and amount_atoms is the
+    // exact 10^-44 value. tx_outputs cannot be used for balances: it only sees
+    // an input when the block archived the coin proofs (it reports ~193k
+    // phantom unspent coins), and its amount_raw is the whole-coin integer
+    // part, so 0.8 MIN becomes 0 and every sub-1 token balance becomes 0.
+    auto mmr = con.Query(
+        "SELECT m.token_id,m.amount_atoms,t.name,t.decimals,t.is_nft,t.image_url "
+        "FROM analytics.mmr_coins m "
+        "LEFT JOIN analytics.token_metadata t ON t.token_id=m.token_id "
+        "WHERE m.address=" + sqlLit(address) +
+        (token.empty() ? std::string() : " AND m.token_id=" + sqlLit(token)) + ";");
+
+    std::map<std::string, AddressHolding> holdings;
+    bool haveAtoms = false;
+    if (mmr && !mmr->HasError()) {
+        for (std::size_t i = 0; i < mmr->RowCount(); ++i) {
+            if (mmr->GetValue(1, i).IsNull()) continue; // pre-refresh row
+            const std::string id = mmr->GetValue(0, i).IsNull()
+                ? std::string("0x00") : mmr->GetValue(0, i).ToString();
+            AddressHolding& h = holdings[id];
+            h.token_id = id;
+            h.atoms += boost::multiprecision::cpp_int(mmr->GetValue(1, i).ToString());
+            ++h.coin_count;
+            if (!h.has_name && !mmr->GetValue(2, i).IsNull()) {
+                h.name = mmr->GetValue(2, i).ToString();
+                h.has_name = true;
+            }
+            if (!h.has_decimals && !mmr->GetValue(3, i).IsNull()) {
+                h.decimals = mmr->GetValue(3, i).ToString();
+                h.has_decimals = true;
+            }
+            if (!h.has_nft && !mmr->GetValue(4, i).IsNull()) {
+                h.is_nft = mmr->GetValue(4, i).ToString();
+                h.has_nft = true;
+            }
+            if (!h.has_image && !mmr->GetValue(5, i).IsNull()) {
+                h.image_url = mmr->GetValue(5, i).ToString();
+                h.has_image = true;
+            }
+            haveAtoms = true;
+        }
+    }
+
+    auto tip = con.Query(tipHeight);
+    const std::string height = (tip && !tip->HasError() && tip->RowCount() > 0)
+        ? tip->GetValue(0, 0).ToString() : std::string("0");
+
+    if (!token.empty() && haveAtoms) {
+        const AddressHolding& h = holdings.begin()->second;
+        std::ostringstream out;
+        out << "{\"address\":" << quote(address)
+            << ",\"token_id\":" << quote(h.token_id)
+            << ",\"balance_raw\":" << quote(h.atoms.convert_to<std::string>())
+            << ",\"balance\":" << quote(formatAtoms(h.atoms))
+            << ",\"coin_count\":" << h.coin_count
+            << ",\"snapshot_height\":" << height
+            << ",\"source\":\"megammr\"}";
+        found = true;
+        return out.str();
+    }
+
+    if (token.empty() && haveAtoms) {
+        const auto native = holdings.find("0x00");
+        const boost::multiprecision::cpp_int nativeAtoms = native == holdings.end()
+            ? boost::multiprecision::cpp_int(0) : native->second.atoms;
+        const long long nativeCoins = native == holdings.end() ? 0 : native->second.coin_count;
+
+        std::vector<const AddressHolding*> tokens;
+        tokens.reserve(holdings.size());
+        for (const auto& entry : holdings) {
+            if (entry.first != "0x00") tokens.push_back(&entry.second);
+        }
+        std::sort(tokens.begin(), tokens.end(),
+                  [](const AddressHolding* a, const AddressHolding* b) {
+                      return a->atoms > b->atoms;
+                  });
+
+        std::ostringstream out;
+        out << "{\"address\":" << quote(address)
+            << ",\"balance_raw\":" << quote(nativeAtoms.convert_to<std::string>())
+            << ",\"balance\":" << quote(formatAtoms(nativeAtoms))
+            << ",\"coin_count\":" << nativeCoins
+            << ",\"snapshot_height\":" << height
+            << ",\"source\":\"megammr\",\"tokens\":[";
+        for (std::size_t i = 0; i < tokens.size(); ++i) {
+            const AddressHolding& h = *tokens[i];
+            if (i) out << ",";
+            out << "{\"token_id\":" << quote(h.token_id)
+                << ",\"balance_raw\":" << quote(h.atoms.convert_to<std::string>())
+                << ",\"balance\":" << quote(formatAtoms(h.atoms))
+                << ",\"coin_count\":" << h.coin_count
+                << ",\"name\":" << (h.has_name ? quote(h.name) : "null")
+                << ",\"decimals\":" << (h.has_decimals ? h.decimals : "null")
+                << ",\"is_nft\":" << (h.has_nft ? h.is_nft : "null")
+                << ",\"image_url\":" << (h.has_image ? quote(h.image_url) : "null")
+                << "}";
+        }
+        out << "]}";
+        found = true;
+        return out.str();
+    }
+
+    // Legacy path: the MegaMMR coin table was not readable or has no row for
+    // this address. Keep the historical response shape from the snapshots.
     if (!token.empty()) {
         std::string dayClause;
         if (!day.empty()) {
@@ -295,7 +424,8 @@ std::string addressJson(const std::string& indexPath, const std::string& address
     out << "{\"address\":" << quote(res->GetValue(1,0).ToString())
         << ",\"balance_raw\":" << res->GetValue(2,0).ToString()
         << ",\"coin_count\":" << res->GetValue(3,0).ToString()
-        << ",\"snapshot_height\":" << res->GetValue(0,0).ToString() << "}";
+        << ",\"snapshot_height\":" << res->GetValue(0,0).ToString()
+        << ",\"source\":\"archive\",\"tokens\":[]}";
     return out.str();
 }
 

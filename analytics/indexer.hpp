@@ -27,4 +27,7 @@ struct IndexResult {
 
 IndexResult buildIndex(const IndexOptions& options);
 
+// Refresh the MegaMMR-derived tables without replaying the archive.
+bool refreshMmrCoins(const IndexOptions& options, std::string& error);
+
 } // namespace minima::analytics

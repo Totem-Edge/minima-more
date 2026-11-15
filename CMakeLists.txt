@@ -628,6 +628,20 @@ if(APPLE)
 endif()
 target_link_libraries(test_serialization PRIVATE OpenSSL::Crypto Threads::Threads)
 
+# Exact raw amounts: 0.8 MIN must not collapse to 0 (MiniNumber::getAsLong).
+add_executable(test_amount_atoms
+    EXCLUDE_FROM_ALL
+    tests/test_amount_atoms.cpp
+    org/minima/objects/base/mini_number.cpp
+    org/minima/utils/streamable.cpp
+)
+target_compile_features(test_amount_atoms PRIVATE cxx_std_17)
+target_include_directories(test_amount_atoms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(test_amount_atoms PRIVATE /opt/homebrew/include)
+endif()
+add_test(NAME test_amount_atoms COMMAND test_amount_atoms)
+
 # signtoken verification: tokencreate signs the create-output coin ID, not the
 # token descriptor's 0x00 placeholder.
 add_executable(test_signtoken_coinid

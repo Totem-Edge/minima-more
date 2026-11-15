@@ -46,6 +46,7 @@ void printHelp() {
         << "  -indexdb FILE    DuckDB index path (default <data>/analytics.duckdb)\n"
         << "  -rebuild         Rebuild the index from scratch\n"
         << "  -mmr-enrich      Load MegaMMR and write root/consistency snapshots\n"
+        << "  -mmrcoins        Refresh MegaMMR coins (exact amounts) and exit\n"
         << "  -mmrstore DIR    Coin LMDB store (default <data>/1.0/databases/coins.lmdb)\n"
         << "  -knownscripts F  CSV of known script labels (default analytics/known_scripts.csv)\n"
         << "  -backup DIR      Export a portable Parquet backup and exit\n"
@@ -72,6 +73,7 @@ int main(int argc, char** argv) {
     bool indexOnly = false;
     bool rebuild = false;
     bool enrichMmr = false;
+    bool mmrCoinsOnly = false;
     bool mmrStoreSpecified = false;
     std::string mmrStorePath;
 
@@ -151,6 +153,8 @@ int main(int argc, char** argv) {
             rebuild = true;
         } else if (arg == "-mmr-enrich") {
             enrichMmr = true;
+        } else if (arg == "-mmrcoins") {
+            mmrCoinsOnly = true;
         } else if (arg == "-mmrstore") {
             mmrStoreSpecified = true;
             if (!next(mmrStorePath)) {
@@ -185,6 +189,20 @@ int main(int argc, char** argv) {
         mmrStorePath = std::filesystem::exists(a, ec) ? a :
                        (std::filesystem::exists(b, ec) ? b : "");
     }
+    if (mmrCoinsOnly) {
+        minima::analytics::IndexOptions iopt;
+        iopt.indexPath = opt.indexPath;
+        iopt.mmrPath = opt.mmrPath;
+        iopt.mmrStorePath = mmrStorePath;
+        std::string error;
+        if (!minima::analytics::refreshMmrCoins(iopt, error)) {
+            std::cerr << "mmr coin refresh failed: " << error << "\n";
+            return 1;
+        }
+        std::cerr << "refreshed MegaMMR coins in " << opt.indexPath << "\n";
+        return 0;
+    }
+
     if (!hashScript.empty()) {
         std::ifstream in(hashScript, std::ios::binary);
         if (!in) {
