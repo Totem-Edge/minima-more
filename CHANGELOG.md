@@ -1,5 +1,31 @@
 # PureMinima C++ — Change Report
 
+## v0.6.3 — Archive-complete spends and exact token display
+
+### Fixed
+
+- **Spends were missing from the archive index.** `tx_inputs` was written from
+  `getInputCoinProofs()`, which archived blocks often omit, so spent outputs
+  looked unspent (the live index reported ~193k phantom coins against the
+  MegaMMR). Inputs are now taken from `Transaction::getAllInputs()`, with the
+  coin proofs kept as a fallback.
+- **Address balances/tokens now come from the archive first.** The unspent set
+  is complete and current, and `tx_outputs.amount_atoms` stores the exact
+  10^-44 value. `/v1/addresses` sums those atoms and returns `balance`,
+  `balance_raw` and `tokens[]`; the MegaMMR path remains as a fallback.
+- **Token display uses the token's decimals.** `formatAtoms` takes the metadata
+  decimals, so 99,000,000,000 porq atoms render as `990` instead of
+  `0.000…00099`.
+- **Holder cohorts prefer the archive set** (now correct) and fall back to the
+  MMR tables.
+
+### Compatibility
+
+- Derived-index change only: no consensus, wire or archive change.
+- A full `-rebuild` is required to backfill `tx_inputs` spends and
+  `amount_atoms` for historical rows; an incremental `-index` only covers new
+  blocks.
+
 ## v0.6.2 — Exact balances, Mx lookups and MMR-backed holder data
 
 ### Fixed
