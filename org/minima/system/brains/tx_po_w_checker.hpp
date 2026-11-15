@@ -40,7 +40,8 @@ public:
      * checkTxBlockOnly - This function also calls helpers that modify, so zTxBlock must be NON-CONST
      */
     static bool checkTxBlockOnly(org::minima::database::txpowtree::TxPoWTreeNode* zParentNode,
-                                 org::minima::objects::TxBlock& zTxBlock); // NOT CONST
+                                 org::minima::objects::TxBlock& zTxBlock, // NOT CONST
+                                 bool zCheckDifficulty = true);
 
     // Basic TxPoW transaction checks (main + burn)
     static bool checkTxPoWBasic(org::minima::objects::TxPoW& zTxPoW);
@@ -50,7 +51,8 @@ public:
     static bool checkTxPoWSimple(org::minima::objects::mmr::MMR& zTipMMR,
                                  org::minima::objects::TxPoW& zTxPoW, // NOT CONST
                                  org::minima::objects::TxPoW& zBlock, // NOT CONST
-                                 bool zLog);
+                                 bool zLog,
+                                 bool zAllowBlockProofOffset = false);
 
     // Scripts checks for a TxPoW (main + burn)
     // FIX: Must be NON-CONST
@@ -63,7 +65,8 @@ public:
                          org::minima::objects::TxPoW& zTxPoW);
     static bool checkMMR(org::minima::objects::mmr::MMR& zTipMMR,
                          org::minima::objects::TxPoW& zTxPoW, // NOT CONST
-                         bool zLog);
+                         bool zLog,
+                         bool zAllowBlockProofOffset = false);
 
     // Signature checks (main + burn)
     static bool checkSignatures(org::minima::objects::TxPoW& zTxPoW);

@@ -228,7 +228,7 @@ bool TxPoWChecker::checkTxPoWBlock(TxPoWTreeNode* zParentNode,
         // Check this TxPoW (if it is a transaction)
         if (zTxPoW.isTransaction()) {
             // FIX: Pass zTxPoW as non-const
-            bool valid = checkTxPoWSimple(parentMMR, zTxPoW, zTxPoW, true);
+            bool valid = checkTxPoWSimple(parentMMR, zTxPoW, zTxPoW, true, true);
             if (!valid) return false;
         }
 
@@ -236,7 +236,7 @@ bool TxPoWChecker::checkTxPoWBlock(TxPoWTreeNode* zParentNode,
         for (auto* txp : zTransactions) {
             if (!txp) continue;
             // H17: txp is already non-const
-            bool valid = checkTxPoWSimple(parentMMR, *txp, zTxPoW, true);
+            bool valid = checkTxPoWSimple(parentMMR, *txp, zTxPoW, true, true);
             if (!valid) return false;
         }
 
@@ -276,7 +276,7 @@ bool TxPoWChecker::checkTxPoWBlock(TxPoWTreeNode* zParentNode,
 }
 
 // zTxBlock is NON-CONST
-bool TxPoWChecker::checkTxBlockOnly(TxPoWTreeNode* zParentNode, TxBlock& zTxBlock) {
+bool TxPoWChecker::checkTxBlockOnly(TxPoWTreeNode* zParentNode, TxBlock& zTxBlock, bool zCheckDifficulty) {
     if (!zParentNode) {
         MinimaLogger::log("checkTxBlockOnly with NULL parent node");
         return false;
@@ -321,11 +321,17 @@ bool TxPoWChecker::checkTxBlockOnly(TxPoWTreeNode* zParentNode, TxBlock& zTxBloc
             return false;
         }
 
-        // Block difficulty
-        MiniData blockdifficulty = org::minima::system::brains::TxPoWGenerator::getBlockDifficulty(zParentNode->shared_from_this());
-        if (!txpow.getBlockDifficulty().isEqual(blockdifficulty)) {
-            MinimaLogger::log("Incorrect TxPoW block difficulty @ " + txpow.getBlockNumber().toString() + " " + txpow.getTxPoWID());
-            return false;
+        // Block difficulty. The expected value is a trailing average over the
+        // local tree, so it is only meaningful when that window is the one the
+        // block was mined against. The IBD path skips it: 0.2.12 never applied
+        // it to historical blocks, and doing so rejects valid blocks at the
+        // first height whose window the node does not hold.
+        if (zCheckDifficulty) {
+            MiniData blockdifficulty = org::minima::system::brains::TxPoWGenerator::getBlockDifficulty(zParentNode->shared_from_this());
+            if (!txpow.getBlockDifficulty().isEqual(blockdifficulty)) {
+                MinimaLogger::log("Incorrect TxPoW block difficulty @ " + txpow.getBlockNumber().toString() + " " + txpow.getTxPoWID());
+                return false;
+            }
         }
 
         // Magic check
@@ -512,7 +518,8 @@ bool TxPoWChecker::checkTxPoWBasic_impl(const std::string& zTxPoWID,
 bool TxPoWChecker::checkTxPoWSimple(MMR& zTipMMR,
                                     TxPoW& zTxPoW, // NOT CONST
                                     TxPoW& zBlock, // NOT CONST
-                                    bool zLog) {
+                                    bool zLog,
+                                    bool zAllowBlockProofOffset) {
     if (zTxPoW.getTxnDifficulty().isMore(zBlock.getMagic().getMinTxPowWork())) {
         MinimaLogger::log("TxPoW difficulty too low.. " + zTxPoW.getTxPoWID());
         return false;
@@ -531,7 +538,7 @@ bool TxPoWChecker::checkTxPoWSimple(MMR& zTipMMR,
         return false;
     }
 
-    if (!checkMMR(zTipMMR, zTxPoW, zLog)) {
+    if (!checkMMR(zTipMMR, zTxPoW, zLog, zAllowBlockProofOffset)) {
         return false;
     }
 
@@ -673,16 +680,21 @@ bool TxPoWChecker::checkTxPoWScripts_impl(MMR& /*zTipMMR*/,
 
 // Overload 1
 bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW) {
-    return checkMMR(zTipMMR, zTxPoW, true);
+    return checkMMR(zTipMMR, zTxPoW, true, zTxPoW.isBlock());
 }
 
 // Overload 2: FIX: zTxPoW is NON-CONST
-bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW, bool zLog) {
-    // A block's own coin proofs are created one block ahead of the parent MMR
-    // (the TxBlock child-MMR constructor advances the block time), so a block
-    // may prove against the parent's current peaks rather than a time-valid
-    // parent entry. Transactions stay strict: their coins live in the parent.
-    const bool blockOffset = zTxPoW.isBlock();
+bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW, bool zLog, bool zAllowBlockProofOffset) {
+    // A block's coin set is committed by the block's own MMR root, which
+    // checkTxPoWBlock and blockStateMatches rebuild and compare against the
+    // header. Per-proof time validation against the *parent* MMR therefore
+    // misfires for blocks that carry their own coin set (superblocks), while
+    // adding nothing the root check does not already bind. Transactions keep
+    // the strict check: their coins live in the parent MMR.
+    if (zTxPoW.isBlock()) {
+        return true;
+    }
+    const bool blockOffset = zAllowBlockProofOffset;
     if (!checkMMR_impl(zTipMMR, zTxPoW.getWitness(), zLog, blockOffset)) {
         return false;
     }

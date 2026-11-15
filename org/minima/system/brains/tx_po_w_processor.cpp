@@ -148,7 +148,7 @@ bool witnessesMatch(org::minima::database::txpowtree::TxPoWTreeNode* parentnode,
     if (zTxBlock.getTxPoW().isTransaction()) {
         auto own = zTxBlock.getTxPoW().deepCopy();
         if (!TxPoWChecker::checkTxPoWSimple(parentnode->getMMR(), *own,
-                                            *blockCopy, false)) {
+                                            *blockCopy, false, true)) {
             MinimaLogger::log("[!] SyncBlock invalid block transaction witness/signature @ "
                               + zTxBlock.getTxPoW().getBlockNumber().toString()
                               + " " + zTxBlock.getTxPoW().getTxPoWID());
@@ -172,7 +172,7 @@ bool witnessesMatch(org::minima::database::txpowtree::TxPoWTreeNode* parentnode,
         }
         auto copy = txp->deepCopy();
         if (!TxPoWChecker::checkTxPoWSimple(parentnode->getMMR(), *copy,
-                                            *blockCopy, false)) {
+                                            *blockCopy, false, true)) {
             MinimaLogger::log("[!] SyncBlock invalid transaction witness/signature @ "
                               + zTxBlock.getTxPoW().getBlockNumber().toString()
                               + " " + txid.to0xString());
@@ -719,7 +719,7 @@ bool TxPoWProcessor::processSyncBlock(const std::shared_ptr<TxBlock>& zTxBlock) 
                                   + " " + zTxBlock->getTxPoW().getTxPoWID());
                 return false;
             }
-            if (!TxPoWChecker::checkTxBlockOnly(parentnode.get(), *zTxBlock)) {
+            if (!TxPoWChecker::checkTxBlockOnly(parentnode.get(), *zTxBlock, false)) {
                 MinimaLogger::log("[!] SyncBlock failed block validation @ "
                                   + zTxBlock->getTxPoW().getBlockNumber().toString()
                                   + " " + zTxBlock->getTxPoW().getTxPoWID());

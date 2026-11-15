@@ -43,7 +43,8 @@ public:
     static bool checkTxPoWSimple(org::minima::objects::mmr::MMR& zMMR,
                                  org::minima::objects::TxPoW& zMempoolTxPoW,
                                  org::minima::objects::TxPoW& zCurrentTxPoW,
-                                 bool zFastCheck);
+                                 bool zFastCheck,
+                                 bool zAllowBlockProofOffset = false);
 };
 } } } }
 
