@@ -329,11 +329,28 @@ void NIOMessage::run() {
                 return;
             }
 
-            // One greeting per connection. A duplicate greeting would otherwise
-            // repeat peer-list work, P2P_CONNECTED and an IBD send.
+            // One greeting per connection, but a duplicate must still be able
+            // to retrigger IBD. The first request can race the peer's own
+            // greeting handling and yield a blocks-only reply; 0.2.12 happened
+            // to retry on the duplicate and so obtained the cascade. Keep the
+            // side effects single without losing that retry.
             if (!nioclient->claimGreeting()) {
                 MinimaLogger::log("[!] Duplicate greeting from "
-                                  + nioclient->getFullAddress() + " - ignoring");
+                                  + nioclient->getFullAddress() + " - retrying IBD only");
+                auto dupGreet = Greeting::ReadFromStream(dis);
+                if (dupGreet) {
+                    try {
+                        auto mytip = MinimaDB::getDB()->getTxPoWTree().getTip();
+                        const MiniNumber mytop =
+                            mytip ? mytip->getTxPoW().getBlockNumber()
+                                  : MiniNumber::MINUSONE();
+                        if (dupGreet->getTopBlock().isMore(mytop)) {
+                            Main::getInstance()->getTxPoWProcessor().askToSyncTxBlocks(nioclient->getUID());
+                        }
+                    } catch (const std::exception& exc) {
+                        MinimaLogger::log(std::string("sync-IBD retrigger failed: ") + exc.what());
+                    }
+                }
                 return;
             }
 
