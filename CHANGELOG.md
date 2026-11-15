@@ -1,5 +1,26 @@
 # PureMinima C++ — Change Report
 
+## v0.6.4 — txnlist transaction-body indexing
+
+### Added
+
+- **Multi-transaction block inputs are indexed.** A block's `txnlist` holds
+  transaction IDs only; the bodies live in the node's TxPoW DB
+  (`txpowsql/txpow`), so the indexer previously saw the block's own (often
+  empty) transaction and missed spends made by multi-transaction blocks.
+  `-txpowdb FILE` (default `<data>/1.0/databases/txpowsql/txpow`) opens the DB
+  read-only and writes each retained body's inputs into `tx_inputs` with the
+  transaction's own txid.
+- A run reports `txpowdb: txn bodies=N missing=M`; missing bodies are skipped,
+  never guessed.
+- `test_txpow_body` decodes a real retained body fixture and asserts its input.
+
+### Limitation
+
+- The node prunes old TxPoW bodies. This makes the archive index complete for
+  new multi-transaction blocks while their bodies exist; pruned history still
+  requires the MegaMMR/coin store. It is not a retroactive reconstruction.
+
 ## v0.6.3 — Archive-complete spends and exact token display
 
 ### Fixed
