@@ -228,7 +228,7 @@ bool TxPoWChecker::checkTxPoWBlock(TxPoWTreeNode* zParentNode,
         // Check this TxPoW (if it is a transaction)
         if (zTxPoW.isTransaction()) {
             // FIX: Pass zTxPoW as non-const
-            bool valid = checkTxPoWSimple(parentMMR, zTxPoW, zTxPoW, true);
+            bool valid = checkTxPoWSimple(parentMMR, zTxPoW, zTxPoW, true, true);
             if (!valid) return false;
         }
 
@@ -236,7 +236,7 @@ bool TxPoWChecker::checkTxPoWBlock(TxPoWTreeNode* zParentNode,
         for (auto* txp : zTransactions) {
             if (!txp) continue;
             // H17: txp is already non-const
-            bool valid = checkTxPoWSimple(parentMMR, *txp, zTxPoW, true);
+            bool valid = checkTxPoWSimple(parentMMR, *txp, zTxPoW, true, true);
             if (!valid) return false;
         }
 
@@ -518,7 +518,8 @@ bool TxPoWChecker::checkTxPoWBasic_impl(const std::string& zTxPoWID,
 bool TxPoWChecker::checkTxPoWSimple(MMR& zTipMMR,
                                     TxPoW& zTxPoW, // NOT CONST
                                     TxPoW& zBlock, // NOT CONST
-                                    bool zLog) {
+                                    bool zLog,
+                                    bool zAllowBlockProofOffset) {
     if (zTxPoW.getTxnDifficulty().isMore(zBlock.getMagic().getMinTxPowWork())) {
         MinimaLogger::log("TxPoW difficulty too low.. " + zTxPoW.getTxPoWID());
         return false;
@@ -537,7 +538,7 @@ bool TxPoWChecker::checkTxPoWSimple(MMR& zTipMMR,
         return false;
     }
 
-    if (!checkMMR(zTipMMR, zTxPoW, zLog)) {
+    if (!checkMMR(zTipMMR, zTxPoW, zLog, zAllowBlockProofOffset)) {
         return false;
     }
 

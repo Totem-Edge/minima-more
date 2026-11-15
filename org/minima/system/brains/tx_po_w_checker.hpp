@@ -51,7 +51,8 @@ public:
     static bool checkTxPoWSimple(org::minima::objects::mmr::MMR& zTipMMR,
                                  org::minima::objects::TxPoW& zTxPoW, // NOT CONST
                                  org::minima::objects::TxPoW& zBlock, // NOT CONST
-                                 bool zLog);
+                                 bool zLog,
+                                 bool zAllowBlockProofOffset = false);
 
     // Scripts checks for a TxPoW (main + burn)
     // FIX: Must be NON-CONST
