@@ -293,7 +293,6 @@ bool refreshMmrCoins(const IndexOptions& options, std::string& error) {
                 error);
 }
 
-
 bool forEachBlock(const IndexOptions& options,
                    const std::function<bool(long long, org::minima::objects::TxBlock&)>& fn,
                    std::string& error) {
@@ -744,6 +743,9 @@ IndexResult buildIndex(const IndexOptions& options) {
                     txCount = 1;
                     const std::string id = tx.getTransactionID().to0xString();
                     if (!id.empty()) txid = id;
+                    // The body carries every input. getInputCoinProofs() is
+                    // often empty in archived blocks; using it alone leaves
+                    // spent outputs looking unspent.
                     txInputs = tx.getAllInputs();
                 }
             } catch (...) {
@@ -1078,13 +1080,15 @@ IndexResult buildIndex(const IndexOptions& options) {
             "u AS (SELECT o.amount_raw FROM analytics.tx_outputs o "
             "WHERE o.token_id='0x00' AND NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
             "SELECT tip.h, CASE "
-            "WHEN u.amount_raw < 10000 THEN '0-1' "
-            "WHEN u.amount_raw < 100000 THEN '1-10' "
-            "WHEN u.amount_raw < 1000000 THEN '10-100' "
-            "WHEN u.amount_raw < 10000000 THEN '100-1k' "
-            "WHEN u.amount_raw < 100000000 THEN '1k-10k' "
-            "WHEN u.amount_raw < 1000000000 THEN '10k-100k' "
-            "WHEN u.amount_raw < 10000000000 THEN '100k-1m' ELSE '1m+' END, "
+            "WHEN u.amount_raw < 1 THEN '0-1' "
+            "WHEN u.amount_raw < 10 THEN '1-10' "
+            "WHEN u.amount_raw < 100 THEN '10-100' "
+            "WHEN u.amount_raw < 1000 THEN '100-1k' "
+            "WHEN u.amount_raw < 10000 THEN '1k-10k' "
+            "WHEN u.amount_raw < 100000 THEN '10k-100k' "
+            "WHEN u.amount_raw < 1000000 THEN '100k-1m' "
+            "WHEN u.amount_raw < 10000000 THEN '1m-10m' "
+            "WHEN u.amount_raw < 100000000 THEN '10m-100m' ELSE '100m+' END, "
             "COUNT(*), SUM(u.amount_raw) FROM u, tip GROUP BY tip.h, 2;",
             "DELETE FROM analytics.holder_cohorts WHERE snapshot_height = "
             "(SELECT MAX(height) FROM analytics.chain_blocks);",
@@ -1092,13 +1096,15 @@ IndexResult buildIndex(const IndexOptions& options) {
             "(snapshot_height,cohort,address_count,balance_raw) "
             "WITH tip AS (SELECT MAX(height) h FROM analytics.chain_blocks) "
             "SELECT ab.snapshot_height, CASE "
-            "WHEN ab.balance_raw < 10000 THEN '0-1' "
-            "WHEN ab.balance_raw < 100000 THEN '1-10' "
-            "WHEN ab.balance_raw < 1000000 THEN '10-100' "
-            "WHEN ab.balance_raw < 10000000 THEN '100-1k' "
-            "WHEN ab.balance_raw < 100000000 THEN '1k-10k' "
-            "WHEN ab.balance_raw < 1000000000 THEN '10k-100k' "
-            "WHEN ab.balance_raw < 10000000000 THEN '100k-1m' ELSE '1m+' END, "
+            "WHEN ab.balance_raw < 1 THEN '0-1' "
+            "WHEN ab.balance_raw < 10 THEN '1-10' "
+            "WHEN ab.balance_raw < 100 THEN '10-100' "
+            "WHEN ab.balance_raw < 1000 THEN '100-1k' "
+            "WHEN ab.balance_raw < 10000 THEN '1k-10k' "
+            "WHEN ab.balance_raw < 100000 THEN '10k-100k' "
+            "WHEN ab.balance_raw < 1000000 THEN '100k-1m' "
+            "WHEN ab.balance_raw < 10000000 THEN '1m-10m' "
+            "WHEN ab.balance_raw < 100000000 THEN '10m-100m' ELSE '100m+' END, "
             "COUNT(*), SUM(ab.balance_raw) FROM analytics.address_balances ab, tip "
             "WHERE ab.snapshot_height=tip.h GROUP BY ab.snapshot_height, 2;",
         };
@@ -1166,26 +1172,30 @@ IndexResult buildIndex(const IndexOptions& options) {
             "u AS (SELECT o.token_id,o.amount_raw FROM analytics.tx_outputs o "
             "WHERE NOT EXISTS (SELECT 1 FROM analytics.tx_inputs i WHERE i.coin_id=o.coin_id)) "
             "SELECT tip.d,u.token_id,CASE "
-            "WHEN u.amount_raw < 10000 THEN '0-1' "
-            "WHEN u.amount_raw < 100000 THEN '1-10' "
-            "WHEN u.amount_raw < 1000000 THEN '10-100' "
-            "WHEN u.amount_raw < 10000000 THEN '100-1k' "
-            "WHEN u.amount_raw < 100000000 THEN '1k-10k' "
-            "WHEN u.amount_raw < 1000000000 THEN '10k-100k' "
-            "WHEN u.amount_raw < 10000000000 THEN '100k-1m' ELSE '1m+' END, "
+            "WHEN u.amount_raw < 1 THEN '0-1' "
+            "WHEN u.amount_raw < 10 THEN '1-10' "
+            "WHEN u.amount_raw < 100 THEN '10-100' "
+            "WHEN u.amount_raw < 1000 THEN '100-1k' "
+            "WHEN u.amount_raw < 10000 THEN '1k-10k' "
+            "WHEN u.amount_raw < 100000 THEN '10k-100k' "
+            "WHEN u.amount_raw < 1000000 THEN '100k-1m' "
+            "WHEN u.amount_raw < 10000000 THEN '1m-10m' "
+            "WHEN u.amount_raw < 100000000 THEN '10m-100m' ELSE '100m+' END, "
             "COUNT(*),SUM(u.amount_raw) FROM u,tip GROUP BY tip.d,u.token_id,3;",
             "INSERT INTO analytics.asset_holder_cohorts "
             "(snapshot_day_ms,token_id,cohort,address_count,balance_raw) "
             "WITH tip AS (SELECT CAST(MAX(timestamp_ms)/86400000 AS BIGINT)*86400000 d "
             "FROM analytics.chain_blocks) "
             "SELECT ab.snapshot_day_ms,ab.token_id,CASE "
-            "WHEN ab.balance_raw < 10000 THEN '0-1' "
-            "WHEN ab.balance_raw < 100000 THEN '1-10' "
-            "WHEN ab.balance_raw < 1000000 THEN '10-100' "
-            "WHEN ab.balance_raw < 10000000 THEN '100-1k' "
-            "WHEN ab.balance_raw < 100000000 THEN '1k-10k' "
-            "WHEN ab.balance_raw < 1000000000 THEN '10k-100k' "
-            "WHEN ab.balance_raw < 10000000000 THEN '100k-1m' ELSE '1m+' END, "
+            "WHEN ab.balance_raw < 1 THEN '0-1' "
+            "WHEN ab.balance_raw < 10 THEN '1-10' "
+            "WHEN ab.balance_raw < 100 THEN '10-100' "
+            "WHEN ab.balance_raw < 1000 THEN '100-1k' "
+            "WHEN ab.balance_raw < 10000 THEN '1k-10k' "
+            "WHEN ab.balance_raw < 100000 THEN '10k-100k' "
+            "WHEN ab.balance_raw < 1000000 THEN '100k-1m' "
+            "WHEN ab.balance_raw < 10000000 THEN '1m-10m' "
+            "WHEN ab.balance_raw < 100000000 THEN '10m-100m' ELSE '100m+' END, "
             "COUNT(*),SUM(ab.balance_raw) FROM analytics.asset_address_balances ab,tip "
             "WHERE ab.snapshot_day_ms=tip.d GROUP BY ab.snapshot_day_ms,ab.token_id,3;",
             "INSERT INTO analytics.token_registry (token_id,total_supply_raw) "

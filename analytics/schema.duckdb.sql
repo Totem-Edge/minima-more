@@ -21,7 +21,7 @@ INSERT INTO config VALUES
     ('finality_depth',      '2048'),
     ('stale_after_blocks',  '12'),
     ('age_bands',           '["0-1d","1d-1w","1w-1m","1m-3m","3m-6m","6m-1y","1y-2y","2y-5y","5y+"]'),
-    ('value_bands',         '["0-1","1-10","10-100","100-1k","1k-10k","10k-100k","100k-1m","1m+"]'),
+    ('value_bands',         '["0-1","1-10","10-100","100-1k","1k-10k","10k-100k","100k-1m","1m-10m","10m-100m","100m+"]'),
     ('snapshot_retention_days', '365')
 ON CONFLICT (key) DO NOTHING;
 
