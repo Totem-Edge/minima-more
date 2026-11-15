@@ -64,7 +64,8 @@ public:
                          org::minima::objects::TxPoW& zTxPoW);
     static bool checkMMR(org::minima::objects::mmr::MMR& zTipMMR,
                          org::minima::objects::TxPoW& zTxPoW, // NOT CONST
-                         bool zLog);
+                         bool zLog,
+                         bool zAllowBlockProofOffset = false);
 
     // Signature checks (main + burn)
     static bool checkSignatures(org::minima::objects::TxPoW& zTxPoW);

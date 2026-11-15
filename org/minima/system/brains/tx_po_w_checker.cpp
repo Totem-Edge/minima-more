@@ -679,15 +679,11 @@ bool TxPoWChecker::checkTxPoWScripts_impl(MMR& /*zTipMMR*/,
 
 // Overload 1
 bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW) {
-    return checkMMR(zTipMMR, zTxPoW, true);
+    return checkMMR(zTipMMR, zTxPoW, true, zTxPoW.isBlock());
 }
 
 // Overload 2: FIX: zTxPoW is NON-CONST
-bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW, bool zLog) {
-    // A block's own coin proofs are created one block ahead of the parent MMR
-    // (the TxBlock child-MMR constructor advances the block time), so a block
-    // may prove against the parent's current peaks rather than a time-valid
-    // parent entry. Transactions stay strict: their coins live in the parent.
+bool TxPoWChecker::checkMMR(MMR& zTipMMR, TxPoW& zTxPoW, bool zLog, bool zAllowBlockProofOffset) {
     // A block's coin set is committed by the block's own MMR root, which
     // checkTxPoWBlock and blockStateMatches rebuild and compare against the
     // header. Per-proof time validation against the *parent* MMR therefore
