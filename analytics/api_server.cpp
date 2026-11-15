@@ -3,6 +3,9 @@
 #include "archive_reader.hpp"
 #include "metric_catalog.hpp"
 
+#include "org/minima/objects/address.hpp"
+#include "org/minima/objects/base/mini_data.hpp"
+
 #include <duckdb.hpp>
 
 #include <arpa/inet.h>
@@ -1078,7 +1081,17 @@ void handleClient(int fd, const ApiOptions& opt) {
         return;
     }
     if (path.rfind("/v1/addresses/", 0) == 0 && requireIndex()) {
-        const std::string address = path.substr(14);
+        std::string address = path.substr(14);
+        // Accept the Mx checksummed-base32 form as well as 0x hex: the index
+        // stores to0xString(), so an Mx query could never match.
+        if (address.size() > 2 && (address[0] == 'M' || address[0] == 'm') &&
+            (address[1] == 'x' || address[1] == 'X')) {
+            try {
+                address = org::minima::objects::Address::convertMinimaAddress(address).to0xString();
+            } catch (const std::exception&) {
+                // leave it unchanged; the lookup will report not_found
+            }
+        }
         bool found = false;
         const std::string body = addressJson(opt.indexPath, address,
                                              queryParam(query, "token"),
