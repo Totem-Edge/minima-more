@@ -1298,8 +1298,21 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             : -1;
         if (mmrfrom < 0 && update_mmr &&
             org::minima::system::params::GeneralParams::IS_MEGAMMR) {
-            // Default to the first block the MMR has not seen yet.
-            mmrfrom = db->getMegaMMR().getMMR().getBlockTime().getAsLong() + 1;
+            // Only trust the cursor when coverage is known-complete. A partial
+            // MMR (a fresh cascade sync never replays old blocks through the
+            // tree) can have the cursor at the tree root while missing most of
+            // the UTXO set, so restart from genesis to repair it.
+            auto& megammr = db->getMegaMMR();
+            if (megammr.isCoverageComplete()) {
+                mmrfrom = megammr.getMMR().getBlockTime().getAsLong() + 1;
+            } else {
+                mmrfrom = 1;
+                org::minima::utils::MinimaLogger::log(
+                    "MegaMMR coverage is partial (first_block=" +
+                    std::to_string(megammr.firstBlock()) + ", coins=" +
+                    std::to_string(megammr.coinCount()) +
+                    ") - replaying from block 1");
+            }
         }
         if (update_mmr &&
             org::minima::system::params::GeneralParams::IS_MEGAMMR &&

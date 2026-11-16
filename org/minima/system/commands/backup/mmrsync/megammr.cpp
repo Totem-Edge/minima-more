@@ -149,6 +149,9 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
         resp.put("mmr", megammrdb.getMMR().toJSON(false));
         resp.put("coins", static_cast<long long>(megammrdb.coinCount()));
         resp.put("coin_store", std::string(megammrdb.coinStoreEngine()));
+        resp.put("first_block", megammrdb.firstBlock());
+        resp.put("coverage_broken", megammrdb.coverageBroken());
+        resp.put("coverage_complete", megammrdb.isCoverageComplete());
 
         ret->put("response", resp);
         return ret;

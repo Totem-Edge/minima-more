@@ -162,6 +162,20 @@ void MegaMMR::addBlock(const TxBlock& zBlock) {
     // DEBUG END
 
     MiniNumber block = zBlock.getTxPoW().getBlockNumber();
+
+    // Coverage tracking. The MMR is a cumulative store: blocks must arrive in
+    // chain order, starting at genesis, or the coin set is incomplete even when
+    // the cursor reaches the tree root. Record where coverage starts and latch
+    // any gap, so callers can distinguish a full MMR from a partial one.
+    const long long prev_block = mMMR->getBlockTime().getAsLong();
+    const long long this_block = block.getAsLong();
+    if (mFirstBlock < 0 || this_block < mFirstBlock) {
+        mFirstBlock = this_block;
+    }
+    if (prev_block > 0 && this_block != prev_block + 1) {
+        mCoverageBroken = true;
+    }
+
     mMMR->setBlockTime(block);
 
     const auto& peaks = zBlock.getPreviousPeaks();
@@ -325,7 +339,19 @@ void MegaMMR::clear() {
     mMMR = std::make_unique<org::minima::objects::mmr::MMR>();
     mAllUnspentCoins.clear();
     mMaterialized = false;
+    mFirstBlock = -1;
+    mCoverageBroken = false;
     if (mCoinStore) mCoinStore->clear();
+}
+
+bool MegaMMR::isCoverageComplete() const {
+    if (mCoverageBroken) {
+        return false;
+    }
+    if (mFirstBlock != 1) {
+        return false;
+    }
+    return mMMR && mMMR->getBlockTime().getAsLong() > 0;
 }
 
 bool MegaMMR::coinCacheMetaMatches(const std::filesystem::path& zRaw) const {
@@ -432,8 +458,12 @@ void MegaMMR::writeDataStream(std::ostream& zOut) {
         pruneUnspendable(false);
     }
 
-    MiniNumber::WriteToStream(zOut, 1);
+    MiniNumber::WriteToStream(zOut, 2);
     mMMR->writeDataStream(zOut);
+
+    // Coverage watermark (v2). -1 means unknown, e.g. a legacy v1 file.
+    MiniNumber::WriteToStream(zOut, mFirstBlock);
+    MiniNumber::WriteToStream(zOut, mCoverageBroken ? 1 : 0);
 
     MiniNumber::WriteToStream(zOut, static_cast<int>(coinCount()));
 
@@ -444,11 +474,20 @@ void MegaMMR::writeDataStream(std::ostream& zOut) {
 
 void MegaMMR::readDataStream(std::istream& zIn) {
     int version = MiniNumber::ReadFromStream(zIn).getAsInt();
-    (void)version; 
+
+    // Legacy v1 files carry no coverage watermark: treat them as unknown
+    // (partial) rather than assuming a full UTXO set.
+    mFirstBlock = -1;
+    mCoverageBroken = false;
 
     mMMR = std::make_unique<org::minima::objects::mmr::MMR>();
     mMMR->readDataStream(zIn);
     mMMR->setFinalized(false);
+
+    if (version >= 2) {
+        mFirstBlock = MiniNumber::ReadFromStream(zIn).getAsLong();
+        mCoverageBroken = MiniNumber::ReadFromStream(zIn).getAsInt() != 0;
+    }
 
     const int size = MiniNumber::ReadFromStream(zIn).getAsInt();
 
