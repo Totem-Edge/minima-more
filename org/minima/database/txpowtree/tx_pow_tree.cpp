@@ -428,11 +428,16 @@ std::shared_ptr<TxPoWTreeNode> TxPowTree::traverseTree(TxPoWTreeNodeAction& zNod
 }
 
 void TxPowTree::loadDB(const std::filesystem::path& zFile) {
-    MiniFile::loadObjectSlow(zFile, *this);
+    try {
+        MiniFile::loadObjectVerified(zFile, *this, 1);
+    } catch (const std::exception& e) {
+        MiniFile::quarantineFile(zFile, e.what());
+        throw;
+    }
 }
 
 void TxPowTree::saveDB(const std::filesystem::path& zFile) {
-    MiniFile::saveObjectDirect(zFile, *this);
+    MiniFile::saveObjectAtomic(zFile, *this, 1);
 }
 
 void TxPowTree::writeDataStream(std::ostream& out) {
@@ -445,12 +450,10 @@ void TxPowTree::writeDataStream(std::ostream& out) {
         explicit WriteOutAction(std::ostream& out) : m_out(out) {}
 
         void runAction(const std::shared_ptr<TxPoWTreeNode>& zNode) override {
-            if (!zNode) return;
-            try {
-                zNode->writeDataStream(m_out);
-            } catch (const std::exception& e) {
-                MinimaLogger::log(e);
+            if (!zNode) {
+                throw std::runtime_error("TxPowTree::writeDataStream - null node");
             }
+            zNode->writeDataStream(m_out);
         }
     private:
         std::ostream& m_out;

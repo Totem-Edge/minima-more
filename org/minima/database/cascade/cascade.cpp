@@ -151,12 +151,17 @@ std::string Cascade::printCascade() const {
 }
 
 void Cascade::loadDB(const std::filesystem::path& zFile) {
-    org::minima::utils::MiniFile::loadObjectSlow(zFile, *this);
+    try {
+        org::minima::utils::MiniFile::loadObjectVerified(zFile, *this, 2);
+    } catch (const std::exception& e) {
+        org::minima::utils::MiniFile::quarantineFile(zFile, e.what());
+        throw;
+    }
 }
 
 void Cascade::saveDB(const std::filesystem::path& zFile) {
     std::shared_lock lock(mMutex);
-    org::minima::utils::MiniFile::saveObjectDirect(zFile, *this);
+    org::minima::utils::MiniFile::saveObjectAtomic(zFile, *this, 2);
 }
 
 void Cascade::writeDataStream(std::ostream& out) {
