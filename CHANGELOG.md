@@ -40,6 +40,14 @@
   serves from its own cascade start) can no longer truncate a complete
   archive. `force:true` is the explicit operator override.
 
+### Storage
+
+- **Shutdown save guard.** A tree node without a `TxBlock`/`MMR` now throws
+  instead of dereferencing null, and the tree is written before the cascade so
+  an interrupted save cannot leave the cascade ahead of the tree (`Your
+  Cascade is BROKEN` on the next start). `test_tree_save_guard` covers the
+  null-node case.
+
 ### Compatibility
 
 - No consensus, wire, hash or payload change: the envelope wraps the same

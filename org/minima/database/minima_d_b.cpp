@@ -670,11 +670,14 @@ void MinimaDB::saveState() {
         mP2PDB->saveDB((basedb / "p2p.db").string());
         mP2P2DB->saveDB((basedb / "p2p2.db").string());
 
+        // Tree first. The cascade and tree must advance together: if the tree
+        // write throws, the catch below skips the cascade so the on-disk pair
+        // still links on the next start. Saving the cascade first is what
+        // turns an interrupted tree write into "Cascade is BROKEN".
+        mTxPoWTree->saveDB(basedb / "chaintree.db");
+
         // Cascade
         mCascade->saveDB(basedb / "cascade.db");
-
-        // TxPoWTree
-        mTxPoWTree->saveDB(basedb / "chaintree.db");
 
         // MEGA MMR
         if (org::minima::system::params::GeneralParams::IS_MEGAMMR) {

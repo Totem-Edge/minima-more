@@ -656,6 +656,19 @@ endif()
 target_link_libraries(test_cascade_weight PRIVATE minima_core OpenSSL::Crypto Threads::Threads)
 add_test(NAME test_cascade_weight COMMAND test_cascade_weight)
 
+# Shutdown save guard: a node without a TxBlock/MMR must throw, not crash.
+add_executable(test_tree_save_guard
+    EXCLUDE_FROM_ALL
+    tests/test_tree_save_guard.cpp
+)
+target_compile_features(test_tree_save_guard PRIVATE cxx_std_17)
+target_include_directories(test_tree_save_guard PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(test_tree_save_guard PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(test_tree_save_guard PRIVATE minima_core OpenSSL::Crypto Threads::Threads)
+add_test(NAME test_tree_save_guard COMMAND test_tree_save_guard)
+
 # TxPoW DB bodies: decode a retained txnlist transaction body into its inputs.
 add_executable(test_txpow_body
     EXCLUDE_FROM_ALL

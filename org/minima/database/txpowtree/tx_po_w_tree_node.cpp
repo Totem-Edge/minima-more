@@ -615,6 +615,14 @@ bool TxPoWTreeNode::checkFullTxns(org::minima::database::txpowdb::TxPoWDB& zTxpD
 }
 
 void TxPoWTreeNode::writeDataStream(std::ostream& zOut) {
+    // A node must be fully constructed before it can be persisted. A null
+    // block or MMR here used to dereference and crash the whole node during a
+    // shutdown save; fail with an exception so saveState can isolate it.
+    if (!mTxBlock || !mMMR) {
+        throw std::runtime_error(
+            "TxPoWTreeNode::writeDataStream - node has a null TxBlock or MMR");
+    }
+
     // mTxBlock and mMMR
     mTxBlock->writeDataStream(zOut);
     mMMR->writeDataStream(zOut);
