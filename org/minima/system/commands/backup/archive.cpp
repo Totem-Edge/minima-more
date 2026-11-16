@@ -1318,6 +1318,17 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             org::minima::system::params::GeneralParams::IS_MEGAMMR &&
             mmrfrom >= 0) {
             auto& megammr = db->getMegaMMR();
+            const long long mmr_cursor = megammr.getMMR().getBlockTime().getAsLong();
+            // A replay that starts at or below the current cursor re-applies
+            // blocks the MMR already absorbed. Reset first, or the MMR would
+            // contain duplicate entries and the coverage latch would trip.
+            if (mmrfrom <= mmr_cursor) {
+                org::minima::utils::MinimaLogger::log(
+                    "MegaMMR replay starts at " + std::to_string(mmrfrom) +
+                    " but the cursor is " + std::to_string(mmr_cursor) +
+                    " - clearing for a full rebuild");
+                megammr.clear();
+            }
             auto addMmr = [&](const org::minima::objects::TxBlock& block) {
                 try {
                     megammr.addBlock(block);
