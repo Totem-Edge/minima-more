@@ -669,12 +669,41 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         int keys = getNumberParam("keys", MiniNumber(Wallet::NUMBER_GETADDRESS_KEYS))->getAsInt();
         int keyuses = getNumberParam("keyuses", MiniNumber(1000))->getAsInt();
 
-        // Pre-check connection
+        // Pre-check connection and chain weight. A resync wipes the local
+        // archive and cascade (archiveResetReady below), so the peer must be on
+        // a strictly heavier chain. A block-zero request carries the peer's
+        // cascade and therefore its cumulative weight.
+        const bool force = getBooleanParam("force", false);
         if (!usinglocal) {
             auto ibdtest = sendArchiveReq(host, port, MiniNumber::MINUSONE());
             if (!ibdtest) {
                 throw CommandException("Could not connect to Archive host! @ " + host + ":" + std::to_string(port));
             }
+
+            auto peeribd = sendArchiveReq(host, port, MiniNumber::ZERO());
+            if (!peeribd || !peeribd->hasCascade() || !peeribd->getCascade()->getTip()) {
+                throw CommandException(
+                    "Archive peer did not supply a cascade; cannot verify chain weight. "
+                    "Use force:true to resync anyway. @ " + host + ":" + std::to_string(port));
+            }
+
+            const auto& localCascade = MinimaDB::getDB()->getCascade();
+            const bool haveLocalCascade = localCascade.getTip() != nullptr;
+            const MiniNumber localWeight = localCascade.getTotalWeight();
+            const MiniNumber peerWeight = peeribd->getCascade()->getTotalWeight();
+
+            if (!force && !org::minima::database::cascade::Cascade::shouldAdopt(
+                              localWeight, peerWeight, haveLocalCascade)) {
+                throw CommandException(
+                    "Archive resync refused: peer cascade weight " + peerWeight.toString() +
+                    " is not greater than local " + localWeight.toString() +
+                    ". Resync would truncate the local archive to a lighter chain. "
+                    "Use force:true to override.");
+            }
+
+            MinimaLogger::log("Resync weight check: local " + localWeight.toString() +
+                              " peer " + peerWeight.toString() +
+                              (force ? " (forced)" : " - peer heavier"));
         }
 
         // Notify MiniDAPPs

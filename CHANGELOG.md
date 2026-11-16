@@ -33,6 +33,12 @@
   keeps the local chain, and a lighter peer chain is ignored even if it has a
   higher block number. `Cascade::shouldAdopt` is the testable predicate and is
   covered by `test_cascade_weight`.
+- **Resync is gated before it resets anything.** `archive action:resync`
+  wipes the local archive and cascade, so it now requests the peer's cascade
+  and refuses to proceed unless that peer is strictly heavier. The check runs
+  before `archiveResetReady`, so a lighter peer (for example one that only
+  serves from its own cascade start) can no longer truncate a complete
+  archive. `force:true` is the explicit operator override.
 
 ### Compatibility
 
