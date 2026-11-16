@@ -1,5 +1,38 @@
 # PureMinima C++ — Change Report
 
+## v0.6.6 — Database envelope shared with hawk-node
+
+### Added
+
+- **Versioned, checksummed database container.** `chaintree.db` and
+  `cascade.db` are written inside the same envelope `hawk-node` uses:
+  `HAWKDB01` magic, format version, object kind, payload length, CRC32 and a
+  `HAWKEND1` trailer. The layout is byte-identical in both forks, so a data
+  directory can move in either direction.
+- **Atomic replace.** The object is serialized fully first, written to `.tmp`,
+  fsynced, the previous file is kept as `.bak`, and the new file is renamed
+  into place.
+- **Quarantine.** A database rejected at load is preserved as
+  `<name>.corrupt-<timestamp>` instead of being left in place.
+
+### Changed
+
+- **Strict, pre-parse validation.** Magic, envelope version, object kind,
+  payload length, CRC32 and trailer are checked before `readDataStream`, and
+  trailing payload bytes are rejected. Legacy unwrapped files are refused by
+  default (`zAllowLegacy = false`).
+- **Fail-closed tree writes.** `TxPowTree::writeDataStream` now throws on a
+  null node or a failed node write instead of swallowing it, so a silently
+  truncated tree can never be committed.
+- `megammr.mmr` and `p2p2.db` keep the raw format, matching `hawk-node`.
+
+### Compatibility
+
+- No consensus, wire, hash or payload change: the envelope wraps the same
+  object bytes, so Java peers and the parity suite are unaffected.
+- Raw data directories written by v0.6.5 and earlier are rejected and
+  quarantined; the node starts empty and resyncs.
+
 ## v0.6.5 — Mainnet IBD sync
 
 ### Fixed
