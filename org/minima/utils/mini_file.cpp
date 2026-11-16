@@ -13,6 +13,13 @@
 #include <system_error>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
+#include <stdexcept>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #include <zlib.h>
 
@@ -51,6 +58,66 @@ static void ensureParentExists(const fs::path& p) {
     if (!parent.empty()) {
         fs::create_directories(parent, ec);
     }
+}
+
+// Database envelope shared with hawk-node. The layout is deliberately
+// identical in both forks so a data directory can move between them:
+//   magic[8] | version u32 | kind u32 | length u64 | crc32 u32 | reserved u32
+//   payload[length] | trailer[8]
+// All integers are little-endian. The magic is a file-format marker, not a
+// network or consensus artefact: the payload is the same object encoding that
+// goes on the wire.
+static constexpr std::uint32_t kDatabaseEnvelopeVersion = 1;
+static constexpr char kDatabaseMagic[8] = {'H', 'A', 'W', 'K', 'D', 'B', '0', '1'};
+static constexpr char kDatabaseTrailer[8] = {'H', 'A', 'W', 'K', 'E', 'N', 'D', '1'};
+
+static void writeU32(std::ostream& out, std::uint32_t value) {
+    for (int i = 0; i < 4; ++i) out.put(static_cast<char>((value >> (i * 8)) & 0xff));
+}
+
+static void writeU64(std::ostream& out, std::uint64_t value) {
+    for (int i = 0; i < 8; ++i) out.put(static_cast<char>((value >> (i * 8)) & 0xff));
+}
+
+static std::uint32_t readU32(std::istream& in) {
+    std::uint32_t value = 0;
+    for (int i = 0; i < 4; ++i) {
+        value |= static_cast<std::uint32_t>(static_cast<unsigned char>(in.get())) << (i * 8);
+    }
+    return value;
+}
+
+static std::uint64_t readU64(std::istream& in) {
+    std::uint64_t value = 0;
+    for (int i = 0; i < 8; ++i) {
+        value |= static_cast<std::uint64_t>(static_cast<unsigned char>(in.get())) << (i * 8);
+    }
+    return value;
+}
+
+static std::uint32_t checksumBytes(const std::string& bytes) {
+    uLong crc = crc32(0L, Z_NULL, 0);
+    const auto* data = reinterpret_cast<const Bytef*>(bytes.data());
+    std::size_t remaining = bytes.size();
+    while (remaining > 0) {
+        const uInt chunk = static_cast<uInt>(std::min<std::size_t>(remaining, 0x7fffffff));
+        crc = crc32(crc, data, chunk);
+        data += chunk;
+        remaining -= chunk;
+    }
+    return static_cast<std::uint32_t>(crc);
+}
+
+static void fsyncPath(const fs::path& path) {
+#if !defined(_WIN32)
+    int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd >= 0) {
+        ::fsync(fd);
+        ::close(fd);
+    }
+#else
+    (void)path;
+#endif
 }
 
 fs::path MiniFile::createBaseFile(const std::string& zFilename) {
@@ -284,6 +351,133 @@ void MiniFile::saveObjectDirect(const fs::path& zFile, org::minima::utils::Strea
     } catch (const std::exception& exc) {
         logError(std::string("Exception in saveObjectDirect: ") + exc.what());
     }
+}
+
+void MiniFile::quarantineFile(const fs::path& zFile, const std::string& zReason) {
+    std::error_code ec;
+    if (!fs::exists(zFile, ec)) return;
+    std::time_t now = std::time(nullptr);
+    char stamp[32] = {0};
+    std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&now));
+    const fs::path dest = zFile.string() + ".corrupt-" + stamp;
+    fs::rename(zFile, dest, ec);
+    if (ec) {
+        logError("QUARANTINE_FAILED " + zFile.string() + ": " + ec.message() + " (" + zReason + ")");
+    } else {
+        logError("QUARANTINED " + zFile.string() + " -> " + dest.string() + " (" + zReason + ")");
+    }
+}
+
+void MiniFile::saveObjectAtomic(const fs::path& zFile,
+                                org::minima::utils::Streamable& zObject,
+                                std::uint32_t zKind) {
+    ensureParentExists(zFile);
+
+    // Serialize fully before touching the target. If a node write throws, the
+    // previous database remains intact and the temp file is discarded.
+    std::ostringstream payload(std::ios::binary);
+    zObject.writeDataStream(payload);
+    if (!payload) {
+        throw std::runtime_error("saveObjectAtomic: serialization failed for " + zFile.string());
+    }
+    const std::string bytes = payload.str();
+    const std::uint32_t crc = checksumBytes(bytes);
+
+    const fs::path tmp = zFile.string() + ".tmp";
+    std::ofstream out(tmp, std::ios::binary | std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::ios_base::failure("saveObjectAtomic: cannot open temp file " + tmp.string());
+    }
+    out.write(kDatabaseMagic, sizeof(kDatabaseMagic));
+    writeU32(out, kDatabaseEnvelopeVersion);
+    writeU32(out, zKind);
+    writeU64(out, static_cast<std::uint64_t>(bytes.size()));
+    writeU32(out, crc);
+    writeU32(out, 0);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    out.write(kDatabaseTrailer, sizeof(kDatabaseTrailer));
+    out.flush();
+    if (!out) {
+        throw std::runtime_error("saveObjectAtomic: write failed for " + tmp.string());
+    }
+    out.close();
+
+    fsyncPath(tmp);
+
+    // Keep the previous file as .bak, then atomically swap the new file in.
+    std::error_code ec;
+    if (fs::exists(zFile, ec)) {
+        const fs::path backup = zFile.string() + ".bak";
+        fs::remove(backup, ec);
+        ec.clear();
+        fs::rename(zFile, backup, ec);
+        if (ec) {
+            throw std::runtime_error("saveObjectAtomic: cannot back up " + zFile.string() + ": " + ec.message());
+        }
+    }
+    fs::rename(tmp, zFile, ec);
+    if (ec) {
+        throw std::runtime_error("saveObjectAtomic: cannot replace " + zFile.string() + ": " + ec.message());
+    }
+}
+
+void MiniFile::loadObjectVerified(const fs::path& zFile,
+                                  org::minima::utils::Streamable& zObject,
+                                  std::uint32_t zExpectedKind,
+                                  bool zAllowLegacy) {
+    std::error_code ec;
+    if (!fs::exists(zFile, ec)) {
+        logError("Load Object file does not exist: " + zFile.string());
+        return;
+    }
+
+    const std::vector<std::uint8_t> raw = MiniFile::readCompleteFile(zFile);
+    if (raw.size() >= sizeof(kDatabaseMagic) &&
+        std::memcmp(raw.data(), kDatabaseMagic, sizeof(kDatabaseMagic)) == 0) {
+        constexpr std::size_t headerSize = 8 + 4 + 4 + 8 + 4 + 4;
+        if (raw.size() < headerSize + sizeof(kDatabaseTrailer)) {
+            throw std::runtime_error("loadObjectVerified: truncated database header/trailer: " + zFile.string());
+        }
+        std::string header(reinterpret_cast<const char*>(raw.data() + 8), headerSize - 8);
+        std::istringstream hs(header, std::ios::binary);
+        const std::uint32_t version = readU32(hs);
+        const std::uint32_t kind = readU32(hs);
+        const std::uint64_t payloadLen = readU64(hs);
+        const std::uint32_t expectedCrc = readU32(hs);
+        (void)readU32(hs);
+        if (version != kDatabaseEnvelopeVersion) {
+            throw std::runtime_error("loadObjectVerified: unsupported database version "
+                                     + std::to_string(version) + ": " + zFile.string());
+        }
+        if (kind != zExpectedKind) {
+            throw std::runtime_error("loadObjectVerified: wrong database kind for " + zFile.string());
+        }
+        const std::uint64_t expectedSize = headerSize + payloadLen + sizeof(kDatabaseTrailer);
+        if (expectedSize != raw.size()) {
+            throw std::runtime_error("loadObjectVerified: length mismatch for " + zFile.string());
+        }
+        const std::string payload(reinterpret_cast<const char*>(raw.data() + headerSize),
+                                  static_cast<std::size_t>(payloadLen));
+        if (checksumBytes(payload) != expectedCrc) {
+            throw std::runtime_error("loadObjectVerified: checksum mismatch for " + zFile.string());
+        }
+        if (std::memcmp(raw.data() + headerSize + payloadLen,
+                        kDatabaseTrailer, sizeof(kDatabaseTrailer)) != 0) {
+            throw std::runtime_error("loadObjectVerified: missing database trailer for " + zFile.string());
+        }
+        std::istringstream in(payload, std::ios::binary);
+        zObject.readDataStream(in);
+        if (in.peek() != std::char_traits<char>::eof()) {
+            throw std::runtime_error("loadObjectVerified: trailing payload data for " + zFile.string());
+        }
+        return;
+    }
+
+    if (!zAllowLegacy) {
+        throw std::runtime_error("loadObjectVerified: unrecognized database format: " + zFile.string());
+    }
+    logError("loadObjectVerified: loading legacy unwrapped database: " + zFile.string());
+    MiniFile::loadObjectSlow(zFile, zObject);
 }
 
 void MiniFile::saveObjectEncrypted(const std::string& zPassword,

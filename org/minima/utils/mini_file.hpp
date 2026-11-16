@@ -56,6 +56,25 @@ public:
     static void loadObjectSlow(const std::filesystem::path& zFile,
                                org::minima::utils::Streamable& zObject);
 
+    // Preserve a corrupt database file under a timestamped .corrupt-* name.
+    static void quarantineFile(const std::filesystem::path& zFile,
+                               const std::string& zReason);
+
+    // Save a database object inside the versioned, checksummed envelope
+    // (magic, format version, object kind, payload length, CRC32, trailer),
+    // atomically replacing the target and keeping the previous file as .bak.
+    static void saveObjectAtomic(const std::filesystem::path& zFile,
+                                 org::minima::utils::Streamable& zObject,
+                                 std::uint32_t zKind);
+
+    // Load a database object from the envelope, validating magic, version,
+    // kind, length, CRC32 and trailer before deserialization. Legacy
+    // unwrapped files are only read when zAllowLegacy is true.
+    static void loadObjectVerified(const std::filesystem::path& zFile,
+                                   org::minima::utils::Streamable& zObject,
+                                   std::uint32_t zExpectedKind,
+                                   bool zAllowLegacy = false);
+
     // Load an encrypted Streamable (using PasswordCrypto) from a file
     static void loadObjectEncrypted(const std::string& zPassword,
                                     const std::filesystem::path& zFile,
