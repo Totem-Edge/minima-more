@@ -285,6 +285,11 @@ std::string archive::getFullHelp() const {
     << "host: (optional) \n"
     << "    ip:port of the archive node to sync from. Use with action:resync.\n"
     << "\n"
+    << "rawfile: (optional)\n"
+    << "    Path under the data folder of a raw .dat export. Use with action:backfill\n"
+    << "    to fill historical blocks without resetting the cascade/tree, e.g.\n"
+    << "    archive action:backfill rawfile:archive.raw.dat from:1 to:2415814\n"
+    << "\n"
     << "file: (optional) \n"
     << "    name or path of the archive export gzip file to export/import/inspect.\n"
     << "\n"
@@ -576,13 +581,31 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         auto* db = MinimaDB::getDB();
         if (db == nullptr) throw CommandException("No database available");
 
-        const std::string fullhost = getParam("host", "eurobuddha.com:9001");
-        auto connectdata = connect::createConnectMessage(fullhost);
-        if (!connectdata) {
-            throw CommandException("Invalid HOST format for backfill : " + fullhost);
+        // A raw .dat export can be replayed straight into the archive. Unlike
+        // action:import this does not reset the cascade/tree: it only fills
+        // missing heights, so the live chain and the analytics index survive.
+        const std::string rawfile = getParam("rawfile", "");
+        std::unique_ptr<RawArchiveInput> rawin;
+        std::string host;
+        int port = 0;
+        if (!rawfile.empty()) {
+            std::filesystem::path rawpath = MiniFile::createBaseFile(rawfile);
+            if (!std::filesystem::exists(rawpath)) {
+                throw CommandException("RAW backfill file doesn't exist : " +
+                                       std::filesystem::absolute(rawpath).string());
+            }
+            rawin = std::make_unique<RawArchiveInput>(rawpath);
+            rawin->connect();
+            MinimaLogger::log("RAW backfill source: " + rawpath.string());
+        } else {
+            const std::string fullhost = getParam("host", "eurobuddha.com:9001");
+            auto connectdata = connect::createConnectMessage(fullhost);
+            if (!connectdata) {
+                throw CommandException("Invalid HOST format for backfill : " + fullhost);
+            }
+            host = connectdata->getString("host");
+            port = connectdata->getInteger("port");
         }
-        const std::string host = connectdata->getString("host");
-        const int port = connectdata->getInteger("port");
 
         auto& arch = db->getArchive();
         long long from = existsParam("from")
@@ -593,6 +616,13 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             from = last ? last->getTxPoW().getBlockNumber().getAsLong() + 1 : 1;
         }
         long long to = existsParam("to") ? getNumberParam("to")->getAsLong() : -1;
+        // A raw source defaults to stopping just below the existing archive,
+        // so a missing 'to' cannot overwrite live heights.
+        if (rawin && to < 0) {
+            if (auto first = arch.loadFirstBlock()) {
+                to = first->getTxPoW().getBlockNumber().getAsLong() - 1;
+            }
+        }
 
         long long saved = 0;
         long long failed = 0;
@@ -602,7 +632,8 @@ std::unique_ptr<JSONObject> archive::runCommand() {
 
         arch.beginSaveBatch();
         while (!done) {
-            auto ibd = sendArchiveReq(host, port, MiniNumber(start));
+            auto ibd = rawin ? rawin->getNextIBD()
+                             : sendArchiveReq(host, port, MiniNumber(start));
             if (!ibd) break;
             auto& blocks = ibd->getTxBlocks();
             if (blocks.empty()) break;
@@ -631,6 +662,13 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         arch.endSaveBatch(true);
         arch.flushPending();
         arch.checkpoint();
+
+        if (rawin) {
+            rawin->stop();
+            if (rawin->hasError()) {
+                throw CommandException("RAW backfill incomplete: " + rawin->errorMessage());
+            }
+        }
 
         const long long missing = arch.firstMissingBlock();
         JSONObject resp;

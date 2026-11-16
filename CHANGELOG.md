@@ -47,6 +47,11 @@
   an interrupted save cannot leave the cascade ahead of the tree (`Your
   Cascade is BROKEN` on the next start). `test_tree_save_guard` covers the
   null-node case.
+- **Historical restore from a raw export.** `archive action:backfill
+  rawfile:<name>.raw.dat from:1 to:<first-1>` fills missing historical heights
+  from a local raw `.dat` without resetting the cascade/tree, so the live chain
+  and the analytics index survive. A missing `to` defaults to the block just
+  below the current archive start.
 
 ### Compatibility
 
