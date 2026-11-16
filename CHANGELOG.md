@@ -26,6 +26,14 @@
   truncated tree can never be committed.
 - `megammr.mmr` and `p2p2.db` keep the raw format, matching `hawk-node`.
 
+### Chain selection
+
+- **Cumulative-weight cascade adoption.** A peer cascade/IBD may replace the
+  local cascade only when its cumulative weight is strictly greater. A tie
+  keeps the local chain, and a lighter peer chain is ignored even if it has a
+  higher block number. `Cascade::shouldAdopt` is the testable predicate and is
+  covered by `test_cascade_weight`.
+
 ### Compatibility
 
 - No consensus, wire, hash or payload change: the envelope wraps the same

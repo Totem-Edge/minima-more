@@ -642,6 +642,20 @@ if(APPLE)
 endif()
 add_test(NAME test_amount_atoms COMMAND test_amount_atoms)
 
+# Sync-IBD/cascade adoption: only a strictly heavier cascade may replace the
+# local chain.
+add_executable(test_cascade_weight
+    EXCLUDE_FROM_ALL
+    tests/test_cascade_weight.cpp
+)
+target_compile_features(test_cascade_weight PRIVATE cxx_std_17)
+target_include_directories(test_cascade_weight PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(test_cascade_weight PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(test_cascade_weight PRIVATE minima_core OpenSSL::Crypto Threads::Threads)
+add_test(NAME test_cascade_weight COMMAND test_cascade_weight)
+
 # TxPoW DB bodies: decode a retained txnlist transaction body into its inputs.
 add_executable(test_txpow_body
     EXCLUDE_FROM_ALL

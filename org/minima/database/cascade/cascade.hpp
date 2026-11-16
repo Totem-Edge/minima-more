@@ -53,6 +53,17 @@ public:
     static bool checkCascadeCorrect(const Cascade& zCascade);
     static bool checkPastNodeExists(CascadeNode* zCascadeNode, const std::string& zTxPoWID);
 
+    // Sync-IBD/cascade adoption is gated on cumulative chain weight: a peer
+    // cascade may replace the local one only when it is strictly heavier.
+    // Height alone is not chain selection. A tie keeps the local chain; an
+    // empty local chain accepts the peer's after the caller's tip/root linkage
+    // checks. Keep this as a free-standing predicate so it is unit-testable.
+    static bool shouldAdopt(const org::minima::objects::base::MiniNumber& localWeight,
+                            const org::minima::objects::base::MiniNumber& incomingWeight,
+                            bool haveLocalCascade) {
+        return !haveLocalCascade || incomingWeight.isMore(localWeight);
+    }
+
     // Thread-safe chain walk: given a node from this cascade, return its parent as a shared_ptr.
     // Returns nullptr if the parent is no longer in the cascade or node is null.
     // Each call acquires a shared_lock internally.

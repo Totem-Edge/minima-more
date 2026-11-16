@@ -1095,7 +1095,31 @@ void TxPoWProcessor::processMessage(Message& zMessage) {
                         MinimaDB::getDB()->writeLock(false);
                     }
                 } else {
-                    // Already have a cascade; ignore incoming cascade
+                    // A peer cascade may only replace the local one when it
+                    // carries strictly more cumulative weight. A higher block
+                    // number alone is not chain selection: the peer may be on
+                    // a lighter fork (or simply behind).
+                    const auto& localCascade = MinimaDB::getDB()->getCascade();
+                    const MiniNumber localWeight = localCascade.getTotalWeight();
+                    const MiniNumber incomingWeight = incomingCascade->getTotalWeight();
+                    if (org::minima::database::cascade::Cascade::shouldAdopt(
+                            localWeight, incomingWeight, true)) {
+                        MinimaDB::getDB()->writeLock(true);
+                        try {
+                            MinimaDB::getDB()->setIBDCascade(*incomingCascade);
+                            MinimaDB::getDB()->getArchive().checkCascadeRequired(*incomingCascade);
+                            MinimaLogger::log("[+] Adopted heavier IBD cascade: local "
+                                              + localWeight.toString() + " incoming "
+                                              + incomingWeight.toString());
+                        } catch (const std::exception& exc) {
+                            MinimaLogger::log(exc);
+                        }
+                        MinimaDB::getDB()->writeLock(false);
+                    } else {
+                        MinimaLogger::log("[!] IGNORE IBD - cascade not heavier: local "
+                                          + localWeight.toString() + " incoming "
+                                          + incomingWeight.toString());
+                    }
                 }
             }
 
