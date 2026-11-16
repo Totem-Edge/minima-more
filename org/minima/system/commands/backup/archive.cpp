@@ -1298,13 +1298,37 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             : -1;
         if (mmrfrom < 0 && update_mmr &&
             org::minima::system::params::GeneralParams::IS_MEGAMMR) {
-            // Default to the first block the MMR has not seen yet.
-            mmrfrom = db->getMegaMMR().getMMR().getBlockTime().getAsLong() + 1;
+            // Only trust the cursor when coverage is known-complete. A partial
+            // MMR (a fresh cascade sync never replays old blocks through the
+            // tree) can have the cursor at the tree root while missing most of
+            // the UTXO set, so restart from genesis to repair it.
+            auto& megammr = db->getMegaMMR();
+            if (megammr.isCoverageComplete()) {
+                mmrfrom = megammr.getMMR().getBlockTime().getAsLong() + 1;
+            } else {
+                mmrfrom = 1;
+                org::minima::utils::MinimaLogger::log(
+                    "MegaMMR coverage is partial (first_block=" +
+                    std::to_string(megammr.firstBlock()) + ", coins=" +
+                    std::to_string(megammr.coinCount()) +
+                    ") - replaying from block 1");
+            }
         }
         if (update_mmr &&
             org::minima::system::params::GeneralParams::IS_MEGAMMR &&
             mmrfrom >= 0) {
             auto& megammr = db->getMegaMMR();
+            const long long mmr_cursor = megammr.getMMR().getBlockTime().getAsLong();
+            // A replay that starts at or below the current cursor re-applies
+            // blocks the MMR already absorbed. Reset first, or the MMR would
+            // contain duplicate entries and the coverage latch would trip.
+            if (mmrfrom <= mmr_cursor) {
+                org::minima::utils::MinimaLogger::log(
+                    "MegaMMR replay starts at " + std::to_string(mmrfrom) +
+                    " but the cursor is " + std::to_string(mmr_cursor) +
+                    " - clearing for a full rebuild");
+                megammr.clear();
+            }
             auto addMmr = [&](const org::minima::objects::TxBlock& block) {
                 try {
                     megammr.addBlock(block);

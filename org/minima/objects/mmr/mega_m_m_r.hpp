@@ -68,6 +68,16 @@ public:
 
     bool isEmpty() const;
 
+    // Coverage of the persisted MMR. firstBlock() is the first block this MMR
+    // has absorbed; -1 means unknown (legacy file or empty store). Coverage is
+    // only complete when the store is contiguous from genesis (block 1) to the
+    // MMR cursor. A cursor at the tree root does not imply a full UTXO set:
+    // blocks that never passed through the live tree (a fresh cascade sync)
+    // are absent.
+    long long firstBlock() const { return mFirstBlock; }
+    bool coverageBroken() const { return mCoverageBroken; }
+    bool isCoverageComplete() const;
+
     // Convert the TxBlock
     void addBlock(const org::minima::objects::TxBlock& zBlock);
 
@@ -104,6 +114,11 @@ private:
     bool mSkipCoinLoad = false;
     mutable bool mMaterialized = false;
     mutable std::unordered_map<std::string, std::unique_ptr<org::minima::objects::Coin>> mAllUnspentCoins;
+
+    // Coverage watermark: first absorbed block (-1 = unknown) and a flag set
+    // when addBlock() sees a non-contiguous sequence.
+    long long mFirstBlock = -1;
+    bool mCoverageBroken = false;
 
     // Logging toggle (Java: private static boolean)
     static bool s_PRUNE_LOGS;

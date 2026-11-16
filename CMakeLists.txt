@@ -1041,7 +1041,7 @@ if(LMDB_LIBRARY)
     list(APPEND MINIMA_TEST_LIBS ${LMDB_LIBRARY})
 endif()
 
-foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import test_archive_roundtrip test_archive_records test_archive_tail test_db_envelope test_script_conformance test_txpowtree_weight test_tree_properties gen_command_reference)
+foreach(tgt test_capabilities test_mcp_server test_docs_manifest test_megammr_import test_h2_import test_archive_roundtrip test_archive_records test_archive_tail test_db_envelope test_mmr_coverage test_script_conformance test_txpowtree_weight test_tree_properties gen_command_reference)
     add_executable(${tgt} EXCLUDE_FROM_ALL
         tests/${tgt}.cpp
         $<TARGET_OBJECTS:minima_core>)
@@ -1073,6 +1073,7 @@ add_test(NAME archive_roundtrip COMMAND test_archive_roundtrip)
 add_test(NAME archive_records COMMAND test_archive_records)
 add_test(NAME archive_tail COMMAND test_archive_tail)
 add_test(NAME db_envelope COMMAND test_db_envelope)
+add_test(NAME mmr_coverage COMMAND test_mmr_coverage)
 add_test(NAME script_conformance COMMAND test_script_conformance)
 add_test(NAME txpowtree_weight COMMAND test_txpowtree_weight)
 add_test(NAME tree_properties COMMAND test_tree_properties)
