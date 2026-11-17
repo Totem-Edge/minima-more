@@ -450,6 +450,54 @@ std::string addressJson(const std::string& indexPath, const std::string& address
     return out.str();
 }
 
+// Per-address transaction history: outputs that paid the address and inputs it
+// spent. Balances alone cannot drive a wallet activity view.
+std::string addressTxsJson(const std::string& indexPath, const std::string& address,
+                           int limit, int offset, bool& found) {
+    found = false;
+    duckdb::DuckDB db(indexPath);
+    duckdb::Connection con(db);
+    if (limit < 1) limit = 50;
+    if (limit > 200) limit = 200;
+    if (offset < 0) offset = 0;
+
+    auto res = con.Query(
+        "SELECT * FROM ("
+        " SELECT t.txpowid, t.height, t.timestamp_ms, 'receive' AS kind,"
+        "        o.amount_raw, o.token_id, o.coin_id"
+        "   FROM analytics.tx_outputs o JOIN analytics.txs t ON t.txpowid=o.txpowid"
+        "  WHERE o.address=" + sqlLit(address) +
+        " UNION ALL"
+        " SELECT t.txpowid, t.height, t.timestamp_ms, 'send',"
+        "        i.amount_raw, i.token_id, i.coin_id"
+        "   FROM analytics.tx_inputs i JOIN analytics.txs t ON t.txpowid=i.txpowid"
+        "  WHERE i.address=" + sqlLit(address) +
+        ") ORDER BY height DESC, txpowid LIMIT " + std::to_string(limit) +
+        " OFFSET " + std::to_string(offset) + ";");
+
+    if (!res || res.HasError()) return {};
+    found = true;
+
+    std::ostringstream out;
+    out << "{\"address\":" << quote(address)
+        << ",\"limit\":" << limit
+        << ",\"offset\":" << offset
+        << ",\"transactions\":[";
+    for (std::size_t i = 0; i < res.RowCount(); ++i) {
+        if (i) out << ",";
+        out << "{\"txpowid\":" << quote(res.GetValue(0,i).ToString())
+            << ",\"height\":" << res.GetValue(1,i).GetValue<std::int64_t>()
+            << ",\"timestamp_ms\":" << res.GetValue(2,i).GetValue<std::int64_t>()
+            << ",\"kind\":" << quote(res.GetValue(3,i).ToString())
+            << ",\"amount_raw\":" << res.GetValue(4,i).ToString()
+            << ",\"token_id\":" << quote(res.GetValue(5,i).ToString())
+            << ",\"coin_id\":" << quote(res.GetValue(6,i).ToString())
+            << "}";
+    }
+    out << "]}";
+    return out.str();
+}
+
 std::string assetCohortsJson(const std::string& indexPath, const std::string& token,
                              const std::string& day, bool& found) {
     found = false;
@@ -1277,6 +1325,24 @@ void handleClient(int fd, const ApiOptions& opt) {
         const std::string body = txJson(opt.indexPath, txid, found);
         sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
                      found ? body : errorJson("not_found", "Unknown transaction", "[]", "[]", ""));
+        return;
+    }
+    if (path.rfind("/v1/addresses/", 0) == 0 && path.size() > 27 &&
+        path.compare(path.size() - 13, 13, "/transactions") == 0 && requireIndex()) {
+        std::string address = path.substr(14, path.size() - 14 - 13);
+        if (address.size() > 2 && (address[0] == 'M' || address[0] == 'm') &&
+            (address[1] == 'x' || address[1] == 'X')) {
+            try {
+                address = org::minima::objects::Address::convertMinimaAddress(address).to0xString();
+            } catch (const std::exception&) {}
+        }
+        int limit = 50, offset = 0;
+        try { const std::string l = queryParam(query, "limit"); if (!l.empty()) limit = std::stoi(l); } catch (...) {}
+        try { const std::string o = queryParam(query, "offset"); if (!o.empty()) offset = std::stoi(o); } catch (...) {}
+        bool found = false;
+        const std::string body = addressTxsJson(opt.indexPath, address, limit, offset, found);
+        sendResponse(fd, found ? 200 : 404, found ? "OK" : "Not Found",
+                     found ? body : errorJson("not_found", "Unknown address", "[]", "[]", ""));
         return;
     }
     if (path.rfind("/v1/addresses/", 0) == 0 && requireIndex()) {
