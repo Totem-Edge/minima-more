@@ -422,14 +422,43 @@ void MegaMMR::writeCoinCacheMeta(const std::filesystem::path& zRaw) const {
 }
 
 void MegaMMR::loadMMR(const std::filesystem::path& zFile) {
+    namespace fs = std::filesystem;
+
+    // Prefer the primary file, but fall back to the atomic-save backup if the
+    // primary is missing or fails validation.
+    fs::path use = zFile;
+    std::error_code ec;
+    if (!fs::exists(use, ec)) {
+        fs::path bak = zFile;
+        bak += ".bak";
+        if (fs::exists(bak, ec)) {
+            MinimaLogger::log("MegaMMR: primary missing, loading .bak");
+            use = bak;
+        }
+    }
+
     try {
-        auto fsize = std::filesystem::file_size(zFile);
+        auto fsize = std::filesystem::file_size(use);
         MinimaLogger::log("Loading MegaMMR size : " + MiniFormat::formatSize(static_cast<long long>(fsize)));
     } catch (...) {
     }
-    const bool reuseStore = coinCacheMetaMatches(zFile);
+
+    const bool reuseStore = coinCacheMetaMatches(use);
     mSkipCoinLoad = reuseStore;
-    MiniFile::loadObjectSlow(zFile, *this);
+    try {
+        MiniFile::loadObjectSlow(use, *this);
+    } catch (const std::exception& exc) {
+        fs::path bak = zFile;
+        bak += ".bak";
+        if (use != bak && fs::exists(bak, ec)) {
+            MinimaLogger::log(std::string("MegaMMR: primary load failed, trying .bak: ") + exc.what());
+            mSkipCoinLoad = false;
+            MiniFile::loadObjectSlow(bak, *this);
+        } else {
+            mSkipCoinLoad = false;
+            throw;
+        }
+    }
     mSkipCoinLoad = false;
     if (mCoinStore) {
         // A full load (re)populated the store; record the fingerprint for the
@@ -444,7 +473,39 @@ void MegaMMR::loadMMR(const std::filesystem::path& zFile) {
 }
 
 void MegaMMR::saveMMR(const std::filesystem::path& zFile) {
-    MiniFile::saveObjectDirect(zFile, *this);
+    namespace fs = std::filesystem;
+
+    // Serialize fully to a temp file first, then swap. A crash during a direct
+    // write used to leave a truncated file with no usable previous copy.
+    fs::path tmp = zFile;
+    tmp += ".tmp";
+    fs::path bak = zFile;
+    bak += ".bak";
+
+    {
+        std::ofstream fos(tmp, std::ios::binary | std::ios::out | std::ios::trunc);
+        if (!fos) {
+            throw std::runtime_error("MegaMMR::saveMMR cannot open " + tmp.string());
+        }
+        writeDataStream(fos);
+        fos.flush();
+        if (!fos) {
+            throw std::runtime_error("MegaMMR::saveMMR write failed for " + tmp.string());
+        }
+    }
+
+    std::error_code ec;
+    if (fs::exists(bak, ec)) fs::remove(bak, ec);
+    if (fs::exists(zFile, ec)) fs::rename(zFile, bak, ec);
+    fs::rename(tmp, zFile, ec);
+    if (ec) {
+        std::error_code ec2;
+        if (!fs::exists(zFile, ec2) && fs::exists(bak, ec2)) {
+            fs::rename(bak, zFile, ec2);
+        }
+        throw std::runtime_error("MegaMMR::saveMMR rename failed: " + ec.message());
+    }
+
     if (mCoinStore) {
         writeCoinCacheMeta(zFile);
         mCoinStore->sync();

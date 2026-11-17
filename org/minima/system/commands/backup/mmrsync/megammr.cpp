@@ -33,6 +33,8 @@
 
 // Headers assumed to exist in the project (same package)
 #include "org/minima/system/commands/backup/mmrsync/mega_m_m_r_backup.hpp"
+#include "org/minima/database/cascade/cascade.hpp"
+#include "org/minima/system/brains/tx_po_w_processor.hpp"
 
 using org::minima::system::commands::CommandException;
 
@@ -125,7 +127,7 @@ std::string megammr::getFullHelp() const {
 }
 
 std::vector<std::string> megammr::getValidParams() const {
-    return std::vector<std::string>{ "action", "file" };
+    return std::vector<std::string>{ "action", "file", "force", "requiremanifest" };
 }
 
 std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
@@ -197,6 +199,20 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
             ofs.flush();
             ofs.close();
 
+            // Self-describing sidecar: an importer verifies this before it
+            // replaces any live state.
+            auto manifest =
+                org::minima::system::commands::backup::mmrsync::MegaMMRBackup::buildManifest(
+                    mmrbackup, backupfile);
+            std::filesystem::path manifestfile = backupfile;
+            manifestfile += ".manifest";
+            if (!org::minima::system::commands::backup::mmrsync::MegaMMRBackup::writeManifest(
+                    manifestfile, manifest)) {
+                MinimaDB::getDB()->readLock(false);
+                throw CommandException("Failed to write MegaMMR manifest: " +
+                                       manifestfile.string());
+            }
+
             // Unlock DB
             MinimaDB::getDB()->readLock(false);
 
@@ -204,6 +220,8 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
             resp.put("megammrtip", megammrdb.getMMR().getBlockTime().toString());
             resp.put("ibdtip", ibd.getTreeTip().toString());
             resp.put("backup", std::filesystem::absolute(backupfile).string());
+            resp.put("manifest", std::filesystem::absolute(manifestfile).string());
+            resp.put("sha256", manifest.sha256);
             resp.put("size", MiniFormat::formatSize(static_cast<long long>(std::filesystem::file_size(backupfile))));
 
             ret->put("response", resp);
@@ -250,30 +268,100 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammr::runCommand() {
             throw CommandException(exc.what());
         }
 
-        // Reset archive state and install MegaMMR into DB
-        org::minima::system::Main::getInstance()->archiveResetReady(false);
+        // A backup that carries an IBD restores the whole condensed chain
+        // state (MMR + cascade + tree) without replaying archive blocks. A
+        // legacy raw MMR has no chain state, so keep the MMR-only install.
+        auto* incomingIBD = mmrback.getIBD();
+        bool restoredIBD = false;
 
-        MinimaDB::getDB()->getMegaMMR().clear();
-        // mmrback.getMegaMMR() returns a pointer; hardSetMegaMMR expects a reference
-        MinimaDB::getDB()->hardSetMegaMMR(*mmrback.getMegaMMR());
+        if (!incomingIBD) {
+            MinimaDB::getDB()->getMegaMMR().clear();
+            MinimaDB::getDB()->hardSetMegaMMR(*mmrback.getMegaMMR());
+            MinimaDB::getDB()->saveState();
+        } else {
+            std::filesystem::path manifestfile = restorefile;
+            manifestfile += ".manifest";
+            auto manifest =
+                org::minima::system::commands::backup::mmrsync::MegaMMRBackup::readManifest(
+                    manifestfile);
+            std::string merr;
+            if (!manifest.present) {
+                if (getBooleanParam("requiremanifest", false)) {
+                    throw CommandException("MegaMMR manifest missing: " +
+                                           manifestfile.string());
+                }
+                org::minima::utils::MinimaLogger::log(
+                    "[!] MegaMMR manifest missing - structural verification only");
+            } else if (!org::minima::system::commands::backup::mmrsync::
+                           MegaMMRBackup::verifyManifest(manifest, mmrback, restorefile, merr)) {
+                throw CommandException("MegaMMR manifest verification failed: " + merr);
+            }
+
+            if (!incomingIBD->checkValidData()) {
+                throw CommandException("MegaMMR backup IBD failed validation");
+            }
+
+            const auto& localCascade = MinimaDB::getDB()->getCascade();
+            const org::minima::objects::base::MiniNumber localWeight =
+                localCascade.getTotalWeight();
+            const bool haveLocal = localCascade.getTip() != nullptr;
+            org::minima::objects::base::MiniNumber incomingWeight =
+                org::minima::objects::base::MiniNumber::ZERO();
+            if (auto* casc = incomingIBD->getCascade()) {
+                incomingWeight = casc->getTotalWeight();
+            }
+            const bool force = getBooleanParam("force", false);
+            if (!force &&
+                !org::minima::database::cascade::Cascade::shouldAdopt(
+                    localWeight, incomingWeight, haveLocal)) {
+                throw CommandException(
+                    "MegaMMR import refused: backup cascade weight " +
+                    incomingWeight.toString() + " is not greater than local " +
+                    localWeight.toString() + ". Use force:true to roll back.");
+            }
+
+            auto ibdOwned = mmrback.takeIBD();
+            std::shared_ptr<IBD> ibdShared = std::move(ibdOwned);
+
+            MinimaDB::getDB()->writeLock(true);
+            try {
+                MinimaDB::getDB()->resetCascadeAndTxPoWTree();
+                MinimaDB::getDB()->getMegaMMR().clear();
+                MinimaDB::getDB()->hardSetMegaMMR(*mmrback.getMegaMMR());
+            } catch (...) {
+                MinimaDB::getDB()->writeLock(false);
+                throw;
+            }
+            MinimaDB::getDB()->writeLock(false);
+
+            auto& proc =
+                org::minima::system::Main::getInstance()->getTxPoWProcessor();
+            proc.postProcessIBD(ibdShared, "0x00", true);
+
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::minutes(30);
+            while (!proc.isIBDProcessFinished()) {
+                if (std::chrono::steady_clock::now() > deadline) {
+                    throw CommandException(
+                        "MegaMMR import timed out waiting for IBD processing");
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+
+            restoredIBD = true;
+            MinimaDB::getDB()->saveState();
+        }
 
         if (downloaded) {
             std::error_code ec;
             std::filesystem::remove(restorefile, ec);
         }
 
-        // Respond to caller (we cannot call TxPoWProcessor methods without their headers)
         JSONObject resp;
-        resp.put("message", std::string("MegaMMR import finished.. please restart"));
+        resp.put("message", std::string("MegaMMR import finished and saved"));
         resp.put("legacyraw", legacyraw);
+        resp.put("restored_ibd", restoredIBD);
         ret->put("response", resp);
-
-        // Perform shutdown sequence using available APIs
-        org::minima::system::Main::getInstance()->setHasShutDown();
-        org::minima::database::MinimaDB::getDB()->saveAllDB();
-        org::minima::system::Main::getInstance()->shutdown();
-        org::minima::system::Main::getInstance()->NotifyMainListenerOfShutDown();
-
         return ret;
     } else if (action == "integrity") {
         std::string file = getParam("file");

@@ -37,6 +37,7 @@ public:
     // Accessors (mirror Java semantics)
     org::minima::objects::IBD& getIBD();
     const org::minima::objects::IBD& getIBD() const;
+    std::shared_ptr<org::minima::objects::IBD> getIBDShared() const;
 
     std::vector<std::unique_ptr<org::minima::objects::CoinProof>>& getAllCoinProofs();
     const std::vector<std::unique_ptr<org::minima::objects::CoinProof>>& getAllCoinProofs() const;

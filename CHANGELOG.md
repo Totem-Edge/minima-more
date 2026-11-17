@@ -1,5 +1,27 @@
 # PureMinima C++ — Change Report
 
+## v0.6.7 — Fast, Verified MegaMMR Restore
+
+### Added
+
+- **`megammr import` restores the complete IBD.** A backup now installs the
+  MMR and then applies the backup's cascade + tree through
+  `postProcessIBD(..., true)`, instead of replaying every archive block. The
+  archive is left untouched; a legacy raw MMR still uses the MMR-only path.
+- **`megammrsync` applies the peer IBD** before the coin proofs, so a peer
+  sync rebuilds the chain without a replay.
+- **Restore manifest.** `megammr export` writes `<backup>.manifest` with the
+  tip, weight, `first_block`, coin and entry counts, IBD sizes and a SHA-256
+  of the payload. `import` verifies it (`requiremanifest:true` makes it
+  mandatory) and refuses a lighter chain unless `force:true`.
+- **Atomic MMR save.** `saveMMR` writes a temp file, renames it into place and
+  keeps a `.bak`; `loadMMR` falls back to the `.bak`.
+- **Resumable replay fallback.** `archive action:replay mmr:true mmrfrom:1`
+  checkpoints the MMR and a cursor every 100k blocks and resumes after a
+  restart instead of redoing the whole replay.
+- `test_restore_manifest` covers SHA-256, round-trip, tamper and wrong-tip
+  detection.
+
 ## v0.6.6 — Database envelope shared with hawk-node
 
 ### Added

@@ -47,6 +47,10 @@ const org::minima::objects::IBD& MegaMMRIBD::getIBD() const {
     return *mInitialIBD;
 }
 
+std::shared_ptr<org::minima::objects::IBD> MegaMMRIBD::getIBDShared() const {
+    return mInitialIBD;
+}
+
 std::vector<std::unique_ptr<org::minima::objects::CoinProof>>& MegaMMRIBD::getAllCoinProofs() {
     return mAllCoinProofs;
 }

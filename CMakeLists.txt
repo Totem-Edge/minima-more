@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(minima VERSION 0.6.6 LANGUAGES CXX)
+project(minima VERSION 0.6.7 LANGUAGES CXX)
 
 include(CTest)
 
@@ -668,6 +668,19 @@ if(APPLE)
 endif()
 target_link_libraries(test_tree_save_guard PRIVATE minima_core OpenSSL::Crypto Threads::Threads)
 add_test(NAME test_tree_save_guard COMMAND test_tree_save_guard)
+
+# Restore manifest: sidecar round-trip, SHA-256 and tamper detection.
+add_executable(test_restore_manifest
+    EXCLUDE_FROM_ALL
+    tests/test_restore_manifest.cpp
+)
+target_compile_features(test_restore_manifest PRIVATE cxx_std_17)
+target_include_directories(test_restore_manifest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(test_restore_manifest PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(test_restore_manifest PRIVATE minima_core OpenSSL::Crypto Threads::Threads)
+add_test(NAME test_restore_manifest COMMAND test_restore_manifest)
 
 # TxPoW DB bodies: decode a retained txnlist transaction body into its inputs.
 add_executable(test_txpow_body

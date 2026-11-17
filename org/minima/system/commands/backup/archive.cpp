@@ -1398,15 +1398,39 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             mmrfrom >= 0) {
             auto& megammr = db->getMegaMMR();
             const long long mmr_cursor = megammr.getMMR().getBlockTime().getAsLong();
+
+            // Resumable full rebuild: a previous replay saves the MMR and a
+            // cursor every 100k blocks. If both agree, continue from there.
+            const std::filesystem::path progressFile =
+                db->getDBFile("mmr-replay.progress");
+            long long resume_from = -1;
+            if (mmrfrom == 1) {
+                std::ifstream pf(progressFile);
+                long long savedFrom = -1, savedCursor = -1, savedTo = -1;
+                if (pf) {
+                    pf >> savedFrom >> savedCursor >> savedTo;
+                }
+                if (savedFrom == 1 && savedCursor >= 1 && savedCursor == mmr_cursor) {
+                    resume_from = savedCursor + 1;
+                    org::minima::utils::MinimaLogger::log(
+                        "MegaMMR replay resuming from " + std::to_string(resume_from) +
+                        " (saved cursor " + std::to_string(savedCursor) + ")");
+                }
+            }
+
             // A replay that starts at or below the current cursor re-applies
             // blocks the MMR already absorbed. Reset first, or the MMR would
             // contain duplicate entries and the coverage latch would trip.
-            if (mmrfrom <= mmr_cursor) {
+            if (resume_from > 0) {
+                mmrfrom = resume_from;
+            } else if (mmrfrom <= mmr_cursor) {
                 org::minima::utils::MinimaLogger::log(
                     "MegaMMR replay starts at " + std::to_string(mmrfrom) +
                     " but the cursor is " + std::to_string(mmr_cursor) +
                     " - clearing for a full rebuild");
                 megammr.clear();
+                std::error_code ec;
+                std::filesystem::remove(progressFile, ec);
             }
             auto addMmr = [&](const org::minima::objects::TxBlock& block) {
                 try {
@@ -1433,6 +1457,7 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                 archive_first = fb->getTxPoW().getBlockNumber().getAsLong();
             }
             long long last_mmr_block = mmrfrom - 1;
+            long long checkpoint_base = last_mmr_block;
             for (long long start = mmrfrom; start <= mmr_to; ) {
                 // The archive may start after mmrfrom (a truncated history).
                 // Skip the hole instead of giving up, so a replay from 1 still
@@ -1456,6 +1481,31 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                     last_mmr_block = bn;
                 }
                 start = end + 1;
+
+                // Checkpoint every 100k blocks so an interrupted rebuild can
+                // resume. saveMMR is atomic (temp + rename + .bak).
+                if (update_mmr &&
+                    (last_mmr_block - checkpoint_base) >= 100000) {
+                    try {
+                        db->getMegaMMR().saveMMR(db->getDBFile("megammr.mmr"));
+                        std::filesystem::path tmp = progressFile;
+                        tmp += ".tmp";
+                        {
+                            std::ofstream of(tmp, std::ios::out | std::ios::trunc);
+                            of << 1 << " " << last_mmr_block << " " << mmr_to << "\n";
+                        }
+                        std::error_code ec;
+                        std::filesystem::rename(tmp, progressFile, ec);
+                        checkpoint_base = last_mmr_block;
+                        org::minima::utils::MinimaLogger::log(
+                            "MegaMMR replay checkpoint at " +
+                            std::to_string(last_mmr_block) + " / " +
+                            std::to_string(mmr_to));
+                    } catch (const std::exception& exc) {
+                        org::minima::utils::MinimaLogger::log(
+                            std::string("MegaMMR checkpoint failed: ") + exc.what());
+                    }
+                }
             }
 
             // The live tree tail may be ahead of the archive tip; cover it
@@ -1475,6 +1525,10 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             org::minima::system::params::GeneralParams::IS_MEGAMMR) {
             try {
                 db->getMegaMMR().saveMMR(db->getDBFile("megammr.mmr"));
+                if (mmr_failed == 0) {
+                    std::error_code ec;
+                    std::filesystem::remove(db->getDBFile("mmr-replay.progress"), ec);
+                }
                 MinimaLogger::log("MegaMMR saved after replay");
             } catch (const std::exception& exc) {
                 MinimaLogger::log(std::string("MegaMMR save failed: ") + exc.what());

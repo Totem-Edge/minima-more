@@ -16,6 +16,8 @@
 #include "org/minima/objects/i_b_d.hpp"
 
 #include "org/minima/system/main.hpp"
+#include "org/minima/database/cascade/cascade.hpp"
+#include "org/minima/system/brains/tx_po_w_processor.hpp"
 #include "org/minima/system/commands/command_exception.hpp"
 #include "org/minima/system/commands/command_runner.hpp"
 #include "org/minima/system/commands/backup/archive.hpp"
@@ -217,7 +219,7 @@ std::string megammrsync::getFullHelp() const {
 }
 
 std::vector<std::string> megammrsync::getValidParams() const {
-    return {"action","host","phrase","anyphrase","keys","keyuses","file","password"};
+    return {"action","host","phrase","anyphrase","keys","keyuses","file","password","force"};
 }
 
 static int32_t read_int32_be_from_buf(const uint8_t* buf) {
@@ -291,6 +293,13 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammrsync::runCommand() 
         int keys = getNumberParam("keys", org::minima::objects::base::MiniNumber(org::minima::database::wallet::Wallet::NUMBER_GETADDRESS_KEYS))->getAsInt();
         int keyuses = getNumberParam("keyuses", org::minima::objects::base::MiniNumber(1000))->getAsInt();
 
+        // Capture the chain weight before any reset so the peer's IBD can be
+        // gated on cumulative weight.
+        const auto& localCascade = org::minima::database::MinimaDB::getDB()->getCascade();
+        const org::minima::objects::base::MiniNumber localWeight =
+            localCascade.getTotalWeight();
+        const bool haveLocalCascade = localCascade.getTip() != nullptr;
+
         // Optional seed or file
         std::string file = getParam("file", "");
         std::string phrase = getParam("phrase", "");
@@ -332,7 +341,8 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammrsync::runCommand() 
             org::minima::system::Main::getInstance()->restoreReadyForSync();
             org::minima::system::Main::getInstance()->archiveResetReady(false);
         } else {
-            org::minima::system::Main::getInstance()->archiveResetReady(false);
+            // Keep the archive. The peer's IBD below replaces only the
+            // condensed cascade/tree state, so a restored archive survives.
         }
 
         // Build details and send request
@@ -341,6 +351,56 @@ std::unique_ptr<org::minima::utils::json::JSONObject> megammrsync::runCommand() 
         if (!mibd) {
             throw org::minima::system::commands::CommandException("Error getting MegaMMR data from host");
         }
+
+        // A MegaMMRsync response carries a complete IBD (cascade + tree).
+        // Apply it before the coin proofs so the chain is restored without a
+        // block replay; the proofs then land on the correct MMR.
+        auto ibdShared = mibd->getIBDShared();
+        if (!ibdShared) {
+            throw org::minima::system::commands::CommandException(
+                "MegaMMRsync response has no IBD");
+        }
+        if (!ibdShared->checkValidData()) {
+            throw org::minima::system::commands::CommandException(
+                "MegaMMRsync IBD failed validation");
+        }
+        org::minima::objects::base::MiniNumber incomingWeight =
+            org::minima::objects::base::MiniNumber::ZERO();
+        if (auto* casc = ibdShared->getCascade()) {
+            incomingWeight = casc->getTotalWeight();
+        }
+        if (!getBooleanParam("force", false) &&
+            !org::minima::database::cascade::Cascade::shouldAdopt(
+                localWeight, incomingWeight, haveLocalCascade)) {
+            throw org::minima::system::commands::CommandException(
+                "MegaMMRsync refused: peer cascade weight " +
+                incomingWeight.toString() + " is not greater than local " +
+                localWeight.toString() + ". Use force:true to roll back.");
+        }
+
+        org::minima::database::MinimaDB::getDB()->writeLock(true);
+        try {
+            org::minima::database::MinimaDB::getDB()->resetCascadeAndTxPoWTree();
+        } catch (...) {
+            org::minima::database::MinimaDB::getDB()->writeLock(false);
+            throw;
+        }
+        org::minima::database::MinimaDB::getDB()->writeLock(false);
+
+        {
+            auto& proc = org::minima::system::Main::getInstance()->getTxPoWProcessor();
+            proc.postProcessIBD(ibdShared, "0x00", true);
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::minutes(30);
+            while (!proc.isIBDProcessFinished()) {
+                if (std::chrono::steady_clock::now() > deadline) {
+                    throw org::minima::system::commands::CommandException(
+                        "MegaMMRsync timed out waiting for IBD processing");
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+        }
+        org::minima::database::MinimaDB::getDB()->saveState();
 
         // Notify MiniDAPPs
         // Create an empty JSONObject object on the stack
