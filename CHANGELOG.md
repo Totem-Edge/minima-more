@@ -52,6 +52,12 @@
   from a local raw `.dat` without resetting the cascade/tree, so the live chain
   and the analytics index survive. A missing `to` defaults to the block just
   below the current archive start.
+- **Legacy MMR snapshots stay usable.** A non-empty MMR without a coverage
+  watermark (`first_block = -1`) is no longer classified as known-partial:
+  replay advances it from the cursor, and `addBlock` no longer stamps the next
+  block height into `first_block`. `replay` also skips archive ranges below the
+  stored history instead of stopping with `mmr_saved: 0`.
+  `megammr action:info` reports `coverage_known`.
 
 ### Compatibility
 

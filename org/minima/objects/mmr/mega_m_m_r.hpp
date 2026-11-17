@@ -76,6 +76,10 @@ public:
     // are absent.
     long long firstBlock() const { return mFirstBlock; }
     bool coverageBroken() const { return mCoverageBroken; }
+    // A legacy v1 snapshot, or a v2 file written before coverage was known,
+    // carries coins but no watermark. It is usable, but genesis coverage
+    // cannot be proven, so callers must not classify it as known-partial.
+    bool coverageKnown() const { return !mCoverageUnknown && mFirstBlock >= 0; }
     bool isCoverageComplete() const;
 
     // Convert the TxBlock
@@ -119,6 +123,8 @@ private:
     // when addBlock() sees a non-contiguous sequence.
     long long mFirstBlock = -1;
     bool mCoverageBroken = false;
+    // True when a non-empty file was loaded without a usable watermark.
+    bool mCoverageUnknown = false;
 
     // Logging toggle (Java: private static boolean)
     static bool s_PRUNE_LOGS;

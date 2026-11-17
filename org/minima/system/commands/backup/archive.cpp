@@ -1376,8 +1376,14 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             // tree) can have the cursor at the tree root while missing most of
             // the UTXO set, so restart from genesis to repair it.
             auto& megammr = db->getMegaMMR();
-            if (megammr.isCoverageComplete()) {
+            if (megammr.isCoverageComplete() || !megammr.coverageKnown()) {
+                // Unknown legacy coverage is usable: advance from the cursor
+                // instead of discarding a published coin set.
                 mmrfrom = megammr.getMMR().getBlockTime().getAsLong() + 1;
+                if (!megammr.coverageKnown()) {
+                    org::minima::utils::MinimaLogger::log(
+                        "MegaMMR coverage is unknown (legacy snapshot) - advancing from the cursor");
+                }
             } else {
                 mmrfrom = 1;
                 org::minima::utils::MinimaLogger::log(
@@ -1422,19 +1428,34 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             const long long mmr_to = std::max(tipblock, archive_tip);
             if (mmrfrom < 1) mmrfrom = 1;
 
+            long long archive_first = 0;
+            if (auto fb = db->getArchive().loadFirstBlock()) {
+                archive_first = fb->getTxPoW().getBlockNumber().getAsLong();
+            }
             long long last_mmr_block = mmrfrom - 1;
-            for (long long start = mmrfrom; start <= mmr_to; start += 256) {
+            for (long long start = mmrfrom; start <= mmr_to; ) {
+                // The archive may start after mmrfrom (a truncated history).
+                // Skip the hole instead of giving up, so a replay from 1 still
+                // advances the MMR to the first block the archive holds.
+                if (archive_first > 0 && start < archive_first) {
+                    start = archive_first;
+                    if (start > mmr_to) break;
+                }
                 const long long end = std::min(mmr_to, start + 255);
                 // loadBlockRange excludes both bounds.
                 auto blocks = db->getArchive().loadBlockRange(
                     MiniNumber(start - 1), MiniNumber(end + 1), false);
-                if (blocks.empty()) break;
+                if (blocks.empty()) {
+                    start = end + 1;
+                    continue;
+                }
                 for (auto& block : blocks) {
                     const long long bn = block->getTxPoW().getBlockNumber().getAsLong();
                     if (bn < mmrfrom || bn <= last_mmr_block) continue;
                     addMmr(*block);
                     last_mmr_block = bn;
                 }
+                start = end + 1;
             }
 
             // The live tree tail may be ahead of the archive tip; cover it

@@ -8,6 +8,8 @@
  */
 
 #include "org/minima/objects/base/mini_number.hpp"
+#include "org/minima/objects/base/mini_data.hpp"
+#include "org/minima/objects/coin.hpp"
 #include "org/minima/objects/mmr/mega_m_m_r.hpp"
 #include "org/minima/objects/mmr/m_m_r.hpp"
 #include "org/minima/objects/tx_block.hpp"
@@ -56,6 +58,7 @@ int main() {
         MegaMMR mmr;
         check(mmr.firstBlock() == -1, "fresh MMR reports unknown first block");
         check(!mmr.coverageBroken(), "fresh MMR is not marked broken");
+        check(!mmr.coverageKnown(), "fresh MMR coverage is unknown");
         check(!mmr.isCoverageComplete(), "fresh MMR is not complete");
         check(mmr.coinCount() == 0, "fresh MMR holds no coins");
     }
@@ -66,6 +69,7 @@ int main() {
         addRange(mmr, 1, 5);
         check(mmr.firstBlock() == 1, "genesis-start MMR reports first_block 1");
         check(!mmr.coverageBroken(), "contiguous history is not broken");
+        check(mmr.coverageKnown(), "genesis-start MMR coverage is known");
         check(mmr.isCoverageComplete(), "contiguous history is complete");
     }
 
@@ -75,6 +79,7 @@ int main() {
         addRange(mmr, 5, 8);
         check(mmr.firstBlock() == 5, "partial MMR reports first_block 5");
         check(!mmr.coverageBroken(), "contiguous partial history is not broken");
+        check(mmr.coverageKnown(), "partial MMR coverage is known");
         check(!mmr.isCoverageComplete(), "partial MMR is not complete even at the tip");
     }
 
@@ -112,7 +117,38 @@ int main() {
 
         legacy.readDataStream(ss);
         check(legacy.firstBlock() == -1, "v1 file reports unknown first block");
+        check(!legacy.coverageKnown(), "v1 file coverage is unknown");
         check(!legacy.isCoverageComplete(), "v1 file is not assumed complete");
+    }
+
+    // A non-empty legacy v1 snapshot has coins but no watermark. It must stay
+    // usable and must not be stamped partially by the next addBlock().
+    {
+        MegaMMR legacy;
+        org::minima::objects::mmr::MMR empty;
+        std::stringstream ss(std::ios::binary | std::ios::in | std::ios::out);
+        MiniNumber::WriteToStream(ss, 1);
+        empty.writeDataStream(ss);
+        MiniNumber::WriteToStream(ss, 1); // one coin, no coverage metadata
+        org::minima::objects::Coin coin(
+            org::minima::objects::base::MiniData("0x01"),
+            org::minima::objects::base::MiniData("0x02"),
+            MiniNumber(1),
+            org::minima::objects::base::MiniData("0x00"),
+            false);
+        coin.writeDataStream(ss);
+
+        legacy.readDataStream(ss);
+        check(legacy.firstBlock() == -1, "non-empty v1 reports unknown first_block");
+        check(!legacy.coverageKnown(), "non-empty v1 coverage stays unknown");
+        check(!legacy.isCoverageComplete(), "non-empty v1 is not assumed complete");
+        check(legacy.coinCount() == 1, "non-empty v1 keeps its coin");
+
+        legacy.addBlock(makeBlock(10));
+        check(legacy.firstBlock() == -1,
+              "addBlock does not stamp a legacy unknown first_block");
+        check(!legacy.coverageKnown(),
+              "legacy unknown coverage stays unknown after addBlock");
     }
 
     // clear() resets coverage.

@@ -169,7 +169,14 @@ void MegaMMR::addBlock(const TxBlock& zBlock) {
     // any gap, so callers can distinguish a full MMR from a partial one.
     const long long prev_block = mMMR->getBlockTime().getAsLong();
     const long long this_block = block.getAsLong();
-    if (mFirstBlock < 0 || this_block < mFirstBlock) {
+    if (mFirstBlock < 0) {
+        // A legacy snapshot has coins but no watermark. Keep it visibly
+        // unknown rather than stamping first_block to the next block height,
+        // which would make a full published set look known-partial.
+        if (!mCoverageUnknown) {
+            mFirstBlock = this_block;
+        }
+    } else if (this_block < mFirstBlock) {
         mFirstBlock = this_block;
     }
     if (prev_block > 0 && this_block != prev_block + 1) {
@@ -341,6 +348,7 @@ void MegaMMR::clear() {
     mMaterialized = false;
     mFirstBlock = -1;
     mCoverageBroken = false;
+    mCoverageUnknown = false;
     if (mCoinStore) mCoinStore->clear();
 }
 
@@ -479,6 +487,7 @@ void MegaMMR::readDataStream(std::istream& zIn) {
     // (partial) rather than assuming a full UTXO set.
     mFirstBlock = -1;
     mCoverageBroken = false;
+    mCoverageUnknown = false;
 
     mMMR = std::make_unique<org::minima::objects::mmr::MMR>();
     mMMR->readDataStream(zIn);
@@ -490,6 +499,11 @@ void MegaMMR::readDataStream(std::istream& zIn) {
     }
 
     const int size = MiniNumber::ReadFromStream(zIn).getAsInt();
+
+    // A non-empty store with no watermark is a legacy or published snapshot:
+    // usable, but its genesis coverage cannot be proven. Mark it unknown so
+    // catchup may advance it and addBlock does not stamp first_block.
+    mCoverageUnknown = (size > 0) && (version < 2 || mFirstBlock < 0);
 
     // Fast restart: the MMR is loaded and the LMDB store already holds exactly
     // this many coins (fingerprint matched) - skip the coin payload entirely.
