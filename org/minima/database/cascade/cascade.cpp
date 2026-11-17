@@ -251,9 +251,21 @@ void Cascade::readDataStream(std::istream& in) {
     MinimaLogger::log("Cascade: Loaded " + std::to_string(successful) + " nodes successfully, " + std::to_string(failed) + " failed");
 
     if (mTip) {
-        // cascadeChain() re-acquires mMutex; release our lock first to avoid self-deadlock
-        lock.unlock();
-        cascadeChain();
+        // Trust the persisted chain. Re-running cascadeChain() here re-prunes
+        // an already-cascaded chain and can drop retained super-parent nodes,
+        // making checkCascadeCorrect fail after a clean restart. The saved
+        // mCurrentLevel values are the chain's levels; compute the weight
+        // without re-pruning.
+        org::minima::objects::base::MiniNumber total =
+            org::minima::objects::base::MiniNumber::ZERO();
+        std::shared_ptr<CascadeNode> node = mTip;
+        while (node) {
+            total = total.add(
+                org::minima::objects::base::MiniNumber::fromWideString(
+                    node->getCurrentWeight()));
+            node = getParentNoLock(node);
+        }
+        mTotalWeight = total;
     } else {
         MinimaLogger::log("WARNING Cascade: No valid tip node after loading");
     }

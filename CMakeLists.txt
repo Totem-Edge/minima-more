@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(minima VERSION 0.6.8 LANGUAGES CXX)
+project(minima VERSION 0.6.9 LANGUAGES CXX)
 
 include(CTest)
 
@@ -694,6 +694,19 @@ if(APPLE)
 endif()
 target_link_libraries(test_archive_superparents PRIVATE minima_core SQLite::SQLite3 OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
 add_test(NAME test_archive_superparents COMMAND test_archive_superparents)
+
+# Cascade save/load must preserve levels (no re-prune on read).
+add_executable(test_cascade_roundtrip
+    EXCLUDE_FROM_ALL
+    tests/test_cascade_roundtrip.cpp
+)
+target_compile_features(test_cascade_roundtrip PRIVATE cxx_std_17)
+target_include_directories(test_cascade_roundtrip PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(test_cascade_roundtrip PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(test_cascade_roundtrip PRIVATE minima_core SQLite::SQLite3 OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+add_test(NAME test_cascade_roundtrip COMMAND test_cascade_roundtrip)
 
 # Offline cascade rebuild/linkcheck/dump/makeempty from the full archive.
 add_executable(rebuild_cascade

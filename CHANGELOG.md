@@ -1,5 +1,17 @@
 # PureMinima C++ — Change Report
 
+## v0.6.9 — Cascade Round-Trip Persistence
+
+### Fixed
+
+- **A saved cascade now survives a clean restart.** `Cascade::readDataStream`
+  no longer re-runs `cascadeChain()` on load. Re-cascading an already-cascaded
+  chain re-pruned retained super-parent nodes and made a valid in-memory
+  cascade fail `checkCascadeCorrect` on the next start. The loader trusts the
+  saved `mCurrentLevel` values and recomputes `mTotalWeight` by summing them.
+- `test_cascade_roundtrip` saves a three-node cascade with levels 0/0/1 and
+  asserts the levels survive load.
+
 ## v0.6.8 — Archive Super-Parent Validation
 
 ### Added
