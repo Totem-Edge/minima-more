@@ -1,5 +1,22 @@
 # PureMinima C++ — Change Report
 
+## v0.6.8 — Archive Super-Parent Validation
+
+### Added
+
+- **Backfill/importraw validate super-parent ancestry.** Before a block is
+  written outside the live sync path, every non-zero super-parent must already
+  exist in the archive at a lower height. A peer block with a forged or
+  fork-only super-parent is skipped instead of being stored. The live sync
+  path already validated via `TxPoWChecker::checkParents`, the same rule the
+  Java reference uses in `checkTxPoWBlock`/`checkTxBlockOnly`.
+- `archive action:integrity` reports missing super-parents in addition to
+  parent-height/hash errors.
+- `test_archive_superparents` covers an existing, a missing and a future
+  (at/above block height) super-parent.
+- `tools/rebuild_cascade` (offline rebuild/linkcheck/dump/makeempty) for
+  recovering a truncated or invalid cascade from the full archive.
+
 ## v0.6.7 — Fast, Verified MegaMMR Restore
 
 ### Added

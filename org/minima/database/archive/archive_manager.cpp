@@ -15,6 +15,7 @@
 #include "org/minima/objects/base/mini_data.hpp"
 #include "org/minima/objects/base/mini_number.hpp"
 #include "org/minima/system/params/general_params.hpp"
+#include "org/minima/system/params/global_params.hpp"
 #include "org/minima/system/main.hpp"
 #include "org/minima/utils/minima_logger.hpp"
 #include "org/minima/utils/mini_file.hpp"
@@ -917,6 +918,30 @@ MiniNumber ArchiveManager::exists(const std::string& zTxPoWID) {
         MinimaLogger::log(e);
         return MiniNumber::MINUSONE();
     }
+}
+
+bool ArchiveManager::superParentsPresent(const org::minima::objects::TxPoW& zTxPow,
+                                         long long zBlockNumber,
+                                         long long zArchiveFirst) {
+    using org::minima::objects::base::MiniData;
+    using org::minima::objects::base::MiniNumber;
+
+    const int levels = org::minima::system::params::GlobalParams::MINIMA_CASCADE_LEVELS;
+    for (int i = 0; i < levels; ++i) {
+        const MiniData sp = zTxPow.getSuperParent(i);
+        if (sp.isEqual(MiniData::ZERO_TXPOWID())) continue;
+
+        const MiniNumber found = exists(sp.to0xString());
+        if (found.isEqual(MiniNumber::MINUSONE())) {
+            // A partial archive cannot verify a parent older than its window.
+            if (zArchiveFirst > 1 && zBlockNumber > zArchiveFirst) continue;
+            return false;
+        }
+        if (found.getAsLong() >= zBlockNumber) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::vector<std::unique_ptr<TxBlock>>

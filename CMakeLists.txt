@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(minima VERSION 0.6.7 LANGUAGES CXX)
+project(minima VERSION 0.6.8 LANGUAGES CXX)
 
 include(CTest)
 
@@ -681,6 +681,31 @@ if(APPLE)
 endif()
 target_link_libraries(test_restore_manifest PRIVATE minima_core OpenSSL::Crypto Threads::Threads)
 add_test(NAME test_restore_manifest COMMAND test_restore_manifest)
+
+# Archive super-parent validation used by backfill/importraw/integrity.
+add_executable(test_archive_superparents
+    EXCLUDE_FROM_ALL
+    tests/test_archive_superparents.cpp
+)
+target_compile_features(test_archive_superparents PRIVATE cxx_std_17)
+target_include_directories(test_archive_superparents PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(test_archive_superparents PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(test_archive_superparents PRIVATE minima_core SQLite::SQLite3 OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+add_test(NAME test_archive_superparents COMMAND test_archive_superparents)
+
+# Offline cascade rebuild/linkcheck/dump/makeempty from the full archive.
+add_executable(rebuild_cascade
+    EXCLUDE_FROM_ALL
+    tools/rebuild_cascade.cpp
+)
+target_compile_features(rebuild_cascade PRIVATE cxx_std_17)
+target_include_directories(rebuild_cascade PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(APPLE)
+    target_include_directories(rebuild_cascade PRIVATE /opt/homebrew/include)
+endif()
+target_link_libraries(rebuild_cascade PRIVATE minima_core SQLite::SQLite3 OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
 
 # TxPoW DB bodies: decode a retained txnlist transaction body into its inputs.
 add_executable(test_txpow_body

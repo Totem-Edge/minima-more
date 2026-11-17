@@ -73,6 +73,15 @@ public:
 
     org::minima::objects::base::MiniNumber exists(const std::string& zTxPoWID);
 
+    // True when every non-zero super-parent of zTxPow exists in this archive
+    // at a lower height. A partial archive (zArchiveFirst > 1) treats a parent
+    // before the stored window as unverifiable. Used by backfill, importraw
+    // and the integrity report so a peer block with a forged super-parent
+    // cannot be written straight into the archive.
+    bool superParentsPresent(const org::minima::objects::TxPoW& zTxPow,
+                             long long zBlockNumber,
+                             long long zArchiveFirst);
+
     std::vector<std::unique_ptr<org::minima::objects::TxBlock>>
     loadBlockRange(const org::minima::objects::base::MiniNumber& zStartBlock,
                    const org::minima::objects::base::MiniNumber& zEndBlock);

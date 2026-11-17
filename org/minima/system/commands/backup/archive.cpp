@@ -399,6 +399,10 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         int total = 0;
         MiniNumber archstart = start;
         MiniNumber archend = archstart;
+        long long integrityFirst = 0;
+        if (auto first = arch.loadFirstBlock()) {
+            integrityFirst = first->getTxPoW().getBlockNumber().getAsLong();
+        }
 
         JSONObject archjson;
         archjson.put("start", archstart.toString());
@@ -440,6 +444,15 @@ std::unique_ptr<JSONObject> archive::runCommand() {
 
                     parenthash = block.getTxPoW().getTxPoWIDData();
                     parentnum = block.getTxPoW().getBlockNumber();
+                }
+
+                if (!arch.superParentsPresent(block.getTxPoW(),
+                        block.getTxPoW().getBlockNumber().getAsLong(),
+                        integrityFirst)) {
+                    MinimaLogger::log("Missing super-parent @" +
+                                      block.getTxPoW().getBlockNumber().toString() +
+                                      " " + block.getTxPoW().getTxPoWID());
+                    errorsfound++;
                 }
             }
 
@@ -608,6 +621,10 @@ std::unique_ptr<JSONObject> archive::runCommand() {
         }
 
         auto& arch = db->getArchive();
+        long long archiveFirst = 0;
+        if (auto first = arch.loadFirstBlock()) {
+            archiveFirst = first->getTxPoW().getBlockNumber().getAsLong();
+        }
         long long from = existsParam("from")
                              ? getNumberParam("from")->getAsLong()
                              : arch.firstMissingBlock();
@@ -644,6 +661,13 @@ std::unique_ptr<JSONObject> archive::runCommand() {
                 if (to >= 0 && bn > to) {
                     done = true;
                     break;
+                }
+                if (!arch.superParentsPresent(block->getTxPoW(), bn, archiveFirst)) {
+                    MinimaLogger::log("[!] backfill: block " + std::to_string(bn) +
+                                      " references a missing/later super-parent - skipped");
+                    ++failed;
+                    start = bn + 1;
+                    continue;
                 }
                 if (arch.saveBlock(*block)) {
                     ++saved;
@@ -1224,12 +1248,22 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             }
             RawArchiveInput tailraw(restorefile);
             tailraw.connect();
+            long long tailFirst = 0;
+            if (auto first = arch.loadFirstBlock()) {
+                tailFirst = first->getTxPoW().getBlockNumber().getAsLong();
+            }
             while (true) {
                 std::unique_ptr<IBD> ibd = tailraw.getNextIBD();
                 auto& blocks = ibd->getTxBlocks();
                 if (blocks.empty()) break;
                 for (auto& block : blocks) {
                     if (block->getTxPoW().getBlockNumber().isMore(lastarch)) {
+                        const long long bn = block->getTxPoW().getBlockNumber().getAsLong();
+                        if (!arch.superParentsPresent(block->getTxPoW(), bn, tailFirst)) {
+                            MinimaLogger::log("[!] importraw tail: block " + std::to_string(bn) +
+                                              " references a missing/later super-parent - skipped");
+                            continue;
+                        }
                         arch.saveBlock(*block);
                     }
                 }
