@@ -80,9 +80,13 @@ void CascadeNode::setLevel(int zLevel) {
 }
 
 int CascadeNode::getSuperLevel() const {
-    // IMPORTANT: Return the stored mSuperLevel, not from TxPoW
-    // This is the value captured from the original TxPoW before any modifications
-    return mSuperLevel;
+    // IMPORTANT: Return the stored mSuperLevel, not from TxPoW.
+    // A legacy/cascade-loaded block can carry a derived super-level of -1
+    // when its difficulty/txpowid was not recomputed. cascadeChain() treats
+    // every block as at least level 0; returning -1 prunes the tip's
+    // immediate parent, leaving the next tip's super[0] dangling and making
+    // checkCascadeCorrect fail.
+    return mSuperLevel < 0 ? 0 : mSuperLevel;
 }
 
 void CascadeNode::setParent(CascadeNode* zCascadeNode) {
