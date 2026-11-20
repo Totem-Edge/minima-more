@@ -889,6 +889,16 @@ ArchiveManager::loadSyncBlockRange(const MiniNumber& zStartBlock) {
 
 MiniNumber ArchiveManager::exists(const std::string& zTxPoWID) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    // Batched writes keep blocks in mPending until the chunk is flushed, so a
+    // plain SQL lookup cannot see the block that was queued a moment ago. A
+    // caller walking a contiguous range (backfill/importraw tail) validates
+    // each block's super-parents against the previous one, so without this a
+    // range insert rejects every block after the first.
+    for (const auto& pb : mPending) {
+        if (pb.txpowid == zTxPoWID) {
+            return MiniNumber(pb.block);
+        }
+    }
     try {
         checkOpen();
         openConnIfNeeded();

@@ -96,6 +96,24 @@ int main() {
     check(arch.superParentsPresent(future, 2, 1) == false,
           "super-parent at or above the block height is rejected");
 
+    // Pending blocks are not in SQLite yet. A batched range insert validates
+    // each block against the one queued just before it, so the check must see
+    // unflushed rows or it rejects everything after the first block.
+    arch.beginSaveBatch();
+    TxPoW p5 = makePow(5);
+    p5.setSuperParent(0, MiniData(seedId(4)));
+    TxBlock b5(p5);
+    arch.saveBlock(b5);
+    TxPoW p6 = makePow(6);
+    p6.setSuperParent(0, MiniData(seedId(5)));
+    TxBlock b6(p6);
+    check(arch.superParentsPresent(b6.getTxPoW(), 6, 1),
+          "super-parent queued in the same save batch is visible");
+    arch.endSaveBatch(true);
+    check(arch.exists(seedId(5)).getAsLong() == 5, "batched block committed");
+    check(arch.superParentsPresent(b6.getTxPoW(), 6, 1),
+          "super-parent resolves after the batch is flushed");
+
     arch.hardCloseDB();
     fs::remove_all(dir, ec);
 

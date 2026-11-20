@@ -1,5 +1,26 @@
 # PureMinima C++ — Change Report
 
+## v0.6.10 — Batched Archive Inserts See Each Other
+
+### Fixed
+
+- **`ArchiveManager::exists()` now checks the pending batch.** Batched writes
+  are buffered in `mPending` and only flushed to SQLite every 256 blocks, so a
+  SQL-only lookup could not see the block queued a moment earlier. A caller
+  walking a contiguous range validates each block's super-parents against the
+  previous one, so a batched range insert accepted only its first block and
+  skipped the rest. This left the 2026-11-18 raw import with a 247-block hole
+  (2,394,625–2,394,871), and each later `archive action:backfill` could only
+  advance a block or two.
+- **Negative super-levels are normalised to 0.** A legacy or cascade-loaded
+  block can carry a derived super-level of -1 when its difficulty/txpowid was
+  not recomputed. `cascadeChain()` treats every block as at least level 0, so
+  returning -1 pruned the tip's immediate parent, left the next tip's
+  `super[0]` dangling and made `checkCascadeCorrect` fail.
+- `test_archive_superparents` queues two blocks in one batch and asserts the
+  second block's super-parent resolves while the first is still pending. The
+  check fails without the fix.
+
 ## v0.6.9 — Cascade Round-Trip Persistence
 
 ### Fixed
