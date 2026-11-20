@@ -1,5 +1,19 @@
 # PureMinima C++ — Change Report
 
+## v0.6.11 — MMR Replay Resets the Coin Store
+
+### Fixed
+
+- **`archive action:replay mmr:true mmrfrom:1` now clears the coin store.** The
+  replay only reset the MMR and LMDB coin store when `mmrfrom` was at or below
+  the cursor, so a node with a missing MMR but a populated coin store skipped
+  the reset and appended a second pass over the same heights. The rebuilt roots
+  stopped matching the blocks: a full replay on 2026-11-20 diverged over its
+  last 1,001 blocks and the node aborted on the next live block with
+  `MMR: missing MMRData in addEntry sibling at row 0`.
+- A replay from genesis always clears, and the log line reports the cursor and
+  the coin count it discards.
+
 ## v0.6.10 — Batched Archive Inserts See Each Other
 
 ### Fixed

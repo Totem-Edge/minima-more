@@ -1455,13 +1455,24 @@ std::unique_ptr<JSONObject> archive::runCommand() {
             // A replay that starts at or below the current cursor re-applies
             // blocks the MMR already absorbed. Reset first, or the MMR would
             // contain duplicate entries and the coverage latch would trip.
+            // A replay from genesis resets too: the cursor alone does not prove
+            // the coin store is empty.
             if (resume_from > 0) {
                 mmrfrom = resume_from;
-            } else if (mmrfrom <= mmr_cursor) {
+            } else if (mmrfrom <= mmr_cursor || mmrfrom == 1) {
+                // A replay from genesis must also reset the coin store. An
+                // empty MMR cursor does not mean an empty store: a previous
+                // partial replay, or a store restored on its own, can leave
+                // coins from heights >= 1 behind. Appending a second pass then
+                // double-applies spends/outputs and the rebuilt roots stop
+                // matching the blocks (observed 2026-11-20: the tail of a
+                // 2.4M-block replay diverged and the node aborted on the next
+                // live block).
                 org::minima::utils::MinimaLogger::log(
                     "MegaMMR replay starts at " + std::to_string(mmrfrom) +
-                    " but the cursor is " + std::to_string(mmr_cursor) +
-                    " - clearing for a full rebuild");
+                    " (cursor " + std::to_string(mmr_cursor) +
+                    ", coins " + std::to_string(megammr.coinCount()) +
+                    ") - clearing for a full rebuild");
                 megammr.clear();
                 std::error_code ec;
                 std::filesystem::remove(progressFile, ec);
