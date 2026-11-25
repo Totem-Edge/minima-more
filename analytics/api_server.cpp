@@ -475,7 +475,7 @@ std::string addressTxsJson(const std::string& indexPath, const std::string& addr
         ") ORDER BY height DESC, txpowid LIMIT " + std::to_string(limit) +
         " OFFSET " + std::to_string(offset) + ";");
 
-    if (!res || res.HasError()) return {};
+    if (!res || res->HasError()) return {};
     found = true;
 
     std::ostringstream out;
@@ -483,15 +483,15 @@ std::string addressTxsJson(const std::string& indexPath, const std::string& addr
         << ",\"limit\":" << limit
         << ",\"offset\":" << offset
         << ",\"transactions\":[";
-    for (std::size_t i = 0; i < res.RowCount(); ++i) {
+    for (std::size_t i = 0; i < res->RowCount(); ++i) {
         if (i) out << ",";
-        out << "{\"txpowid\":" << quote(res.GetValue(0,i).ToString())
-            << ",\"height\":" << res.GetValue(1,i).GetValue<std::int64_t>()
-            << ",\"timestamp_ms\":" << res.GetValue(2,i).GetValue<std::int64_t>()
-            << ",\"kind\":" << quote(res.GetValue(3,i).ToString())
-            << ",\"amount_raw\":" << res.GetValue(4,i).ToString()
-            << ",\"token_id\":" << quote(res.GetValue(5,i).ToString())
-            << ",\"coin_id\":" << quote(res.GetValue(6,i).ToString())
+        out << "{\"txpowid\":" << quote(res->GetValue(0,i).ToString())
+            << ",\"height\":" << res->GetValue(1,i).GetValue<std::int64_t>()
+            << ",\"timestamp_ms\":" << res->GetValue(2,i).GetValue<std::int64_t>()
+            << ",\"kind\":" << quote(res->GetValue(3,i).ToString())
+            << ",\"amount_raw\":" << res->GetValue(4,i).ToString()
+            << ",\"token_id\":" << quote(res->GetValue(5,i).ToString())
+            << ",\"coin_id\":" << quote(res->GetValue(6,i).ToString())
             << "}";
     }
     out << "]}";

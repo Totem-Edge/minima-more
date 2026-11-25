@@ -1,3 +1,17 @@
+# Minima More v0.6.13 — Analytics build and MMR proof offset
+
+### Fixed
+
+- **The analytics sidecar failed to compile against DuckDB.** In
+  `analytics/api_server.cpp`, `Connection::Query` returns a
+  `duckdb::unique_ptr<MaterializedQueryResult>`, but `addressTxsJson` called
+  `HasError()`, `RowCount()` and `GetValue()` with `.` instead of `->`. The
+  sidecar now builds and links against the pinned DuckDB release.
+- Includes the v0.6.12 MMR proof-offset fix for mempool and received
+  transactions.
+
+---
+
 # Minima More v0.6.12 — MMR Proof Offset for Mempool and Received Transactions
 
 ### Fixed
