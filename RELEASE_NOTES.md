@@ -1,3 +1,25 @@
+# Minima More v0.6.12 — MMR Proof Offset for Mempool and Received Transactions
+
+### Fixed
+
+- **Mempool block generation rejected valid transactions with
+  `Invalid MMR Proof!`.** The block generator and received-TxPoW path left
+  `zAllowBlockProofOffset` at `false`, so transaction proofs created one block
+  ahead of the parent MMR failed `checkProofTimeValid` and never tried the
+  parent-peaks fallback. Both paths now enable the offset. The proof is still
+  verified against the actual parent peaks; no MMR or consensus rule is
+  bypassed.
+- The same patch is applied to hawk-node for parity.
+
+### Evidence
+
+- Before: 31 invalid-proof lines from mempool transactions and
+  `TxPoWMiner: block generation failed` on a fresh mainnet sync.
+- After: 0 invalid-proof lines, 0 miner proof failures, canonical tip, and
+  normal block generation.
+
+---
+
 # Minima More v0.6.6 — Database envelope shared with hawk-node
 
 ### Added
