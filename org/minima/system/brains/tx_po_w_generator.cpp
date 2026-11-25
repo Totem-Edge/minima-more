@@ -415,7 +415,7 @@ TxPoWGenerator::generateTxPoW(const org::minima::objects::Transaction& zTransact
 
             // Validate against simple checker
             std::shared_ptr<org::minima::objects::mmr::MMR> mmr_ptr(tip, &(tip->getMMR()));
-            if (valid && TxPoWChecker::checkTxPoWSimple(*mmr_ptr, const_cast<org::minima::objects::TxPoW&>(*memtxp), txpow, false)) {
+            if (valid && TxPoWChecker::checkTxPoWSimple(*mmr_ptr, const_cast<org::minima::objects::TxPoW&>(*memtxp), txpow, false, true)) {
                 // Add to list
                 chosentxns.push_back(memtxp);
 

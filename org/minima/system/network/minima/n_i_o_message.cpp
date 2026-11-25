@@ -736,7 +736,7 @@ void NIOMessage::run() {
                 fullyvalid = false;
             }
 
-            if (!brains::TxPoWChecker::checkMMR(tipnode->getMMR(), *txpow, false)) { // Dereference
+            if (!brains::TxPoWChecker::checkMMR(tipnode->getMMR(), *txpow, false, true)) { // Dereference
                 fullyvalid = false;
             }
 
